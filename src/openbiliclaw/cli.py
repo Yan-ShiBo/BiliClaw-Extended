@@ -16,6 +16,8 @@ app = typer.Typer(
     help="🦀 OpenBiliClaw — 你的 B 站专属 AI 朋友",
     add_completion=False,
 )
+auth_app = typer.Typer(help="B 站认证命令")
+app.add_typer(auth_app, name="auth")
 console = Console()
 _APP_CONTEXT: dict[str, Any] = {}
 
@@ -37,6 +39,14 @@ def _build_registry() -> Any:
     return build_llm_registry(load_config())
 
 
+def _build_auth_manager() -> Any:
+    """Build the configured Bilibili auth manager."""
+    from openbiliclaw.bilibili.auth import AuthManager
+    from openbiliclaw.config import load_config
+
+    return AuthManager(load_config().data_path)
+
+
 @app.callback()
 def main(log_level: str | None = typer.Option(None, "--log-level")) -> None:
     """Global CLI options."""
@@ -51,6 +61,20 @@ def _print_config_guidance(messages: list[str]) -> None:
     console.print("[bold yellow]配置提示[/bold yellow]")
     for message in messages:
         console.print(f"  - {message}")
+
+
+def _print_auth_status(status: Any) -> None:
+    """Render auth status consistently."""
+    state_label = "已认证" if status.authenticated else "未认证"
+    console.print("[bold]B站认证状态[/bold]")
+    console.print(f"  状态: {state_label}")
+    console.print(f"  Cookie 文件: {status.cookie_path}")
+    if status.username:
+        console.print(f"  用户名: {status.username}")
+    if status.user_id:
+        console.print(f"  UID: {status.user_id}")
+    if status.message:
+        console.print(f"  说明: {status.message}")
 
 
 def _require_runtime_config() -> None:
@@ -147,6 +171,32 @@ def config_show() -> None:
         f"{issue.field}: {issue.message}" for issue in diagnostics.issues
     ]
     _print_config_guidance(hints)
+
+
+@auth_app.command("login")
+def auth_login(
+    cookie: str | None = typer.Option(None, "--cookie", help="直接传入完整 Cookie"),
+) -> None:
+    """交互式设置并验证 B 站 Cookie."""
+    manager = _build_auth_manager()
+    cookie_value = cookie or typer.prompt("请输入 B 站 Cookie", prompt_suffix=": ")
+    status = asyncio.run(manager.validate_cookie(cookie_value))
+    if not status.authenticated:
+        console.print("[bold red]认证失败[/bold red]")
+        _print_auth_status(status)
+        raise typer.Exit(code=1)
+
+    manager.set_cookie(cookie_value)
+    console.print("[bold green]登录成功[/bold green]")
+    _print_auth_status(status)
+
+
+@auth_app.command("status")
+def auth_status() -> None:
+    """查看当前 B 站 Cookie 认证状态."""
+    manager = _build_auth_manager()
+    status = asyncio.run(manager.get_status())
+    _print_auth_status(status)
 
 
 @app.command("health-check")

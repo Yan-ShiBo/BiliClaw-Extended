@@ -15,6 +15,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+class BilibiliAPIError(RuntimeError):
+    """Raised when a Bilibili API request returns an application error."""
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     """Coerce a JSON value into an object for strict typing."""
     return cast("dict[str, Any]", value)
@@ -47,6 +51,15 @@ class VideoInfo:
     pub_date: str = ""
 
 
+@dataclass
+class NavInfo:
+    """Basic authenticated user info from the nav endpoint."""
+
+    is_login: bool = False
+    uname: str = ""
+    mid: int = 0
+
+
 class BilibiliAPIClient:
     """Client for Bilibili's web API.
 
@@ -76,6 +89,22 @@ class BilibiliAPIClient:
     def is_authenticated(self) -> bool:
         """Whether we have a valid authentication cookie."""
         return bool(self._cookie)
+
+    async def get_nav_info(self) -> NavInfo:
+        """Get the current login state from Bilibili nav API."""
+        resp = await self._client.get(f"{self._BASE_URL}/x/web-interface/nav")
+        resp.raise_for_status()
+        payload = _json_object(resp.json())
+        code = int(payload.get("code", 0))
+        if code != 0:
+            message = str(payload.get("message", "Bilibili API request failed"))
+            raise BilibiliAPIError(message)
+        data = _json_object(payload.get("data", {}))
+        return NavInfo(
+            is_login=bool(data.get("isLogin", False)),
+            uname=str(data.get("uname", "")),
+            mid=int(data.get("mid", 0)),
+        )
 
     async def get_video_info(self, bvid: str) -> VideoInfo:
         """Get video information by BV ID.

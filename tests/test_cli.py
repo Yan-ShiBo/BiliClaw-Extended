@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from openbiliclaw import cli as cli_module
 from openbiliclaw import config as config_module
+from openbiliclaw.bilibili.auth import AuthStatus
 from openbiliclaw.cli import app
 
 
@@ -134,3 +135,111 @@ def test_health_check_reports_provider_statuses(
     assert "openai" in result.stdout
     assert "可用" in result.stdout
     assert "connection refused" in result.stdout
+
+
+def test_auth_login_accepts_interactive_cookie_and_saves_on_success(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        def __init__(self) -> None:
+            self.saved_cookie: str | None = None
+
+        async def validate_cookie(self, cookie: str) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=True,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                username="alice",
+                user_id=10086,
+                message="Cookie 验证成功。",
+            )
+
+        def set_cookie(self, cookie: str) -> None:
+            self.saved_cookie = cookie
+
+    fake_manager = FakeAuthManager()
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: fake_manager, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["auth", "login"], input="SESSDATA=abc123\n")
+
+    assert result.exit_code == 0
+    assert fake_manager.saved_cookie == "SESSDATA=abc123"
+    assert "登录成功" in result.stdout
+    assert "alice" in result.stdout
+
+
+def test_auth_login_does_not_save_on_validation_failure(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        def __init__(self) -> None:
+            self.saved_cookie = False
+
+        async def validate_cookie(self, cookie: str) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=False,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                message="cookie 已过期",
+            )
+
+        def set_cookie(self, cookie: str) -> None:
+            self.saved_cookie = True
+
+    fake_manager = FakeAuthManager()
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: fake_manager, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["auth", "login", "--cookie", "SESSDATA=expired"])
+
+    assert result.exit_code == 1
+    assert fake_manager.saved_cookie is False
+    assert "认证失败" in result.stdout
+    assert "已过期" in result.stdout
+
+
+def test_auth_status_reports_missing_cookie(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=False,
+                authenticated=False,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                message="未配置 B 站 Cookie。",
+            )
+
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["auth", "status"])
+
+    assert result.exit_code == 0
+    assert "未配置" in result.stdout
+
+
+def test_auth_status_reports_authenticated_user(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=True,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                username="alice",
+                user_id=10086,
+                message="Cookie 验证成功。",
+            )
+
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["auth", "status"])
+
+    assert result.exit_code == 0
+    assert "已认证" in result.stdout
+    assert "alice" in result.stdout
+    assert "10086" in result.stdout
