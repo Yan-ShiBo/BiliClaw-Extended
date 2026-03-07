@@ -1,5 +1,8 @@
 # OpenBiliClaw configuration example
 # Copy this file to config.toml and edit as needed.
+# 首次运行如果缺少 config.toml，程序会自动基于本文件生成模板。
+# 使用远程模型（OpenAI / Claude / DeepSeek）时，需要为默认 provider 填写 api_key。
+# 如仅使用本地 Ollama，可将 default_provider 设为 "ollama"。
 
 [general]
 # Language for Agent output (zh / en)
@@ -9,29 +12,34 @@ data_dir = "data"
 
 [llm]
 # Default LLM provider: "openai" | "claude" | "deepseek" | "ollama"
+# 这里选择的 provider 决定了运行时会检查哪一组敏感字段。
 default_provider = "openai"
 
 [llm.openai]
+# 若 default_provider = "openai"，api_key 必填
 api_key = ""
 model = "gpt-4o"
 base_url = ""  # Leave empty for default, or set for compatible APIs
 
 [llm.claude]
+# 若 default_provider = "claude"，api_key 必填
 api_key = ""
 model = "claude-sonnet-4-20250514"
 
 [llm.deepseek]
+# 若 default_provider = "deepseek"，api_key 必填
 api_key = ""
 model = "deepseek-chat"
 base_url = "https://api.deepseek.com"
 
 [llm.ollama]
-# Local model via Ollama
+# Local model via Ollama（本地运行，不要求 api_key）
 model = "llama3"
 base_url = "http://localhost:11434"
 
 [bilibili]
 # Authentication method: "cookie" | "qrcode" | "none"
+# 仅允许以上取值；非法值会在运行态校验时报错。
 auth_method = "cookie"
 # Cookie string (from browser)
 cookie = ""

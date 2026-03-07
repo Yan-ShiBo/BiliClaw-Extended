@@ -2,7 +2,68 @@
 
 from pathlib import Path
 
-from openbiliclaw.config import Config, _build_config, load_config
+import pytest
+
+from openbiliclaw import config as config_module
+from openbiliclaw.config import (
+    BilibiliConfig,
+    Config,
+    ConfigError,
+    ConfigIssue,
+    LLMConfig,
+    LLMProviderConfig,
+    _build_config,
+    load_config,
+    load_config_with_diagnostics,
+    validate_runtime_config,
+)
+
+
+def _write_example_config(project_root: Path) -> None:
+    (project_root / "config.example.toml").write_text(
+        """
+[general]
+language = "zh"
+data_dir = "data"
+
+[llm]
+default_provider = "openai"
+
+[llm.openai]
+api_key = ""
+model = "gpt-4o"
+base_url = ""
+
+[llm.claude]
+api_key = ""
+model = "claude-sonnet-4-20250514"
+
+[llm.deepseek]
+api_key = ""
+model = "deepseek-chat"
+base_url = "https://api.deepseek.com"
+
+[llm.ollama]
+model = "llama3"
+base_url = "http://localhost:11434"
+
+[bilibili]
+auth_method = "cookie"
+cookie = ""
+
+[bilibili.browser]
+executable = ""
+headed = false
+
+[scheduler]
+enabled = true
+discovery_cron = "0 */4 * * *"
+
+[storage]
+db_path = "data/openbiliclaw.db"
+""".strip(),
+        encoding="utf-8",
+    )
 
 
 class TestConfigDefaults:
@@ -44,3 +105,51 @@ class TestConfigDefaults:
         """Should return defaults when no config file exists."""
         config = load_config("/nonexistent/path/config.toml")
         assert config.language == "zh"
+
+
+def test_load_config_with_diagnostics_creates_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(config_module, "_PROJECT_ROOT", tmp_path)
+    _write_example_config(tmp_path)
+
+    config, diagnostics = load_config_with_diagnostics()
+
+    assert config.language == "zh"
+    assert (tmp_path / "config.toml").exists()
+    assert diagnostics.created_default_config is True
+    assert diagnostics.config_path == tmp_path / "config.toml"
+    assert ConfigIssue(
+        field="llm.openai.api_key",
+        message="默认 provider `openai` 缺少 `api_key`，请在 config.toml 中填写。",
+    ) in diagnostics.issues
+
+
+def test_validate_runtime_config_requires_api_key_for_default_provider() -> None:
+    config = Config(
+        llm=LLMConfig(
+            default_provider="openai",
+            openai=LLMProviderConfig(api_key=""),
+        )
+    )
+
+    with pytest.raises(ConfigError, match="llm.openai.api_key"):
+        validate_runtime_config(config)
+
+
+def test_validate_runtime_config_allows_ollama_without_api_key() -> None:
+    config = Config(
+        llm=LLMConfig(
+            default_provider="ollama",
+            ollama=LLMProviderConfig(model="llama3", base_url="http://localhost:11434"),
+        )
+    )
+
+    validate_runtime_config(config)
+
+
+def test_validate_runtime_config_rejects_invalid_auth_method() -> None:
+    config = Config(bilibili=BilibiliConfig(auth_method="invalid"))
+
+    with pytest.raises(ConfigError, match="bilibili.auth_method"):
+        validate_runtime_config(config)
