@@ -6,6 +6,7 @@ Loads configuration from TOML files with environment variable overrides.
 from __future__ import annotations
 
 import os
+import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,34 @@ from typing import Any
 # Default config search paths
 _CONFIG_FILENAMES = ["config.toml", "config.local.toml"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_SUPPORTED_AUTH_METHODS = {"cookie", "qrcode", "none"}
+_REMOTE_PROVIDER_FIELDS = {
+    "openai": "llm.openai.api_key",
+    "claude": "llm.claude.api_key",
+    "deepseek": "llm.deepseek.api_key",
+}
+
+
+class ConfigError(ValueError):
+    """Raised when required runtime configuration is missing or invalid."""
+
+
+@dataclass(frozen=True)
+class ConfigIssue:
+    """A user-facing configuration problem."""
+
+    field: str
+    message: str
+
+
+@dataclass
+class ConfigDiagnostics:
+    """Supplementary information collected during config loading."""
+
+    config_path: Path | None = None
+    created_default_config: bool = False
+    messages: list[str] = field(default_factory=list)
+    issues: list[ConfigIssue] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +110,38 @@ class Config:
         return p
 
 
+def _default_config_path() -> Path:
+    """Return the default config.toml path."""
+    return _PROJECT_ROOT / "config.toml"
+
+
+def _config_example_path() -> Path:
+    """Return the repository config example path."""
+    return _PROJECT_ROOT / "config.example.toml"
+
+
+def _ensure_default_config_file(diagnostics: ConfigDiagnostics) -> None:
+    """Create config.toml from the example file when it is missing."""
+    config_path = _default_config_path()
+    diagnostics.config_path = config_path
+
+    if config_path.exists():
+        return
+
+    example_path = _config_example_path()
+    if not example_path.exists():
+        diagnostics.messages.append(
+            "未检测到 config.toml，且缺少 config.example.toml，当前使用内置默认配置。"
+        )
+        return
+
+    shutil.copyfile(example_path, config_path)
+    diagnostics.created_default_config = True
+    diagnostics.messages.append(
+        f"未检测到 config.toml，已自动生成模板文件：{config_path}。"
+    )
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Deep merge two dicts, override values take precedence."""
     merged = base.copy()
@@ -144,7 +205,55 @@ def _build_config(raw: dict[str, Any]) -> Config:
     )
 
 
-def load_config(config_path: str | Path | None = None) -> Config:
+def _collect_config_issues(config: Config) -> list[ConfigIssue]:
+    """Collect non-fatal config issues to display as guidance."""
+    issues: list[ConfigIssue] = []
+
+    if config.bilibili.auth_method not in _SUPPORTED_AUTH_METHODS:
+        supported = ", ".join(sorted(_SUPPORTED_AUTH_METHODS))
+        issues.append(
+            ConfigIssue(
+                field="bilibili.auth_method",
+                message=f"`bilibili.auth_method` 仅支持: {supported}。",
+            )
+        )
+
+    provider_name = config.llm.default_provider
+    provider_configs: dict[str, LLMProviderConfig] = {
+        "openai": config.llm.openai,
+        "claude": config.llm.claude,
+        "deepseek": config.llm.deepseek,
+        "ollama": config.llm.ollama,
+    }
+
+    provider_config = provider_configs.get(provider_name)
+    if provider_config is None:
+        issues.append(
+            ConfigIssue(
+                field="llm.default_provider",
+                message=f"不支持的默认 provider: `{provider_name}`。",
+            )
+        )
+        return issues
+
+    required_field = _REMOTE_PROVIDER_FIELDS.get(provider_name)
+    if required_field and not provider_config.api_key.strip():
+        issues.append(
+            ConfigIssue(
+                field=required_field,
+                message=(
+                    f"默认 provider `{provider_name}` 缺少 `api_key`，"
+                    "请在 config.toml 中填写。"
+                ),
+            )
+        )
+
+    return issues
+
+
+def load_config_with_diagnostics(
+    config_path: str | Path | None = None,
+) -> tuple[Config, ConfigDiagnostics]:
     """Load configuration from TOML file(s).
 
     Resolution order:
@@ -157,16 +266,21 @@ def load_config(config_path: str | Path | None = None) -> Config:
         config_path: Optional explicit path to config file.
 
     Returns:
-        Populated Config instance.
+        Populated Config instance with diagnostics.
     """
+    diagnostics = ConfigDiagnostics()
     raw: dict[str, Any] = {}
 
     if config_path:
         path = Path(config_path)
+        diagnostics.config_path = path
         if path.exists():
             with open(path, "rb") as f:
                 raw = tomllib.load(f)
+        else:
+            diagnostics.messages.append(f"未找到配置文件：{path}，当前使用默认配置。")
     else:
+        _ensure_default_config_file(diagnostics)
         for filename in _CONFIG_FILENAMES:
             path = _PROJECT_ROOT / filename
             if path.exists():
@@ -175,4 +289,20 @@ def load_config(config_path: str | Path | None = None) -> Config:
                 raw = _deep_merge(raw, file_data)
 
     raw = _apply_env_overrides(raw)
-    return _build_config(raw)
+    config = _build_config(raw)
+    diagnostics.issues.extend(_collect_config_issues(config))
+    return config, diagnostics
+
+
+def load_config(config_path: str | Path | None = None) -> Config:
+    """Load configuration only, without diagnostics."""
+    config, _ = load_config_with_diagnostics(config_path)
+    return config
+
+
+def validate_runtime_config(config: Config) -> None:
+    """Raise ConfigError when runtime-critical config is invalid."""
+    issues = _collect_config_issues(config)
+    if issues:
+        issue = issues[0]
+        raise ConfigError(f"{issue.field}: {issue.message}")

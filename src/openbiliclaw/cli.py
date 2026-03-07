@@ -16,9 +16,40 @@ app = typer.Typer(
 console = Console()
 
 
+def _print_config_guidance(messages: list[str]) -> None:
+    """Render config hints in a consistent way."""
+    if not messages:
+        return
+    console.print("[bold yellow]配置提示[/bold yellow]")
+    for message in messages:
+        console.print(f"  - {message}")
+
+
+def _require_runtime_config() -> None:
+    """Exit with a clear message when runtime config is incomplete."""
+    from openbiliclaw.config import (
+        ConfigError,
+        load_config_with_diagnostics,
+        validate_runtime_config,
+    )
+
+    config, diagnostics = load_config_with_diagnostics()
+    try:
+        validate_runtime_config(config)
+    except ConfigError as exc:
+        console.print("[bold red]配置错误[/bold red]")
+        hints = diagnostics.messages + [
+            f"{issue.field}: {issue.message}" for issue in diagnostics.issues
+        ]
+        _print_config_guidance(hints)
+        console.print(f"  {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 @app.command()
 def start() -> None:
     """启动 OpenBiliClaw Agent."""
+    _require_runtime_config()
     console.print("[bold green]🦀 OpenBiliClaw[/bold green] 正在启动...")
     console.print("[dim]v0.1.0-dev — 项目处于早期开发阶段[/dim]")
     # TODO: Initialize and start the agent orchestrator
@@ -27,6 +58,7 @@ def start() -> None:
 @app.command()
 def recommend() -> None:
     """查看推荐内容."""
+    _require_runtime_config()
     console.print("[bold]📬 推荐内容[/bold]")
     console.print("[dim]功能开发中...[/dim]")
     # TODO: Display latest recommendations
@@ -43,6 +75,7 @@ def profile() -> None:
 @app.command()
 def discover() -> None:
     """手动触发内容发现."""
+    _require_runtime_config()
     console.print("[bold]🔍 内容发现[/bold]")
     console.print("[dim]功能开发中...[/dim]")
     # TODO: Trigger content discovery
@@ -51,6 +84,7 @@ def discover() -> None:
 @app.command()
 def chat() -> None:
     """与 Agent 对话（苏格拉底式深度交流）."""
+    _require_runtime_config()
     console.print("[bold]💬 对话模式[/bold]")
     console.print("[dim]功能开发中...[/dim]")
     # TODO: Interactive chat with the agent
@@ -59,15 +93,22 @@ def chat() -> None:
 @app.command()
 def config_show() -> None:
     """显示当前配置."""
-    from openbiliclaw.config import load_config
+    from openbiliclaw.config import load_config_with_diagnostics
 
-    cfg = load_config()
+    cfg, diagnostics = load_config_with_diagnostics()
     console.print("[bold]⚙️ 当前配置[/bold]")
     console.print(f"  语言: {cfg.language}")
     console.print(f"  LLM: {cfg.llm.default_provider}")
     console.print(f"  B站认证: {cfg.bilibili.auth_method}")
     console.print(f"  定时任务: {'开启' if cfg.scheduler.enabled else '关闭'}")
     console.print(f"  数据目录: {cfg.data_path}")
+    if diagnostics.config_path:
+        console.print(f"  配置文件: {diagnostics.config_path}")
+
+    hints = diagnostics.messages + [
+        f"{issue.field}: {issue.message}" for issue in diagnostics.issues
+    ]
+    _print_config_guidance(hints)
 
 
 if __name__ == "__main__":
