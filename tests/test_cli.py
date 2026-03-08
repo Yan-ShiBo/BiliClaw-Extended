@@ -527,3 +527,242 @@ def test_feedback_command_reports_missing_recommendation(
 
     assert result.exit_code == 1
     assert "推荐不存在" in result.stdout
+
+
+def test_init_reports_authentication_failure(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=False,
+                authenticated=False,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                message="未配置 B 站 Cookie。",
+            )
+
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 1
+    assert "认证失败" in result.stdout
+    assert "auth login" in result.stdout
+
+
+def test_init_reports_when_history_is_empty(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=True,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                username="alice",
+                user_id=10086,
+                message="Cookie 验证成功。",
+            )
+
+    class FakeBilibiliClient:
+        async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
+            return []
+
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_bilibili_client",
+        lambda: FakeBilibiliClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 1
+    assert "历史为空" in result.stdout
+
+
+def test_init_runs_history_preference_profile_and_discovery(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=True,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                username="alice",
+                user_id=10086,
+                message="Cookie 验证成功。",
+            )
+
+    class FakeBilibiliClient:
+        async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
+            return [
+                {
+                    "history": {"bvid": "BV1A", "view_at": 1710000000},
+                    "title": "讲透历史叙事",
+                    "author_name": "历史实验室",
+                }
+            ]
+
+    class FakeMemoryManager:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        async def propagate_event(self, event: dict[str, object]) -> None:
+            self.events.append(event)
+
+    class FakeSoulEngine:
+        def __init__(self) -> None:
+            self.analyzed_events: list[list[dict[str, object]]] = []
+            self.built_history: list[list[dict[str, object]]] = []
+
+        async def analyze_events(self, events: list[dict[str, object]]) -> None:
+            self.analyzed_events.append(events)
+
+        async def build_initial_profile(self, history: list[dict[str, object]]) -> SoulProfile:
+            self.built_history.append(history)
+            return SoulProfile(
+                personality_portrait="稳定用户画像" * 30,
+                core_traits=["理性"],
+                preferences=PreferenceLayer(),
+            )
+
+    class FakeDiscoveryEngine:
+        def __init__(self) -> None:
+            self.calls: list[tuple[SoulProfile, int]] = []
+
+        async def discover(
+            self,
+            profile: SoulProfile,
+            strategies: list[str] | None = None,
+            limit: int = 30,
+        ) -> list[DiscoveredContent]:
+            self.calls.append((profile, limit))
+            return [
+                DiscoveredContent(
+                    bvid="BV1DISC",
+                    title="发现内容",
+                    up_name="发现实验室",
+                    relevance_score=0.8,
+                )
+            ]
+
+    fake_memory = FakeMemoryManager()
+    fake_soul = FakeSoulEngine()
+    fake_discovery = FakeDiscoveryEngine()
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_bilibili_client",
+        lambda: FakeBilibiliClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_build_memory_manager", lambda: fake_memory, raising=False)
+    monkeypatch.setattr(cli_module, "_build_soul_engine", lambda: fake_soul, raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_discovery_engine",
+        lambda: fake_discovery,
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0
+    assert "1/4 拉取历史" in result.stdout
+    assert "2/4 分析偏好" in result.stdout
+    assert "3/4 生成画像" in result.stdout
+    assert "4/4 发现内容" in result.stdout
+    assert "历史条数: 1" in result.stdout
+    assert "发现内容数: 1" in result.stdout
+    assert fake_memory.events[0]["event_type"] == "view"
+    assert fake_soul.analyzed_events
+    assert fake_soul.built_history
+    assert fake_discovery.calls
+
+
+def test_init_reports_partial_success_when_discovery_fails(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
+) -> None:
+    class FakeAuthManager:
+        async def get_status(self) -> AuthStatus:
+            return AuthStatus(
+                has_cookie=True,
+                authenticated=True,
+                cookie_path=tmp_path / "bilibili_cookie.json",
+                username="alice",
+                user_id=10086,
+                message="Cookie 验证成功。",
+            )
+
+    class FakeBilibiliClient:
+        async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
+            return [
+                {
+                    "history": {"bvid": "BV1A"},
+                    "title": "讲透历史叙事",
+                    "author_name": "历史实验室",
+                }
+            ]
+
+    class FakeMemoryManager:
+        async def propagate_event(self, event: dict[str, object]) -> None:
+            return None
+
+    class FakeSoulEngine:
+        async def analyze_events(self, events: list[dict[str, object]]) -> None:
+            return None
+
+        async def build_initial_profile(self, history: list[dict[str, object]]) -> SoulProfile:
+            return SoulProfile(
+                personality_portrait="稳定用户画像" * 30,
+                core_traits=["理性"],
+                preferences=PreferenceLayer(),
+            )
+
+    class FakeDiscoveryEngine:
+        async def discover(
+            self,
+            profile: SoulProfile,
+            strategies: list[str] | None = None,
+            limit: int = 30,
+        ) -> list[DiscoveredContent]:
+            raise RuntimeError("discovery unavailable")
+
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_auth_manager", lambda: FakeAuthManager(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_bilibili_client",
+        lambda: FakeBilibiliClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_memory_manager",
+        lambda: FakeMemoryManager(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_build_soul_engine", lambda: FakeSoulEngine(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_discovery_engine",
+        lambda: FakeDiscoveryEngine(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0
+    assert "部分完成" in result.stdout
+    assert "画像已生成" in result.stdout
+    assert "discover" in result.stdout

@@ -6,7 +6,7 @@ Provides the command-line entry point using Typer.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -62,6 +62,15 @@ def _build_browser() -> Any:
     )
 
 
+def _build_bilibili_client() -> Any:
+    """Build the configured Bilibili API client."""
+    from openbiliclaw.bilibili.api import BilibiliAPIClient
+    from openbiliclaw.config import load_config
+
+    config = load_config()
+    return BilibiliAPIClient(cookie=config.bilibili.cookie)
+
+
 def _build_soul_engine() -> Any:
     """Build the configured soul engine with initialized memory storage."""
     from openbiliclaw.config import load_config
@@ -108,6 +117,74 @@ def _build_memory_manager() -> Any:
     memory = MemoryManager(config.data_path)
     memory.initialize()
     return memory
+
+
+def _build_discovery_engine() -> Any:
+    """Build the discovery engine with currently implemented strategies."""
+    from openbiliclaw.config import load_config
+    from openbiliclaw.discovery.engine import ContentDiscoveryEngine
+    from openbiliclaw.discovery.strategies.strategies import (
+        ExploreStrategy,
+        RelatedChainStrategy,
+        SearchStrategy,
+        TrendingStrategy,
+    )
+    from openbiliclaw.llm.service import LLMService
+    from openbiliclaw.memory.manager import MemoryManager
+    from openbiliclaw.storage.database import Database
+
+    config = load_config()
+    memory = MemoryManager(config.data_path)
+    memory.initialize()
+    database = Database(config.data_path / "openbiliclaw.db")
+    database.initialize()
+    bilibili_client = _build_bilibili_client()
+    llm_service = LLMService(registry=_build_registry(), memory=memory)
+
+    engine = ContentDiscoveryEngine(llm_service=llm_service, database=database)
+    search_strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client)
+    trending_strategy = TrendingStrategy(
+        bilibili_client=bilibili_client,
+        llm_service=llm_service,
+    )
+    related_strategy = RelatedChainStrategy(
+        bilibili_client=bilibili_client,
+        llm_service=llm_service,
+        memory_manager=cast("Any", memory),
+        search_strategy=search_strategy,
+        trending_strategy=trending_strategy,
+    )
+    explore_strategy = ExploreStrategy(
+        llm_service=llm_service,
+        bilibili_client=bilibili_client,
+    )
+
+    engine.register_strategy(search_strategy)
+    engine.register_strategy(trending_strategy)
+    engine.register_strategy(related_strategy)
+    engine.register_strategy(explore_strategy)
+    return engine
+
+
+def _history_item_to_event(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a Bilibili history item into an event-layer payload."""
+    history_meta = item.get("history", {})
+    if not isinstance(history_meta, dict):
+        history_meta = {}
+    bvid = str(history_meta.get("bvid", "")).strip()
+    title = str(item.get("title", "")).strip()
+    author = str(item.get("author_name", item.get("author", ""))).strip()
+    view_at = history_meta.get("view_at", item.get("view_at", ""))
+    return {
+        "event_type": "view",
+        "title": title,
+        "url": f"https://www.bilibili.com/video/{bvid}" if bvid else "",
+        "metadata": {
+            "bvid": bvid,
+            "author": author,
+            "view_at": view_at,
+        },
+    }
 
 
 @app.callback()
@@ -176,6 +253,62 @@ def start() -> None:
     console.print("[bold green]🦀 OpenBiliClaw[/bold green] 正在启动...")
     console.print("[dim]v0.1.0-dev — 项目处于早期开发阶段[/dim]")
     # TODO: Initialize and start the agent orchestrator
+
+
+@app.command()
+def init() -> None:
+    """首次运行：拉取历史、生成画像并自动执行一次内容发现."""
+    _require_runtime_config()
+    auth_manager = _build_auth_manager()
+    status = asyncio.run(auth_manager.get_status())
+    if not status.authenticated:
+        console.print("[bold red]认证失败[/bold red]")
+        console.print("请先执行 `openbiliclaw auth login` 完成 B 站认证。")
+        raise typer.Exit(code=1)
+
+    client = _build_bilibili_client()
+    memory = _build_memory_manager()
+    soul_engine = _build_soul_engine()
+
+    console.print("[bold]🚀 初始化 OpenBiliClaw[/bold]")
+    console.print("[bold cyan]1/4 拉取历史[/bold cyan]")
+    history = asyncio.run(client.get_user_history(max_items=200))
+    if not history:
+        console.print("[bold yellow]历史为空[/bold yellow]")
+        console.print("当前无法从 B 站历史中生成初始画像。")
+        raise typer.Exit(code=1)
+
+    events = [_history_item_to_event(item) for item in history]
+    for event in events:
+        asyncio.run(memory.propagate_event(event))
+
+    console.print("[bold cyan]2/4 分析偏好[/bold cyan]")
+    asyncio.run(soul_engine.analyze_events(events))
+
+    console.print("[bold cyan]3/4 生成画像[/bold cyan]")
+    profile_data = asyncio.run(soul_engine.build_initial_profile(history))
+
+    console.print("[bold cyan]4/4 发现内容[/bold cyan]")
+    discovered_count = 0
+    discovery_error = False
+    try:
+        discovery_engine = _build_discovery_engine()
+        discovered = asyncio.run(discovery_engine.discover(profile_data, limit=30))
+        discovered_count = len(discovered)
+    except Exception:
+        discovery_error = True
+        console.print("[bold yellow]部分完成[/bold yellow]")
+        console.print("画像已生成，但 discover 阶段失败，可稍后手动执行 `openbiliclaw discover`。")
+
+    completion_text = (
+        "[bold green]初始化完成[/bold green]"
+        if not discovery_error
+        else "[bold yellow]初始化部分完成[/bold yellow]"
+    )
+    console.print(completion_text)
+    console.print(f"  历史条数: {len(history)}")
+    console.print("  画像已生成")
+    console.print(f"  发现内容数: {discovered_count}")
 
 
 @app.command()

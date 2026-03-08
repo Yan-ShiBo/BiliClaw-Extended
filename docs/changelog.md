@@ -98,6 +98,15 @@
 - CLI 新增 `feedback <id> <like|dislike> [--note ...]`，成功后会同步写入一条 `feedback` 事件
 - 新增 recommendation/storage/cli 测试，覆盖反馈持久化、事件写入和不存在推荐的错误路径
 
+## M7: CLI 交付（进行中）
+
+### 7.1 核心命令 `init` — `cli/m71-init`
+
+- 新增 `openbiliclaw init`，打通首次运行链路：认证检查、历史拉取、事件导入、偏好分析、画像生成、自动 discover
+- 新增 `_build_bilibili_client()`、`_build_discovery_engine()` 和 `_history_item_to_event()`，把 CLI 编排边界固定下来
+- `init` 支持阶段性进度输出，并在 discover 失败时给出“部分完成”提示，不丢弃已生成的画像
+- 新增 CLI 测试，覆盖认证失败、历史为空、全流程成功和 discover 部分失败
+
 ### 6.2 朋友式推荐表达 — `recommendation/m62-expression`
 
 - `RecommendationEngine.generate_expression()` 从 stub 升级为结构化 LLM 调用，输出 `expression` 和 `topic_label`

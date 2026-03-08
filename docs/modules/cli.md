@@ -20,6 +20,7 @@ openbiliclaw [--log-level DEBUG|INFO|WARNING|ERROR] <命令>
 | `browser open <url>` | 通过浏览器打开页面 | ✅ |
 | `browser content <url>` | 获取页面文本内容 | ✅ |
 | `start` | 启动 Agent | 🔲 stub |
+| `init` | 首次初始化 | ✅ |
 | `recommend` | 查看推荐 | ✅ |
 | `feedback <id> <like\|dislike>` | 对推荐提交反馈 | ✅ |
 | `profile` | 查看用户画像 | ✅ |
@@ -134,6 +135,35 @@ $ openbiliclaw profile
 
 深层需求
   被理解、持续成长
+```
+
+### `openbiliclaw init`
+
+首次运行编排命令。会顺序执行：
+
+1. 校验 B 站认证
+2. 拉取历史
+3. 写入事件层并分析偏好
+4. 生成初始画像
+5. 自动跑一次内容发现
+
+```bash
+$ openbiliclaw init
+🚀 初始化 OpenBiliClaw
+1/4 拉取历史
+2/4 分析偏好
+3/4 生成画像
+4/4 发现内容
+初始化完成
+  历史条数: 200
+  画像已生成
+  发现内容数: 30
+```
+
+如果 discover 阶段失败，但历史和画像阶段成功，命令会提示“部分完成”，并建议稍后手动执行：
+
+```bash
+openbiliclaw discover
 ```
 
 ### `openbiliclaw recommend`
