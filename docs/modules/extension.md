@@ -36,6 +36,8 @@ extension/
 │       └── types.ts
 └── tests/
     ├── collector-helpers.test.ts
+    ├── dist-module-specifiers.test.ts
+    ├── manifest-assets.test.ts
     └── service-worker-buffer.test.ts
 ```
 
@@ -64,6 +66,13 @@ extension/
 - `chrome.alarms` 周期性批量发送
 - 发送失败时把事件回填到缓冲区
 
+### 构建链路
+
+- 运行时脚本不再直接把 `tsc` 的 ESM 产物交给 Chrome
+- `scripts/build.mjs` 使用 `esbuild` 将 `collector.ts` 和 `service-worker.ts` bundle 为可直接加载的单文件
+- `tsc --emitDeclarationOnly` 继续负责类型声明产物
+- 新增构建回归测试，确保 content script 不会再次产出浏览器无法执行的 `import` 语句
+
 ## 本地开发
 
 在 `extension/` 目录下：
@@ -74,6 +83,13 @@ npm test
 npm run typecheck
 npm run build
 ```
+
+`npm test` 现在会覆盖：
+
+- 页面识别 / BV 提取 / 动作识别
+- 缓冲去重与强信号 flush
+- manifest 图标资源存在性
+- `dist/` 运行时脚本可被 Chrome 直接加载
 
 ## 手动联调
 
@@ -92,6 +108,13 @@ npm run build
 3. 在 Chrome 的扩展管理页加载 `extension/` 目录
 4. 打开 B 站首页、搜索页、视频页，执行点击、搜索、播放、暂停、滚动等行为
 5. 观察后端 `/api/events` 写入效果，或直接查看 SQLite `events` 表
+
+目前已通过真实联调确认：
+
+- `collector` 能在首页和搜索页成功注入
+- `service worker` 能启动并批量上报
+- `/api/events` 能接收插件预检请求与事件批次
+- SQLite `events` 表已能写入 `snapshot` 事件
 
 ## 当前限制
 

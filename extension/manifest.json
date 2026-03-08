@@ -13,8 +13,7 @@
         "*://*.bilibili.com/*"
     ],
     "background": {
-        "service_worker": "dist/background/service-worker.js",
-        "type": "module"
+        "service_worker": "dist/background/service-worker.js"
     },
     "content_scripts": [
         {

@@ -1,4 +1,4 @@
-import type { ActionHint, BehaviorContext, BehaviorEvent, PageType } from "./types";
+import type { ActionHint, BehaviorContext, BehaviorEvent, PageType } from "./types.js";
 
 const BV_PATTERN = /(BV[0-9A-Za-z]{10})/;
 

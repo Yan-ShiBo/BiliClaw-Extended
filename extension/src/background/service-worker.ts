@@ -5,8 +5,8 @@
  * buffers them, and forwards to the backend API.
  */
 
-import { enqueueBufferedEvent, shouldFlushImmediately } from "./buffer";
-import type { BehaviorEvent } from "../shared/types";
+import { enqueueBufferedEvent, shouldFlushImmediately } from "./buffer.js";
+import type { BehaviorEvent } from "../shared/types.js";
 
 let eventBuffer: BehaviorEvent[] = [];
 const BUFFER_FLUSH_INTERVAL = 30_000;

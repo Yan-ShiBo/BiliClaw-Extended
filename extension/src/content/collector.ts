@@ -15,8 +15,8 @@ import {
   extractBvid,
   inferActionType,
   isTrackableCardElement,
-} from "../shared/behavior";
-import type { BehaviorEvent } from "../shared/types";
+} from "../shared/behavior.js";
+import type { BehaviorEvent } from "../shared/types.js";
 
 const HOVER_DELAY_MS = 800;
 const SCROLL_DEBOUNCE_MS = 600;
