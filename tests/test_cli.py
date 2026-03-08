@@ -434,17 +434,80 @@ def test_discover_displays_preview_rows(
     assert "相关性分数" in result.stdout
 
 
-def test_chat_uses_placeholder_output(
+def test_chat_prints_init_guidance_when_profile_missing(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
+    from openbiliclaw.soul.engine import SoulProfileNotInitializedError
+
+    class FakeSoulEngine:
+        async def get_profile(self) -> SoulProfile:
+            raise SoulProfileNotInitializedError("missing")
+
     monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_soul_engine", lambda: FakeSoulEngine(), raising=False)
     monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
 
     result = runner.invoke(app, ["chat"])
 
+    assert result.exit_code == 1
+    assert "尚未初始化" in result.stdout
+    assert "openbiliclaw init" in result.stdout
+
+
+def test_chat_runs_single_turn_and_prints_reply(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    class FakeSoulEngine:
+        async def get_profile(self) -> SoulProfile:
+            return SoulProfile(personality_portrait="稳定用户画像" * 30)
+
+    class FakeDialogue:
+        async def respond(self, user_message: str) -> str:
+            return f"我听见你在说：{user_message}"
+
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_soul_engine", lambda: FakeSoulEngine(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_dialogue",
+        lambda soul_engine: FakeDialogue(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["chat"], input="我最近总在刷讲结构的视频。\nexit\n")
+
     assert result.exit_code == 0
-    assert "对话模式" in result.stdout
-    assert "功能开发中" in result.stdout
+    assert "苏格拉底式对话" in result.stdout
+    assert "阿花：" in result.stdout
+    assert "我听见你在说：我最近总在刷讲结构的视频。" in result.stdout
+
+
+def test_chat_exits_cleanly_on_exit_command(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    class FakeSoulEngine:
+        async def get_profile(self) -> SoulProfile:
+            return SoulProfile(personality_portrait="稳定用户画像" * 30)
+
+    class FakeDialogue:
+        async def respond(self, user_message: str) -> str:
+            return "不应被调用"
+
+    monkeypatch.setattr(cli_module, "_require_runtime_config", lambda: None)
+    monkeypatch.setattr(cli_module, "_build_soul_engine", lambda: FakeSoulEngine(), raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "_build_dialogue",
+        lambda soul_engine: FakeDialogue(),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["chat"], input="exit\n")
+
+    assert result.exit_code == 0
+    assert "对话结束" in result.stdout
 
 
 def test_profile_command_shows_saved_profile(

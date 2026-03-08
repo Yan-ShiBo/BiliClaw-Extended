@@ -8,6 +8,12 @@
 
 ## M7: CLI 体验 ✅
 
+### 7.1 chat 命令补平 — `cli/m71-chat-command`
+
+- `openbiliclaw chat` 从 stub 升级为交互式 REPL，对接 `SocraticDialogue`
+- 支持多轮对话，输入 `exit` / `quit` / 空行即可正常结束
+- 新增 CLI 测试，覆盖画像缺失、单轮回复和退出路径
+
 ### 7.1 discover 命令补平 — `cli/m71-discover-command`
 
 - `openbiliclaw discover` 从 stub 升级为真实命令：读取画像、执行 discovery engine、展示发现摘要与前 5 条预览

@@ -31,7 +31,7 @@ openbiliclaw [--log-level DEBUG|INFO|WARNING|ERROR] <命令>
 | `feedback <id> <like\|dislike>` | 对推荐提交反馈 | ✅ |
 | `profile` | 查看用户画像 | ✅ |
 | `discover` | 手动触发发现 | ✅ |
-| `chat` | 苏格拉底式对话 | 🔲 stub |
+| `chat` | 苏格拉底式对话 | ✅ |
 
 ## 详细说明
 
@@ -234,9 +234,28 @@ $ openbiliclaw discover
 openbiliclaw init
 ```
 
+### `openbiliclaw chat`
+
+进入持续对话模式，复用 `SocraticDialogue` 的多轮历史。输入 `exit`、`quit` 或空行可结束。
+
+```bash
+$ openbiliclaw chat
+苏格拉底式对话
+你：我最近总在刷讲结构的视频。
+阿花：我听见你在说，你现在在意的可能不只是内容本身，而是想把事情看得更透一点。
+你：exit
+阿花：对话结束。
+```
+
+如果画像尚未初始化，会提示先执行：
+
+```bash
+openbiliclaw init
+```
+
 ### Stub 命令的输出约定
 
-`start`、`chat` 目前仍是 stub，但已经统一使用“开发中”占位态输出，避免与真实错误混淆，并会附带建议的下一步命令。
+`start` 目前仍是 stub，但已经统一使用“开发中”占位态输出，避免与真实错误混淆，并会附带建议的下一步命令。
 
 这条命令会同时：
 

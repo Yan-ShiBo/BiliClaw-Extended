@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import click
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -180,6 +181,13 @@ def _build_recommendation_engine() -> Any:
     database.initialize()
     llm_service = LLMService(registry=_build_registry(), memory=memory)
     return RecommendationEngine(llm=llm_service, database=database)
+
+
+def _build_dialogue(soul_engine: Any) -> Any:
+    """Build the Socratic dialogue helper for interactive chat."""
+    from openbiliclaw.soul.dialogue import SocraticDialogue
+
+    return SocraticDialogue(llm=_build_registry(), soul_engine=soul_engine)
 
 
 def _build_memory_manager() -> Any:
@@ -562,12 +570,39 @@ def discover() -> None:
 @app.command()
 def chat() -> None:
     """与 Agent 对话（苏格拉底式深度交流）."""
+    from openbiliclaw.soul.engine import SoulProfileNotInitializedError
+
     _require_runtime_config()
-    _print_placeholder(
-        "对话模式",
-        "当前可先执行 `openbiliclaw profile` 和 `openbiliclaw recommend` 查看画像与推荐。",
-    )
-    # TODO: Interactive chat with the agent
+    soul_engine = _build_soul_engine()
+    try:
+        asyncio.run(soul_engine.get_profile())
+    except SoulProfileNotInitializedError as exc:
+        _print_status_panel(
+            "warning",
+            "尚未初始化用户画像",
+            "请先执行 `openbiliclaw init` 拉取历史并生成初始画像。",
+        )
+        raise typer.Exit(code=1) from exc
+
+    dialogue = _build_dialogue(soul_engine)
+    _print_page_title("苏格拉底式对话", "输入 exit / quit / 空行结束")
+
+    try:
+        while True:
+            try:
+                user_message = typer.prompt("你", prompt_suffix="： ").strip()
+            except (click.Abort, EOFError, KeyboardInterrupt):
+                console.print("阿花：对话结束。")
+                return
+
+            if user_message.lower() in {"", "exit", "quit"}:
+                console.print("阿花：对话结束。")
+                return
+
+            reply = asyncio.run(dialogue.respond(user_message))
+            console.print(f"阿花：{reply}")
+    except KeyboardInterrupt:
+        console.print("阿花：对话结束。")
 
 
 @app.command()
