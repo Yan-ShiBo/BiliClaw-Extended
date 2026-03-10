@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Schema version for migrations
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """
 -- Event log (behavioral data from browser extension)
@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS content_cache (
     cover_url   TEXT,
     view_count  INTEGER DEFAULT 0,
     like_count  INTEGER DEFAULT 0,
+    relevance_score REAL DEFAULT 0.0,
+    relevance_reason TEXT DEFAULT '',
+    candidate_tier TEXT DEFAULT 'primary',
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_scored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     notification_sent INTEGER DEFAULT 0,
@@ -93,6 +96,7 @@ class Database:
         self._conn.executescript(_SCHEMA_SQL)
         self._ensure_recommendation_feedback_columns()
         self._ensure_content_cache_runtime_columns()
+        self._ensure_content_cache_relevance_columns()
 
         # Set schema version
         self._conn.execute(
@@ -235,10 +239,13 @@ class Database:
                 cover_url,
                 view_count,
                 like_count,
+                relevance_score,
+                relevance_reason,
+                candidate_tier,
                 last_scored_at,
                 source
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ON CONFLICT(bvid) DO UPDATE SET
                 title = excluded.title,
                 up_name = excluded.up_name,
@@ -249,6 +256,9 @@ class Database:
                 cover_url = excluded.cover_url,
                 view_count = excluded.view_count,
                 like_count = excluded.like_count,
+                relevance_score = excluded.relevance_score,
+                relevance_reason = excluded.relevance_reason,
+                candidate_tier = excluded.candidate_tier,
                 last_scored_at = CURRENT_TIMESTAMP,
                 source = excluded.source
             """,
@@ -263,6 +273,9 @@ class Database:
                 kwargs.get("cover_url", ""),
                 kwargs.get("view_count", 0),
                 kwargs.get("like_count", 0),
+                kwargs.get("relevance_score", 0.0),
+                kwargs.get("relevance_reason", ""),
+                kwargs.get("candidate_tier", "primary"),
                 kwargs.get("source", ""),
             ),
         )
@@ -526,6 +539,24 @@ class Database:
             "last_scored_at": "TIMESTAMP",
             "notification_sent": "INTEGER DEFAULT 0",
             "notified_at": "TIMESTAMP",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            self.conn.execute(
+                f"ALTER TABLE content_cache ADD COLUMN {column_name} {column_type}"
+            )
+
+    def _ensure_content_cache_relevance_columns(self) -> None:
+        """Backfill relevance fields for existing content-cache rows."""
+        existing_columns = {
+            str(row["name"])
+            for row in self.conn.execute("PRAGMA table_info(content_cache)").fetchall()
+        }
+        required_columns = {
+            "relevance_score": "REAL DEFAULT 0.0",
+            "relevance_reason": "TEXT DEFAULT ''",
+            "candidate_tier": "TEXT DEFAULT 'primary'",
         }
         for column_name, column_type in required_columns.items():
             if column_name in existing_columns:

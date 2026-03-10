@@ -324,3 +324,34 @@ async def test_discovery_engine_caches_final_results() -> None:
         assert [item.bvid for item in results] == ["BV1A", "BV1B"]
         assert [item["bvid"] for item in cached] == ["BV1A", "BV1B"]
         assert cached[0]["source"] == "search"
+
+
+@pytest.mark.asyncio
+async def test_discovery_engine_cache_results_preserves_relevance_fields() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        db.initialize()
+
+        engine = ContentDiscoveryEngine(database=db)
+        engine.register_strategy(
+            _RecordingStrategy(
+                "search",
+                [
+                    DiscoveredContent(
+                        bvid="BV1A",
+                        title="缓存内容 A",
+                        up_name="UPA",
+                        relevance_score=0.88,
+                        relevance_reason="fits profile",
+                        source_strategy="search",
+                    )
+                ],
+            )
+        )
+
+        await engine.discover(_build_profile(), limit=20)
+        cached = db.get_cached_content(limit=1)
+
+        assert cached[0]["relevance_score"] == 0.88
+        assert cached[0]["relevance_reason"] == "fits profile"
+        assert cached[0]["candidate_tier"] == "primary"

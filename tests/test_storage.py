@@ -60,6 +60,29 @@ class TestDatabase:
 
             db.close()
 
+    def test_cache_content_persists_relevance_and_candidate_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            db.cache_content(
+                "BV1A",
+                title="Video A",
+                up_name="UPA",
+                source="search",
+                relevance_score=0.88,
+                relevance_reason="fits profile",
+                candidate_tier="primary",
+            )
+
+            row = db.get_cached_content(limit=1)[0]
+
+            assert row["relevance_score"] == 0.88
+            assert row["relevance_reason"] == "fits profile"
+            assert row["candidate_tier"] == "primary"
+
+            db.close()
+
     def test_get_cached_content_returns_cached_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db = Database(Path(tmpdir) / "test.db")

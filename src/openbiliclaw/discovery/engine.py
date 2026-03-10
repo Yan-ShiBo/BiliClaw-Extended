@@ -49,6 +49,7 @@ class DiscoveredContent:
     source_strategy: str = ""  # Which strategy found this
     relevance_score: float = 0.0  # 0.0 - 1.0 (based on user soul)
     relevance_reason: str = ""  # Why this is relevant to the user
+    candidate_tier: str = "primary"  # Primary discovery vs backfill supply
 
 
 class DiscoveryStrategy(ABC):
@@ -249,6 +250,9 @@ class ContentDiscoveryEngine:
                     cover_url=item.cover_url,
                     view_count=item.view_count,
                     like_count=item.like_count,
+                    relevance_score=item.relevance_score,
+                    relevance_reason=item.relevance_reason,
+                    candidate_tier=item.candidate_tier,
                     source=item.source_strategy,
                 )
             except Exception:
