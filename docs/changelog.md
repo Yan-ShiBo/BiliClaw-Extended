@@ -13,6 +13,12 @@
 - 刷新失败时保留当前推荐，不清空内容，只给出轻量错误提示
 - 后续修正：手动刷新现在走 `force_refresh()`，不会再因为 `below_threshold` 被短路
 
+### Popup 手动刷新异步化 — `runtime/m105-manual-refresh-async`
+
+- `/api/recommendations/refresh` 现在只负责触发后台手动补货任务，立即返回接受结果
+- `runtime-status` 新增 `manual_refresh_state` 和 `manual_refresh_message`，popup 会轮询后台状态，而不是同步等待整轮补货
+- 手动刷新期间 popup 继续保留当前推荐列表，等后台补货完成后再统一重拉推荐
+
 ### Gemini 可选依赖导入修复 — `fix/gemini-optional-import`
 
 - `google-genai` 缺失时，`openbiliclaw.llm` 和 `openbiliclaw.llm.registry` 现在仍可正常导入，不再因为 Gemini 顶层依赖阻塞整个测试收集
