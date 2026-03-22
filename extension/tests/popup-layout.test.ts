@@ -78,7 +78,7 @@ test("recommendation cards use explicit editorial content sections", () => {
   const metaLineBlock = popupHtml.match(/\.recommendation-meta-line\s*\{[\s\S]*?\}/)?.[0] ?? "";
   const actionsBlock = popupHtml.match(/\.recommendation-actions\s*\{[\s\S]*?\}/)?.[0] ?? "";
 
-  assert.match(previewBlock, /grid-template-columns:\s*104px\s+minmax\(0,\s*1fr\);/);
+  assert.match(previewBlock, /grid-template-columns:\s*116px\s+minmax\(0,\s*1fr\);/);
   assert.match(contentBlock, /justify-content:\s*space-between;/);
   assert.match(copyBlock, /display:\s*flex;/);
   assert.match(copyBlock, /flex-direction:\s*column;/);
@@ -88,27 +88,6 @@ test("recommendation cards use explicit editorial content sections", () => {
   assert.match(popupJs, /metaLine\.className = "recommendation-meta-line";/);
   assert.match(popupJs, /content\.append\(top, copyBlock, metaLine\);/);
   assert.doesNotMatch(popupJs, /content\.append\(top,\s*title,\s*expression,\s*meta\);/);
-});
-
-test("first recommendation card is promoted to a magazine-style hero card", () => {
-  const popupHtml = readFileSync(resolve("popup", "popup.html"), "utf8");
-  const popupJs = readFileSync(resolve("popup", "popup.js"), "utf8");
-  const heroCardBlock =
-    popupHtml.match(/\.recommendation-card\.is-hero\s*\{[\s\S]*?\}/)?.[0] ?? "";
-  const heroPreviewBlock =
-    popupHtml.match(/\.recommendation-card\.is-hero\s+\.recommendation-preview\s*\{[\s\S]*?\}/)?.[0] ?? "";
-  const heroCoverBlock =
-    popupHtml.match(/\.recommendation-card\.is-hero\s+\.recommendation-cover\s*\{[\s\S]*?\}/)?.[0] ?? "";
-  const heroTitleBlock =
-    popupHtml.match(/\.recommendation-card\.is-hero\s+\.recommendation-title\s*\{[\s\S]*?\}/)?.[0] ?? "";
-
-  assert.match(heroCardBlock, /padding:\s*12px;/);
-  assert.match(heroPreviewBlock, /grid-template-columns:\s*1fr;/);
-  assert.match(heroPreviewBlock, /gap:\s*14px;/);
-  assert.match(heroCoverBlock, /aspect-ratio:\s*16\s*\/\s*11;/);
-  assert.match(heroTitleBlock, /font-size:\s*20px;/);
-  assert.match(popupJs, /if \(!append && index === 0\)/);
-  assert.match(popupJs, /card\.classList\.add\("is-hero"\);/);
 });
 
 test("popup page is structured for side panel browsing", () => {
@@ -137,7 +116,7 @@ test("recommendation card layout reserves a media cover slot", () => {
   const coverBlock = popupHtml.match(/\.recommendation-cover\s*\{[\s\S]*?\}/)?.[0] ?? "";
   const coverImageBlock = popupHtml.match(/\.recommendation-cover img\s*\{[\s\S]*?\}/)?.[0] ?? "";
 
-  assert.match(previewBlock, /grid-template-columns:\s*104px\s+minmax\(0,\s*1fr\);/);
+  assert.match(previewBlock, /grid-template-columns:\s*116px\s+minmax\(0,\s*1fr\);/);
   assert.match(coverBlock, /aspect-ratio:\s*16\s*\/\s*10;/);
   assert.match(coverImageBlock, /object-fit:\s*cover;/);
 });

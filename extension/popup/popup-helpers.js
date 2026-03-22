@@ -334,6 +334,26 @@ export function getDisplayedPoolStatusSummary(status, event = null, refreshMessa
   };
 }
 
+export function getReadyRecommendationHint(status) {
+  const runtime = normalizeRuntimeStatus(status);
+  if (runtime.pool_available_count > 0) {
+    return {
+      message: `这池里还有 ${runtime.pool_available_count} 条可换，想看就点，不想看就直说。`,
+      tone: runtime.last_replenished_count > 0 ? "success" : "info",
+    };
+  }
+  if (runtime.manual_refresh_state === "running") {
+    return {
+      message: "这池先翻到头了，后台还在继续补新的。",
+      tone: "info",
+    };
+  }
+  return {
+    message: "这池先翻到头了，等后台再补点新的。",
+    tone: "info",
+  };
+}
+
 export function validateCommentInput(note) {
   if (!normalizeText(note)) {
     return {

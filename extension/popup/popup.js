@@ -8,6 +8,7 @@ import {
   getConnectionBadgeState,
   getDisplayedPoolStatusSummary,
   getNextExpandedCognitionIndex,
+  getReadyRecommendationHint,
   getHintBannerState,
   getRuntimeRefreshSubmissionState,
   getPopupState,
@@ -715,12 +716,9 @@ function renderRecommendations(items, { append = false } = {}) {
     elements.list.replaceChildren();
   }
 
-  for (const [index, item] of items.entries()) {
+  for (const item of items) {
     const card = document.createElement("article");
     card.className = "recommendation-card";
-    if (!append && index === 0) {
-      card.classList.add("is-hero");
-    }
 
     const preview = document.createElement("button");
     preview.className = "recommendation-preview";
@@ -972,12 +970,8 @@ function renderRecommendationState(stateShape) {
   if (stateShape.kind === "ready") {
     hideRecommendationEmptyState();
     renderRecommendations(stateShape.items);
-    const unreadCount = Number(stateShape.runtime?.unread_count ?? 0);
-    if (unreadCount > 0) {
-      setHint(`刚补进 ${unreadCount} 条还没看过的新内容，想看就点，不想看就直说。`, "success");
-    } else {
-      setHint("想看就点，不想看就直说。");
-    }
+    const hint = getReadyRecommendationHint(stateShape.runtime);
+    setHint(hint.message, hint.tone);
     return;
   }
 

@@ -11,6 +11,7 @@ import {
   getConnectionBadgeState,
   getDisplayedPoolStatusSummary,
   getHintBannerState,
+  getReadyRecommendationHint,
   getNextExpandedCognitionIndex,
   getRuntimeRefreshSubmissionState,
   getSubmissionProgressMessage,
@@ -230,6 +231,38 @@ test("getPoolStatusSummary shows enough-stock copy when pool is already full", (
       available: "还有 155 条可换",
       replenished: "这会儿先不补货",
       topics: "先把这一池给你慢慢换开",
+    },
+  );
+});
+
+test("getReadyRecommendationHint prefers pool inventory over unread history", () => {
+  assert.deepEqual(
+    getReadyRecommendationHint({
+      initialized: true,
+      unread_count: 3195,
+      pool_available_count: 28,
+      manual_refresh_state: "idle",
+      last_replenished_count: 6,
+    }),
+    {
+      message: "这池里还有 28 条可换，想看就点，不想看就直说。",
+      tone: "success",
+    },
+  );
+});
+
+test("getReadyRecommendationHint explains empty pool while refresh is still running", () => {
+  assert.deepEqual(
+    getReadyRecommendationHint({
+      initialized: true,
+      unread_count: 3195,
+      pool_available_count: 0,
+      manual_refresh_state: "running",
+      last_replenished_count: 0,
+    }),
+    {
+      message: "这池先翻到头了，后台还在继续补新的。",
+      tone: "info",
     },
   );
 });

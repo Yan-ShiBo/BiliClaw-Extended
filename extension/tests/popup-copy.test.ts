@@ -12,6 +12,7 @@ test("popup copy uses a more native bilibili-style voice in key entry points", (
   assert.match(popupHtml, /这几条，你大概会点开/);
   assert.match(popupHtml, /换一批/);
   assert.match(popupJs, /正在给你换一批/);
+  assert.match(popupHelpers, /这池里还有 .* 条可换，想看就点，不想看就直说。/);
   assert.match(popupHtml, /还有 0 条可换/);
   assert.match(popupHtml, /刚补进 0 条/);
   assert.match(popupHtml, /还在继续摸你的口味/);
@@ -38,5 +39,6 @@ test("popup copy uses a more native bilibili-style voice in key entry points", (
   assert.match(popupHelpers, /已经看到最近这段时间的变化了。/);
   assert.doesNotMatch(popupHtml, /class="recommendation-status-grid"/);
   assert.doesNotMatch(popupJs, /item\.source \|\| "画像观察"/);
+  assert.doesNotMatch(popupJs, /刚补进 .* 条还没看过的新内容/);
   assert.doesNotMatch(popupHtml, /对个暗号|来，唠一句/);
 });
