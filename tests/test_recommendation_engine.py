@@ -59,6 +59,29 @@ def _build_profile() -> SoulProfile:
     )
 
 
+def _seed_pool(db: Database, items: list[DiscoveredContent]) -> None:
+    """Insert DiscoveredContent items into content_cache for pool-based tests."""
+    for item in items:
+        db.cache_content(
+            item.bvid,
+            title=item.title,
+            up_name=item.up_name,
+            up_mid=item.up_mid,
+            duration=item.duration,
+            tags=item.tags,
+            topic_key=item.topic_key,
+            style_key=item.style_key,
+            description=item.description,
+            cover_url=item.cover_url,
+            view_count=item.view_count,
+            like_count=item.like_count,
+            relevance_score=item.relevance_score,
+            relevance_reason=item.relevance_reason,
+            candidate_tier=item.candidate_tier,
+            source=item.source_strategy,
+        )
+
+
 @pytest.mark.asyncio
 async def test_generate_recommendations_ranks_discovered_and_records_history() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -66,14 +89,14 @@ async def test_generate_recommendations_ranks_discovered_and_records_history() -
         db.initialize()
         engine = RecommendationEngine(llm=_DummyLLM(), database=db)
 
-        discovered = [
+        _seed_pool(db, [
             DiscoveredContent(bvid="BV1A", title="A", relevance_score=0.71),
             DiscoveredContent(bvid="BV1B", title="B", relevance_score=0.92),
             DiscoveredContent(bvid="BV1C", title="C", relevance_score=0.83),
-        ]
+        ])
 
         recommendations = await engine.generate_recommendations(
-            discovered=discovered,
+            discovered=None,
             profile=_build_profile(),
             limit=2,
         )
@@ -122,7 +145,7 @@ async def test_generate_recommendations_prefers_primary_then_relevance_then_rece
         db.initialize()
         engine = RecommendationEngine(llm=_DummyLLM(), database=db)
 
-        discovered = [
+        _seed_pool(db, [
             DiscoveredContent(
                 bvid="BV1BACK",
                 title="补货高分",
@@ -144,10 +167,10 @@ async def test_generate_recommendations_prefers_primary_then_relevance_then_rece
                 candidate_tier="primary",
                 last_scored_at="2026-03-10T08:00:00",
             ),
-        ]
+        ])
 
         recommendations = await engine.generate_recommendations(
-            discovered=discovered,
+            discovered=None,
             profile=_build_profile(),
             limit=2,
         )
@@ -196,7 +219,7 @@ async def test_generate_recommendations_limits_single_topic_dominance() -> None:
         db.initialize()
         engine = RecommendationEngine(llm=_DummyLLM(), database=db)
 
-        discovered = [
+        _seed_pool(db, [
             *[
                 DiscoveredContent(
                     bvid=f"RBUF{index}",
@@ -241,10 +264,10 @@ async def test_generate_recommendations_limits_single_topic_dominance() -> None:
                 )
                 for index in range(2)
             ],
-        ]
+        ])
 
         recommendations = await engine.generate_recommendations(
-            discovered=discovered,
+            discovered=None,
             profile=_build_profile(),
             limit=10,
         )
@@ -397,16 +420,18 @@ async def test_generate_recommendations_populates_expression_and_updates_history
         db.initialize()
         engine = RecommendationEngine(llm=_DummyLLM(), database=db)
 
+        _seed_pool(db, [
+            DiscoveredContent(
+                bvid="BV1EXP",
+                title="讲透摄影构图的底层逻辑",
+                up_name="构图实验室",
+                description="从原理出发解释构图。",
+                relevance_score=0.91,
+            ),
+        ])
+
         recommendations = await engine.generate_recommendations(
-            discovered=[
-                DiscoveredContent(
-                    bvid="BV1EXP",
-                    title="讲透摄影构图的底层逻辑",
-                    up_name="构图实验室",
-                    description="从原理出发解释构图。",
-                    relevance_score=0.91,
-                )
-            ],
+            discovered=None,
             profile=_build_profile(),
             limit=1,
         )
@@ -513,6 +538,8 @@ async def test_reshuffle_recommendations_uses_pool_reason_without_waiting_expres
             source="search",
             relevance_score=0.89,
             relevance_reason="这条会对上你最近那股想把来龙去脉搞明白的劲头。",
+            pool_expression="这条会接住你最近想把地缘链路顺清楚的状态。",
+            pool_topic_label="你最近那股想把地缘链路顺清楚的状态",
         )
         engine = RecommendationEngine(llm=_ExplodingLLM(), database=db)
 
@@ -523,12 +550,12 @@ async def test_reshuffle_recommendations_uses_pool_reason_without_waiting_expres
 
         assert len(recommendations) == 1
         assert recommendations[0].content.bvid == "BV1POOL"
-        assert recommendations[0].expression == "这条会对上你最近那股想把来龙去脉搞明白的劲头。"
-        assert recommendations[0].topic_label == "你最近那股偏理性的状态"
+        assert recommendations[0].expression == "这条会接住你最近想把地缘链路顺清楚的状态。"
+        assert recommendations[0].topic_label == "你最近那股想把地缘链路顺清楚的状态"
 
         history = db.get_recommendations(limit=10)
-        assert history[0]["expression"] == "这条会对上你最近那股想把来龙去脉搞明白的劲头。"
-        assert history[0]["topic"] == "你最近那股偏理性的状态"
+        assert history[0]["expression"] == "这条会接住你最近想把地缘链路顺清楚的状态。"
+        assert history[0]["topic"] == "你最近那股想把地缘链路顺清楚的状态"
 
 
 @pytest.mark.asyncio
@@ -559,6 +586,8 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
             source="related_chain",
             relevance_score=0.93,
             relevance_reason="第三条基础理由。",
+            pool_expression="第三条已经提前备好了推荐理由。",
+            pool_topic_label="第三条提前备好的话题",
         )
         engine = RecommendationEngine(llm=_DummyLLM(), database=db)
 
@@ -569,10 +598,45 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
         )
 
         assert [item.content.bvid for item in recommendations] == ["BV1C"]
-        assert recommendations[0].topic_label == "你最近那股偏理性的状态"
+        assert recommendations[0].expression == "第三条已经提前备好了推荐理由。"
+        assert recommendations[0].topic_label == "第三条提前备好的话题"
 
         history = db.get_recommendations(limit=10)
-        assert history[0]["topic"] == "你最近那股偏理性的状态"
+        assert history[0]["expression"] == "第三条已经提前备好了推荐理由。"
+        assert history[0]["topic"] == "第三条提前备好的话题"
+
+
+@pytest.mark.asyncio
+async def test_reshuffle_recommendations_hides_missing_precomputed_copy() -> None:
+    class _ExplodingLLM(_DummyLLM):
+        async def complete_structured_task(self, **kwargs) -> LLMResponse:  # type: ignore[override]
+            raise RuntimeError("expression generation should not run in reshuffle path")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = Database(Path(tmpdir) / "test.db")
+        db.initialize()
+        db.cache_content(
+            "BV1EMPTY",
+            title="还没生成推荐文案",
+            up_name="观察站",
+            source="search",
+            relevance_score=0.89,
+            relevance_reason="这条会对上你最近那股想把来龙去脉搞明白的劲头。",
+        )
+        engine = RecommendationEngine(llm=_ExplodingLLM(), database=db)
+
+        recommendations = await engine.reshuffle_recommendations(
+            profile=_build_profile(),
+            limit=1,
+        )
+
+        assert len(recommendations) == 1
+        assert recommendations[0].expression == ""
+        assert recommendations[0].topic_label == ""
+
+        history = db.get_recommendations(limit=10)
+        assert history[0]["expression"] == ""
+        assert history[0]["topic"] == ""
 
 
 @pytest.mark.asyncio
@@ -863,7 +927,7 @@ async def test_reshuffle_recommendations_backfills_to_requested_limit_when_style
 
 
 @pytest.mark.asyncio
-async def test_reshuffle_recommendations_uses_style_aware_fallback_expression() -> None:
+async def test_reshuffle_recommendations_hides_missing_copy_instead_of_style_fallback() -> None:
     class _ExplodingLLM(_DummyLLM):
         async def complete_structured_task(self, **kwargs) -> LLMResponse:  # type: ignore[override]
             raise RuntimeError("expression generation should not run in reshuffle path")
@@ -887,7 +951,8 @@ async def test_reshuffle_recommendations_uses_style_aware_fallback_expression() 
             limit=1,
         )
 
-        assert "机制/攻略向" in recommendations[0].expression
+        assert recommendations[0].expression == ""
+        assert recommendations[0].topic_label == ""
 
 
 @pytest.mark.asyncio

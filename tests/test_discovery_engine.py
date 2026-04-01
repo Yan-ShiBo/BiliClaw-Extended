@@ -119,6 +119,7 @@ async def test_discovery_engine_runs_registered_search_strategy() -> None:
                 ]
             }
         ),
+        llm_evaluation=False,
     )
     engine.register_strategy(strategy)
 
@@ -138,6 +139,7 @@ async def test_discovery_engine_handles_empty_strategy_results() -> None:
         SearchStrategy(
             llm_service=FakeLLMService('{"queries": []}'),
             bilibili_client=FakeBilibiliClient({}),
+            llm_evaluation=False,
         )
     )
 

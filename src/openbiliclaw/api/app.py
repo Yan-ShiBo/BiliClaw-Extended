@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from typing import Any, cast
 
@@ -36,6 +37,8 @@ from openbiliclaw.api.models import (
     RecommendationReshuffleResponse,
     RuntimeStatusResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 SOURCE_LABELS = {
     "feedback": "推荐反馈",
@@ -90,7 +93,10 @@ def create_app(
         from openbiliclaw.bilibili.api import BilibiliAPIClient
         from openbiliclaw.bilibili.auth import resolve_runtime_cookie
         from openbiliclaw.config import load_config
-        from openbiliclaw.discovery.engine import ContentDiscoveryEngine
+        from openbiliclaw.discovery.engine import (
+            ContentDiscoveryEngine,
+            DiscoveryConcurrencyController,
+        )
         from openbiliclaw.discovery.strategies.strategies import (
             ExploreStrategy,
             RelatedChainStrategy,
@@ -126,7 +132,12 @@ def create_app(
             )
         llm_service = LLMService(registry=llm_registry, memory=memory_manager)
         if recommendation_engine is None:
-            recommendation_engine = RecommendationEngine(llm=llm_service, database=database)
+            from openbiliclaw.recommendation.curator import PoolCurator
+
+            curator = PoolCurator(database)
+            recommendation_engine = RecommendationEngine(
+                llm=llm_service, database=database, curator=curator,
+            )
         bilibili_client = BilibiliAPIClient(
             cookie=resolve_runtime_cookie(
                 data_dir=config.data_path,
@@ -134,17 +145,24 @@ def create_app(
             )
         )
         if runtime_controller is None:
+            concurrency = DiscoveryConcurrencyController(
+                bilibili_request_concurrency=2,
+                llm_evaluation_concurrency=2,
+            )
             discovery_engine = ContentDiscoveryEngine(
                 llm_service=llm_service,
                 database=database,
+                concurrency=concurrency,
             )
             search_strategy = SearchStrategy(
                 llm_service=llm_service,
                 bilibili_client=bilibili_client,
+                concurrency=concurrency,
             )
             trending_strategy = TrendingStrategy(
                 bilibili_client=bilibili_client,
                 llm_service=llm_service,
+                concurrency=concurrency,
             )
             related_strategy = RelatedChainStrategy(
                 bilibili_client=bilibili_client,
@@ -152,10 +170,12 @@ def create_app(
                 memory_manager=cast("Any", memory_manager),
                 search_strategy=search_strategy,
                 trending_strategy=trending_strategy,
+                concurrency=concurrency,
             )
             explore_strategy = ExploreStrategy(
                 llm_service=llm_service,
                 bilibili_client=bilibili_client,
+                concurrency=concurrency,
             )
             discovery_engine.register_strategy(search_strategy)
             discovery_engine.register_strategy(trending_strategy)
@@ -407,6 +427,18 @@ def create_app(
             ],
         )
 
+    async def _trigger_replenishment_if_needed() -> None:
+        """Fire a background Discovery refresh when the pool runs low."""
+        curator = getattr(recommendation_engine, "_curator", None)
+        if curator is None or not hasattr(curator, "needs_replenishment"):
+            return
+        if not curator.needs_replenishment():
+            return
+        trigger = getattr(runtime_controller, "trigger_manual_refresh", None)
+        if callable(trigger):
+            logger.info("Pool low — triggering automatic replenishment")
+            asyncio.create_task(trigger())
+
     @app.post("/api/recommendations/reshuffle", response_model=RecommendationReshuffleResponse)
     async def reshuffle_recommendations() -> RecommendationReshuffleResponse:
         if recommendation_engine is None or soul_engine is None:
@@ -416,6 +448,7 @@ def create_app(
         except Exception:
             return RecommendationReshuffleResponse(items=[])
         items = await recommendation_engine.reshuffle_recommendations(profile=profile, limit=10)
+        await _trigger_replenishment_if_needed()
         return RecommendationReshuffleResponse(items=_serialize_recommendation_items(items))
 
     @app.post("/api/recommendations/append", response_model=RecommendationReshuffleResponse)
@@ -433,6 +466,7 @@ def create_app(
             excluded_bvids=payload.excluded_bvids,
             limit=10,
         )
+        await _trigger_replenishment_if_needed()
         return RecommendationReshuffleResponse(items=_serialize_recommendation_items(items))
 
     @app.post("/api/recommendations/refresh", response_model=RecommendationRefreshResponse)

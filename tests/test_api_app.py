@@ -81,6 +81,150 @@ class TestBackendAPI:
         assert created_memories[0].initialized == 1
         assert created_memories[0].database is created_databases[0]
 
+    def test_create_app_bootstrap_wires_discovery_concurrency_controller(
+        self,
+        monkeypatch,
+    ) -> None:
+        from types import SimpleNamespace
+
+        import openbiliclaw.api.app as app_module
+        import openbiliclaw.bilibili.api as bilibili_api_module
+        import openbiliclaw.discovery.engine as discovery_engine_module
+        import openbiliclaw.discovery.strategies.strategies as strategies_module
+        import openbiliclaw.llm.service as llm_service_module
+        import openbiliclaw.memory.manager as memory_module
+        import openbiliclaw.recommendation.engine as recommendation_module
+        import openbiliclaw.runtime.account_sync as account_sync_module
+        import openbiliclaw.runtime.events as runtime_events_module
+        import openbiliclaw.runtime.refresh as refresh_module
+        import openbiliclaw.soul.dialogue as dialogue_module
+        import openbiliclaw.soul.engine as soul_engine_module
+        import openbiliclaw.storage.database as database_module
+
+        captured: dict[str, object] = {}
+
+        class FakeDiscoveryConcurrencyController:
+            def __init__(
+                self,
+                *,
+                bilibili_request_concurrency: int,
+                llm_evaluation_concurrency: int,
+            ) -> None:
+                captured["controller"] = self
+                captured["bilibili_request_concurrency"] = bilibili_request_concurrency
+                captured["llm_evaluation_concurrency"] = llm_evaluation_concurrency
+
+        class FakeContentDiscoveryEngine:
+            def __init__(self, *, llm_service: object, database: object, concurrency=None) -> None:
+                captured["engine_concurrency"] = concurrency
+
+            def register_strategy(self, strategy: object) -> None:
+                return None
+
+        class _FakeStrategy:
+            def __init__(self, *args, concurrency=None, **kwargs) -> None:
+                captured.setdefault("strategy_concurrency", []).append(concurrency)
+
+        class FakeDatabase:
+            def __init__(self, path) -> None:
+                self.path = path
+
+            def initialize(self) -> None:
+                return None
+
+        class FakeMemoryManager:
+            def __init__(self, data_path, database=None) -> None:
+                self.data_path = data_path
+                self.database = database
+
+            def initialize(self) -> None:
+                return None
+
+        class FakeLLMService:
+            def __init__(self, *, registry: object, memory: object) -> None:
+                self.registry = registry
+                self.memory = memory
+
+        class FakeBilibiliClient:
+            def __init__(self, *, cookie: str) -> None:
+                self.cookie = cookie
+
+        class FakeSoulEngine:
+            def __init__(self, *, llm: object, memory: object) -> None:
+                self.llm = llm
+                self.memory = memory
+
+        class FakeRecommendationEngine:
+            def __init__(self, *, llm: object, database: object, curator: object = None) -> None:
+                self.llm = llm
+                self.database = database
+
+        class FakeRuntimeController:
+            def __init__(self, **kwargs) -> None:
+                captured["runtime_controller_kwargs"] = kwargs
+
+        class FakeAccountSyncService:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeRuntimeEventHub:
+            pass
+
+        class FakeDialogue:
+            def __init__(
+                self,
+                *,
+                llm: object | None = None,
+                soul_engine: object,
+                llm_service: object | None = None,
+                session: str,
+            ) -> None:
+                self.llm = llm
+                self.soul_engine = soul_engine
+                self.llm_service = llm_service
+                self.session = session
+
+        fake_config = SimpleNamespace(
+            data_path=Path("/tmp/openbiliclaw-test-data"),
+            bilibili=SimpleNamespace(cookie=""),
+            scheduler=SimpleNamespace(pool_target_count=300, account_sync_interval_hours=24),
+        )
+
+        monkeypatch.setattr("openbiliclaw.config.load_config", lambda: fake_config)
+        monkeypatch.setattr("openbiliclaw.llm.build_llm_registry", lambda config: "registry")
+        monkeypatch.setattr("openbiliclaw.bilibili.auth.resolve_runtime_cookie", lambda **_: "")
+        monkeypatch.setattr(
+            discovery_engine_module,
+            "DiscoveryConcurrencyController",
+            FakeDiscoveryConcurrencyController,
+        )
+        monkeypatch.setattr(
+            discovery_engine_module,
+            "ContentDiscoveryEngine",
+            FakeContentDiscoveryEngine,
+        )
+        monkeypatch.setattr(strategies_module, "SearchStrategy", _FakeStrategy)
+        monkeypatch.setattr(strategies_module, "TrendingStrategy", _FakeStrategy)
+        monkeypatch.setattr(strategies_module, "RelatedChainStrategy", _FakeStrategy)
+        monkeypatch.setattr(strategies_module, "ExploreStrategy", _FakeStrategy)
+        monkeypatch.setattr(database_module, "Database", FakeDatabase)
+        monkeypatch.setattr(memory_module, "MemoryManager", FakeMemoryManager)
+        monkeypatch.setattr(llm_service_module, "LLMService", FakeLLMService)
+        monkeypatch.setattr(bilibili_api_module, "BilibiliAPIClient", FakeBilibiliClient)
+        monkeypatch.setattr(soul_engine_module, "SoulEngine", FakeSoulEngine)
+        monkeypatch.setattr(recommendation_module, "RecommendationEngine", FakeRecommendationEngine)
+        monkeypatch.setattr(refresh_module, "ContinuousRefreshController", FakeRuntimeController)
+        monkeypatch.setattr(account_sync_module, "AccountSyncService", FakeAccountSyncService)
+        monkeypatch.setattr(runtime_events_module, "RuntimeEventHub", FakeRuntimeEventHub)
+        monkeypatch.setattr(dialogue_module, "SocraticDialogue", FakeDialogue)
+
+        app_module.create_app()
+
+        assert captured["bilibili_request_concurrency"] == 2
+        assert captured["llm_evaluation_concurrency"] == 2
+        assert captured["engine_concurrency"] is captured["controller"]
+        assert all(item is captured["controller"] for item in captured["strategy_concurrency"])
+
     def test_health_endpoint_returns_ok(self) -> None:
         from fastapi.testclient import TestClient
 

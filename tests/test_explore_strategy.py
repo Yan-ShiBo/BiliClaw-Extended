@@ -153,6 +153,75 @@ async def test_explore_strategy_generates_and_filters_domains() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explore_strategy_prioritizes_interest_anchored_domains() -> None:
+    from openbiliclaw.discovery.strategies.strategies import ExploreStrategy
+
+    llm_service = FakeLLMService(
+        [
+            """
+            {
+              "domains": [
+                {
+                  "domain": "纪录片幕后工艺",
+                  "why_it_might_resonate": "你会想把纪录片质感背后的工艺看明白。",
+                  "novelty_level": 0.62,
+                  "queries": ["纪录片 幕后 工艺"]
+                },
+                {
+                  "domain": "历史事件深度复盘",
+                  "why_it_might_resonate": "你会把历史事件背后的因果链一路看透。",
+                  "novelty_level": 0.64,
+                  "queries": ["历史 事件 复盘"]
+                },
+                {
+                  "domain": "排水系统工程科普",
+                  "why_it_might_resonate": "你喜欢把系统原理讲清楚的内容。",
+                  "novelty_level": 0.66,
+                  "queries": ["排水 系统 科普"]
+                },
+                {
+                  "domain": "电影拟音幕后",
+                  "why_it_might_resonate": "你会对幕后工艺感兴趣。",
+                  "novelty_level": 0.65,
+                  "queries": ["电影 拟音 幕后"]
+                }
+              ]
+            }
+            """
+        ]
+    )
+    bilibili_client = FakeBilibiliClient(
+        {
+            "纪录片 幕后 工艺": [
+                {"bvid": "BV1A", "title": "纪录片幕后", "author": "UP1", "mid": 1}
+            ],
+            "历史 事件 复盘": [
+                {"bvid": "BV1B", "title": "历史复盘", "author": "UP2", "mid": 2}
+            ],
+            "排水 系统 科普": [
+                {"bvid": "BV1C", "title": "排水系统", "author": "UP3", "mid": 3}
+            ],
+            "电影 拟音 幕后": [
+                {"bvid": "BV1D", "title": "电影拟音", "author": "UP4", "mid": 4}
+            ],
+        }
+    )
+
+    strategy = ExploreStrategy(
+        llm_service=llm_service,
+        bilibili_client=bilibili_client,
+        score_threshold=0.0,
+        max_domains=3,
+    )
+    results = await strategy.discover(_build_profile(), limit=20)
+
+    assert bilibili_client.calls == ["纪录片 幕后 工艺", "历史 事件 复盘", "排水 系统 科普"]
+    assert {item.bvid for item in results} == {"BV1A", "BV1B", "BV1C"}
+    assert "BV1D" not in {item.bvid for item in results}
+    assert results[-1].bvid == "BV1C"
+
+
+@pytest.mark.asyncio
 async def test_explore_strategy_applies_exploration_bonus() -> None:
     from openbiliclaw.discovery.strategies.strategies import ExploreStrategy
 

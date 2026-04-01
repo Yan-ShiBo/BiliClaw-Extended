@@ -36,6 +36,7 @@ class SupportsEventDatabase(Protocol):
     def count_pool_candidates(self) -> int: ...
     def count_pool_candidates_by_source(self) -> dict[str, int]: ...
     def trim_explore_cluster_overflow(self, *, max_per_cluster: int = 3) -> int: ...
+    def evict_stale_pool_items(self, *, max_age_days: int = 14) -> int: ...
     def get_notification_candidate(
         self,
         *,
@@ -373,6 +374,7 @@ class ContinuousRefreshController:
 
         if flattened_strategies:
             self.database.trim_explore_cluster_overflow(max_per_cluster=3)
+            self.database.evict_stale_pool_items(max_age_days=14)
             await self.recommendation_engine.precompute_pool_copy(
                 profile=profile,
                 limit=_MAX_DISCOVERY_BACKFILL_PER_REFRESH,

@@ -59,7 +59,12 @@ def build_openclaw_adapter_services() -> OpenClawAdapterServices:
         memory=memory_manager,
     )
     llm_service = LLMService(registry=llm_registry, memory=memory_manager)
-    recommendation_engine = RecommendationEngine(llm=llm_service, database=database)
+    from openbiliclaw.recommendation.curator import PoolCurator
+
+    curator = PoolCurator(database)
+    recommendation_engine = RecommendationEngine(
+        llm=llm_service, database=database, curator=curator,
+    )
     bilibili_client = BilibiliAPIClient(
         cookie=resolve_runtime_cookie(
             data_dir=config.data_path,

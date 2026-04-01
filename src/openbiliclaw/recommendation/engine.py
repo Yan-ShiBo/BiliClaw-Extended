@@ -6,14 +6,16 @@ to the user in a warm, friend-like manner with deep personal insights.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
+from openbiliclaw.recommendation.curator import PoolCurator
 from openbiliclaw.soul.tone import build_tone_profile
 
 if TYPE_CHECKING:
@@ -75,9 +77,141 @@ class RecommendationEngine:
     - Personal insights connecting content to the user's soul
     """
 
-    def __init__(self, llm: SupportsCoreMemoryTask, database: Database) -> None:
+    def __init__(
+        self,
+        llm: SupportsCoreMemoryTask,
+        database: Database,
+        *,
+        curator: PoolCurator | None = None,
+    ) -> None:
         self._llm = llm
         self._database = database
+        self._curator = curator
+
+    async def serve(
+        self,
+        profile: SoulProfile,
+        *,
+        limit: int = 5,
+        excluded_bvids: frozenset[str] = frozenset(),
+        expression_mode: Literal["realtime", "precomputed"] = "precomputed",
+    ) -> list[Recommendation]:
+        """Unified recommendation entry point — always picks from the pool.
+
+        All recommendation paths (generate, reshuffle, append) converge here.
+        The engine is fully decoupled from Discovery: it only reads from the
+        candidate pool in content_cache.
+
+        Args:
+            profile: User's soul profile for personalization.
+            limit: Maximum number of recommendations.
+            excluded_bvids: BVIDs already shown to the user (for pagination).
+            expression_mode: ``"precomputed"`` uses pool-cached copy (fast),
+                ``"realtime"`` generates fresh expressions via LLM (slow but
+                higher quality).
+
+        Returns:
+            List of personalized recommendations.
+        """
+        multiplier = 4 if excluded_bvids else 3
+        candidates = self._load_pool_candidates(limit=max(limit * multiplier, 40))
+        if excluded_bvids:
+            candidates = [c for c in candidates if c.bvid not in excluded_bvids]
+        candidates = self._exclude_recently_viewed(candidates)
+        label = "realtime" if expression_mode == "realtime" else "pool"
+        logger.info(
+            "Recommendation candidate summary (serve/%s): %s",
+            label,
+            json.dumps(self._build_debug_summary(candidates), ensure_ascii=False),
+        )
+
+        # Curator-based scoring (recommendation-side, independent of Discovery)
+        score_override: dict[str, float] | None = None
+        if self._curator is not None:
+            context = self._curator.build_context()
+            score_override = self._curator.score_candidates(candidates, context)
+
+        ranked = self._select_diversified_batch(
+            candidates, limit=limit, score_override=score_override,
+        )
+        logger.info(
+            "Recommendation picked summary (serve/%s): %s",
+            label,
+            json.dumps(self._build_debug_summary(ranked), ensure_ascii=False),
+        )
+
+        recommendations: list[Recommendation] = []
+        shown_bvids: list[str] = []
+        for item in ranked:
+            rec = Recommendation(
+                content=item,
+                confidence=item.relevance_score,
+                presented=False,
+            )
+            if expression_mode == "precomputed":
+                rec.expression = item.pool_expression.strip()
+                rec.topic_label = item.pool_topic_label.strip()
+            rec.recommendation_id = self._database.insert_recommendation(
+                item.bvid,
+                confidence=rec.confidence,
+                expression=rec.expression,
+                topic=rec.topic_label,
+                presented=0,
+            )
+            if expression_mode == "realtime":
+                rec.expression, rec.topic_label = await self.generate_expression(
+                    item, profile,
+                )
+                self._database.update_recommendation_content(
+                    rec.recommendation_id,
+                    expression=rec.expression,
+                    topic=rec.topic_label,
+                )
+            recommendations.append(rec)
+            shown_bvids.append(item.bvid)
+
+        self._database.mark_pool_items_shown(shown_bvids)
+        return recommendations
+
+    async def precompute_pool_copy(
+        self,
+        *,
+        profile: SoulProfile,
+        limit: int = 20,
+    ) -> int:
+        """Precompute fast-path popup copy for fresh pool candidates."""
+        candidates = self._load_pool_candidates_needing_copy(limit=max(0, limit))
+        if not candidates:
+            return 0
+
+        semaphore = asyncio.Semaphore(4)
+
+        async def generate_and_store(item: DiscoveredContent) -> int:
+            async with semaphore:
+                generated = await self._try_generate_expression(item, profile)
+            if generated is None:
+                return 0
+            expression, topic_label = generated
+            self._database.update_pool_copy(
+                item.bvid,
+                expression=expression,
+                topic_label=topic_label,
+            )
+            item.pool_expression = expression
+            item.pool_topic_label = topic_label
+            return 1
+
+        results = await asyncio.gather(
+            *(generate_and_store(item) for item in candidates),
+            return_exceptions=True,
+        )
+        completed = 0
+        for item, result in zip(candidates, results, strict=False):
+            if isinstance(result, BaseException):
+                logger.exception("Failed to precompute pool copy: %s", item.bvid, exc_info=result)
+                continue
+            completed += result
+        return completed
 
     async def generate_recommendations(
         self,
@@ -85,58 +219,13 @@ class RecommendationEngine:
         profile: SoulProfile,
         limit: int = 10,
     ) -> list[Recommendation]:
-        """Generate friend-style recommendations from discovered content.
+        """Generate friend-style recommendations with real-time LLM expressions.
 
-        Args:
-            discovered: Content discovered by the discovery engine.
-            profile: User's soul profile for personalization.
-            limit: Maximum number of recommendations.
-
-        Returns:
-            List of personalized recommendations.
+        Delegates to :meth:`serve` with ``expression_mode="realtime"``.
+        The *discovered* parameter is accepted for backward compatibility but
+        ignored — the engine always picks from the candidate pool.
         """
-        candidates = (
-            self._normalize_discovered(discovered)
-            if discovered is not None
-            else self._load_unrecommended_content(limit=max(limit * 3, 20))
-        )
-        candidates = self._exclude_recently_viewed(candidates)
-        logger.info(
-            "Recommendation candidate summary (generate): %s",
-            json.dumps(self._build_debug_summary(candidates), ensure_ascii=False),
-        )
-        ranked = self._select_diversified_batch(candidates, limit=limit)
-        logger.info(
-            "Recommendation picked summary (generate): %s",
-            json.dumps(self._build_debug_summary(ranked), ensure_ascii=False),
-        )
-
-        recommendations = [
-            Recommendation(
-                content=item,
-                confidence=item.relevance_score,
-                presented=False,
-            )
-            for item in ranked
-        ]
-        for item in recommendations:
-            item.recommendation_id = self._database.insert_recommendation(
-                item.content.bvid,
-                confidence=item.confidence,
-                expression=item.expression,
-                topic=item.topic_label,
-                presented=0,
-            )
-            item.expression, item.topic_label = await self.generate_expression(
-                item.content,
-                profile,
-            )
-            self._database.update_recommendation_content(
-                item.recommendation_id,
-                expression=item.expression,
-                topic=item.topic_label,
-            )
-        return recommendations
+        return await self.serve(profile, limit=limit, expression_mode="realtime")
 
     async def reshuffle_recommendations(
         self,
@@ -146,45 +235,9 @@ class RecommendationEngine:
     ) -> list[Recommendation]:
         """Instantly pick a new batch from the discovery pool.
 
-        This path is intentionally fast: it does not wait for friend-style
-        expression generation and falls back to pool relevance reasons.
+        Delegates to :meth:`serve` with ``expression_mode="precomputed"``.
         """
-        candidates = self._load_pool_candidates(limit=max(limit * 3, 20))
-        candidates = self._exclude_recently_viewed(candidates)
-        logger.info(
-            "Recommendation candidate summary (reshuffle): %s",
-            json.dumps(self._build_debug_summary(candidates), ensure_ascii=False),
-        )
-        ranked = self._select_diversified_batch(candidates, limit=limit)
-        logger.info(
-            "Recommendation picked summary (reshuffle): %s",
-            json.dumps(self._build_debug_summary(ranked), ensure_ascii=False),
-        )
-        recommendations: list[Recommendation] = []
-        shown_bvids: list[str] = []
-        topic_label = self._fallback_topic_label(profile)
-
-        for item in ranked:
-            expression = item.relevance_reason.strip() or self._fallback_expression(item)
-            recommendation = Recommendation(
-                content=item,
-                confidence=item.relevance_score,
-                presented=False,
-                expression=expression,
-                topic_label=topic_label,
-            )
-            recommendation.recommendation_id = self._database.insert_recommendation(
-                item.bvid,
-                confidence=recommendation.confidence,
-                expression=recommendation.expression,
-                topic=recommendation.topic_label,
-                presented=0,
-            )
-            recommendations.append(recommendation)
-            shown_bvids.append(item.bvid)
-
-        self._database.mark_pool_items_shown(shown_bvids)
-        return recommendations
+        return await self.serve(profile, limit=limit, expression_mode="precomputed")
 
     async def append_recommendations(
         self,
@@ -193,45 +246,17 @@ class RecommendationEngine:
         excluded_bvids: list[str],
         limit: int = 10,
     ) -> list[Recommendation]:
-        """Append another page of recommendations from the discovery pool."""
-        excluded = {item.strip() for item in excluded_bvids if item and item.strip()}
-        candidates = self._load_pool_candidates(limit=max(limit * 4, 40))
-        candidates = [item for item in candidates if item.bvid not in excluded]
-        candidates = self._exclude_recently_viewed(candidates)
-        logger.info(
-            "Recommendation candidate summary (append): %s",
-            json.dumps(self._build_debug_summary(candidates), ensure_ascii=False),
-        )
-        ranked = self._select_diversified_batch(candidates, limit=limit)
-        logger.info(
-            "Recommendation picked summary (append): %s",
-            json.dumps(self._build_debug_summary(ranked), ensure_ascii=False),
-        )
+        """Append another page of recommendations from the discovery pool.
 
-        recommendations: list[Recommendation] = []
-        shown_bvids: list[str] = []
-        topic_label = self._fallback_topic_label(profile)
-        for item in ranked:
-            expression = item.relevance_reason.strip() or self._fallback_expression(item)
-            recommendation = Recommendation(
-                content=item,
-                confidence=item.relevance_score,
-                presented=False,
-                expression=expression,
-                topic_label=topic_label,
-            )
-            recommendation.recommendation_id = self._database.insert_recommendation(
-                item.bvid,
-                confidence=recommendation.confidence,
-                expression=recommendation.expression,
-                topic=recommendation.topic_label,
-                presented=0,
-            )
-            recommendations.append(recommendation)
-            shown_bvids.append(item.bvid)
-
-        self._database.mark_pool_items_shown(shown_bvids)
-        return recommendations
+        Delegates to :meth:`serve` with excluded BVIDs for pagination.
+        """
+        excluded = frozenset(b.strip() for b in excluded_bvids if b and b.strip())
+        return await self.serve(
+            profile,
+            limit=limit,
+            excluded_bvids=excluded,
+            expression_mode="precomputed",
+        )
 
     async def generate_personal_topic(
         self,
@@ -271,6 +296,17 @@ class RecommendationEngine:
         Returns:
             Expression text and a lightly personalized topic label.
         """
+        generated = await self._try_generate_expression(content, profile)
+        if generated is not None:
+            return generated
+        return self._fallback_expression(content), self._fallback_topic_label(profile)
+
+    async def _try_generate_expression(
+        self,
+        content: DiscoveredContent,
+        profile: SoulProfile,
+    ) -> tuple[str, str] | None:
+        """Try to generate personalized copy without applying a generic fallback."""
         from openbiliclaw.llm.prompts import build_recommendation_expression_prompt
 
         tone_profile = build_tone_profile(
@@ -314,10 +350,10 @@ class RecommendationEngine:
             expression = str(payload.get("expression", "")).strip()
             topic_label = str(payload.get("topic_label", "")).strip()
             if expression and topic_label:
-                return expression, topic_label
+                return (expression, topic_label)
         except Exception:
             logger.exception("Failed to generate recommendation expression: %s", content.bvid)
-        return self._fallback_expression(content), self._fallback_topic_label(profile)
+        return None
 
     def mark_presented(self, recommendation_ids: list[int]) -> None:
         """Mark recommendation rows as presented."""
@@ -343,12 +379,6 @@ class RecommendationEngine:
     def get_recommendation(self, recommendation_id: int) -> dict[str, object] | None:
         """Load a recommendation row for CLI or feedback workflows."""
         return self._database.get_recommendation_by_id(recommendation_id)
-
-    @staticmethod
-    def _normalize_discovered(
-        discovered: list[DiscoveredContent],
-    ) -> list[DiscoveredContent]:
-        return list(discovered)
 
     @staticmethod
     def _ranking_key(item: DiscoveredContent) -> tuple[int, float, float, int, str]:
@@ -402,8 +432,15 @@ class RecommendationEngine:
         candidates: list[DiscoveredContent],
         *,
         limit: int,
+        score_override: dict[str, float] | None = None,
     ) -> list[DiscoveredContent]:
-        ranked = sorted(candidates, key=cls._ranking_key)
+        if score_override:
+            ranked = sorted(
+                candidates,
+                key=lambda item: -score_override.get(item.bvid, 0.0),
+            )
+        else:
+            ranked = sorted(candidates, key=cls._ranking_key)
         if limit <= 1 or len(ranked) <= 1:
             return ranked[:limit]
 
@@ -589,34 +626,6 @@ class RecommendationEngine:
     def _source_cap(limit: int) -> int:
         return 2 if limit <= 5 else 3
 
-    def _load_unrecommended_content(self, *, limit: int) -> list[DiscoveredContent]:
-        from openbiliclaw.discovery.engine import DiscoveredContent
-
-        rows = self._database.get_unrecommended_content(limit=limit)
-        return [
-            DiscoveredContent(
-                bvid=str(row.get("bvid", "")),
-                title=str(row.get("title", "")),
-                up_name=str(row.get("up_name", "")),
-                up_mid=int(row.get("up_mid", 0) or 0),
-                duration=int(row.get("duration", 0) or 0),
-                description=str(row.get("description", "")),
-                cover_url=str(row.get("cover_url", "")),
-                view_count=int(row.get("view_count", 0) or 0),
-                like_count=int(row.get("like_count", 0) or 0),
-                tags=self._parse_tags(row.get("tags", "[]")),
-                topic_key=str(row.get("topic_key", "")),
-                style_key=str(row.get("style_key", "")),
-                source_strategy=str(row.get("source", "")),
-                relevance_score=float(row.get("relevance_score", 0.0) or 0.0),
-                relevance_reason=str(row.get("relevance_reason", "")),
-                candidate_tier=str(row.get("candidate_tier", "primary") or "primary"),
-                discovered_at=str(row.get("discovered_at", "")),
-                last_scored_at=str(row.get("last_scored_at", "")),
-            )
-            for row in rows
-        ]
-
     def _load_pool_candidates(self, *, limit: int) -> list[DiscoveredContent]:
         from openbiliclaw.discovery.engine import DiscoveredContent
 
@@ -638,6 +647,38 @@ class RecommendationEngine:
                 source_strategy=str(row.get("source", "")),
                 relevance_score=float(row.get("relevance_score", 0.0) or 0.0),
                 relevance_reason=str(row.get("relevance_reason", "")),
+                pool_expression=str(row.get("pool_expression", "")),
+                pool_topic_label=str(row.get("pool_topic_label", "")),
+                candidate_tier=str(row.get("candidate_tier", "primary") or "primary"),
+                discovered_at=str(row.get("discovered_at", "")),
+                last_scored_at=str(row.get("last_scored_at", "")),
+            )
+            for row in rows
+        ]
+
+    def _load_pool_candidates_needing_copy(self, *, limit: int) -> list[DiscoveredContent]:
+        from openbiliclaw.discovery.engine import DiscoveredContent
+
+        rows = self._database.get_pool_candidates_needing_copy(limit=limit)
+        return [
+            DiscoveredContent(
+                bvid=str(row.get("bvid", "")),
+                title=str(row.get("title", "")),
+                up_name=str(row.get("up_name", "")),
+                up_mid=int(row.get("up_mid", 0) or 0),
+                duration=int(row.get("duration", 0) or 0),
+                description=str(row.get("description", "")),
+                cover_url=str(row.get("cover_url", "")),
+                view_count=int(row.get("view_count", 0) or 0),
+                like_count=int(row.get("like_count", 0) or 0),
+                tags=self._parse_tags(row.get("tags", "[]")),
+                topic_key=str(row.get("topic_key", "")),
+                style_key=str(row.get("style_key", "")),
+                source_strategy=str(row.get("source", "")),
+                relevance_score=float(row.get("relevance_score", 0.0) or 0.0),
+                relevance_reason=str(row.get("relevance_reason", "")),
+                pool_expression=str(row.get("pool_expression", "")),
+                pool_topic_label=str(row.get("pool_topic_label", "")),
                 candidate_tier=str(row.get("candidate_tier", "primary") or "primary"),
                 discovered_at=str(row.get("discovered_at", "")),
                 last_scored_at=str(row.get("last_scored_at", "")),

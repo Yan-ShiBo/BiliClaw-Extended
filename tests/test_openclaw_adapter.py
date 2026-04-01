@@ -494,7 +494,7 @@ def test_build_openclaw_adapter_services_reuses_shared_database(monkeypatch) -> 
             self.memory = memory
 
     class FakeRecommendationEngine:
-        def __init__(self, *, llm: object, database: object) -> None:
+        def __init__(self, *, llm: object, database: object, curator: object = None) -> None:
             self.llm = llm
             self.database = database
 

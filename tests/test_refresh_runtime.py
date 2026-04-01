@@ -78,6 +78,9 @@ class _FakeDatabase:
     def trim_explore_cluster_overflow(self, *, max_per_cluster: int = 3) -> int:
         return 0
 
+    def evict_stale_pool_items(self, *, max_age_days: int = 14) -> int:
+        return 0
+
 class _FakeSoulEngine:
     async def get_profile(self) -> dict[str, object]:
         return {"profile": "ok"}

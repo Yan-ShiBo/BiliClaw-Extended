@@ -133,6 +133,7 @@ async def test_search_strategy_uses_llm_queries_and_searches_each_query() -> Non
     strategy = SearchStrategy(
         llm_service=llm_service,
         bilibili_client=bilibili_client,
+        llm_evaluation=False,
     )
     results = await strategy.discover(_build_profile(), limit=20)
 
@@ -163,10 +164,46 @@ async def test_search_strategy_deduplicates_results_by_bvid() -> None:
         }
     )
 
-    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client)
+    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client, llm_evaluation=False)
     results = await strategy.discover(_build_profile())
 
     assert [item.bvid for item in results] == ["BV1A", "BV1B", "BV1C"]
+
+
+@pytest.mark.asyncio
+async def test_search_strategy_boosts_high_weight_interest_matches() -> None:
+    from openbiliclaw.discovery.strategies.strategies import SearchStrategy
+
+    llm_service = FakeLLMService('{"queries": ["纪录片 原理", "陌生 主题"]}')
+    bilibili_client = FakeBilibiliClient(
+        {
+            "纪录片 原理": [
+                {
+                    "bvid": "BV1A",
+                    "title": "纪录片原理讲透",
+                    "author": "UP1",
+                    "mid": 1,
+                    "description": "把纪录片结构一次讲清楚",
+                }
+            ],
+            "陌生 主题": [
+                {
+                    "bvid": "BV1B",
+                    "title": "陌生主题速看",
+                    "author": "UP2",
+                    "mid": 2,
+                    "description": "泛兴趣快餐内容",
+                }
+            ],
+        }
+    )
+
+    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client, llm_evaluation=False)
+    results = await strategy.discover(_build_profile(), limit=20)
+
+    assert [item.bvid for item in results] == ["BV1A", "BV1B"]
+    assert results[0].relevance_score >= 0.5
+    assert results[0].relevance_score > results[1].relevance_score
 
 
 @pytest.mark.asyncio
@@ -181,7 +218,7 @@ async def test_search_strategy_falls_back_when_llm_returns_invalid_json() -> Non
         }
     )
 
-    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client)
+    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client, llm_evaluation=False)
     results = await strategy.discover(_build_profile())
 
     assert bilibili_client.calls[:2] == ["纪录片", "摄影"]
@@ -200,7 +237,7 @@ async def test_search_strategy_continues_when_single_query_fails() -> None:
         failing_queries={"纪录片"},
     )
 
-    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client)
+    strategy = SearchStrategy(llm_service=llm_service, bilibili_client=bilibili_client, llm_evaluation=False)
     results = await strategy.discover(_build_profile())
 
     assert bilibili_client.calls == ["纪录片", "摄影"]
@@ -226,6 +263,7 @@ async def test_search_strategy_uses_bounded_request_concurrency_and_keeps_limit(
             bilibili_request_concurrency=2,
             llm_evaluation_concurrency=2,
         ),
+        llm_evaluation=False,
     )
 
     results = await strategy.discover(_build_profile(), limit=2)

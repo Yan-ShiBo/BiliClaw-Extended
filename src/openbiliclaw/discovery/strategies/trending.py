@@ -1,0 +1,197 @@
+"""Trending/ranking content discovery strategy."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
+
+from openbiliclaw.discovery.engine import (
+    ContentDiscoveryEngine,
+    DiscoveredContent,
+    DiscoveryConcurrencyController,
+    DiscoveryStrategy,
+    SupportsStructuredTask,
+)
+from openbiliclaw.discovery.strategies._utils import (
+    SupportsRankingClient,
+    _gather_bounded,
+    build_profile_summary,
+    clean_text,
+    parse_duration,
+    to_int,
+)
+
+if TYPE_CHECKING:
+    from openbiliclaw.soul.profile import SoulProfile
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TrendingStrategy(DiscoveryStrategy):
+    """Discover content from trending/ranking pages."""
+
+    bilibili_client: SupportsRankingClient
+    llm_service: SupportsStructuredTask
+    concurrency: DiscoveryConcurrencyController | None = None
+    score_threshold: float = 0.65
+    max_related_rids: int = 4
+    default_rids: tuple[int, ...] = (36, 188, 181, 119)
+    last_intermediates: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        return "trending"
+
+    def create_backfill_strategy(self) -> DiscoveryStrategy | None:
+        if self.score_threshold <= 0.58:
+            return None
+        return replace(
+            self,
+            score_threshold=max(0.58, round(self.score_threshold - 0.07, 2)),
+            last_intermediates={},
+        )
+
+    async def discover(self, profile: SoulProfile, limit: int = 20) -> list[DiscoveredContent]:
+        """Scan trending and ranking content, filter by soul relevance.
+
+        Args:
+            profile: User soul profile.
+            limit: Maximum results.
+
+        Returns:
+            Discovered content list.
+        """
+        evaluator = ContentDiscoveryEngine(
+            llm_service=self.llm_service,
+            concurrency=self.concurrency,
+        )
+        rids = await self._select_rids(profile)
+        self.last_intermediates = {"rids": list(rids)}
+        runner = self.concurrency.run_bilibili if self.concurrency is not None else None
+        ranking_outcomes = await _gather_bounded(
+            [self.bilibili_client.get_ranking(rid) for rid in rids],
+            runner=runner,
+        )
+        candidates: list[DiscoveredContent] = []
+        seen_bvids: set[str] = set()
+
+        for rid, outcome in zip(rids, ranking_outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.exception("Trending ranking request failed: rid=%s", rid, exc_info=outcome)
+                continue
+            if not isinstance(outcome, list):
+                continue
+            for item in outcome:
+                content = self._map_ranking_item(item)
+                if content is None or content.bvid in seen_bvids:
+                    continue
+                seen_bvids.add(content.bvid)
+                candidates.append(content)
+
+        scores = await asyncio.gather(
+            *(evaluator.evaluate_content(content, profile) for content in candidates)
+        )
+        results: list[DiscoveredContent] = []
+        for content, score in zip(candidates, scores, strict=True):
+            if score < self.score_threshold:
+                continue
+            results.append(content)
+            if len(results) >= limit:
+                return results
+
+        return results
+
+    async def _select_rids(self, profile: SoulProfile) -> list[int]:
+        from openbiliclaw.llm.prompts import build_trending_rids_prompt
+
+        messages = build_trending_rids_prompt(
+            profile_summary=build_profile_summary(profile)
+        )
+        try:
+            response = await self.llm_service.complete_structured_task(
+                system_instruction=messages[0]["content"],
+                user_input=messages[1]["content"],
+            )
+            parsed = json.loads(str(getattr(response, "content", "")).strip())
+            if isinstance(parsed, dict) and isinstance(parsed.get("rids"), list):
+                selected = [
+                    to_int(item)
+                    for item in parsed["rids"]
+                    if to_int(item) > 0
+                ]
+                selected = self._dedupe_ints(selected)[: self.max_related_rids]
+                return [0, *selected]
+        except Exception:
+            logger.exception("Trending rid selection failed; using defaults.")
+        return [0, *list(self.default_rids[: self.max_related_rids])]
+
+    def _map_ranking_item(self, item: dict[str, object]) -> DiscoveredContent | None:
+        bvid = str(item.get("bvid", "")).strip()
+        if not bvid:
+            return None
+        owner = item.get("owner")
+        up_name = str(item.get("author", "")).strip()
+        up_mid = to_int(item.get("mid", 0))
+        if isinstance(owner, dict):
+            up_name = str(owner.get("name", up_name)).strip()
+            up_mid = to_int(owner.get("mid", up_mid))
+        stat = item.get("stat")
+        view_count = to_int(item.get("play", 0))
+        like_count = to_int(item.get("like", 0))
+        if isinstance(stat, dict):
+            view_count = to_int(stat.get("view", view_count))
+            like_count = to_int(stat.get("like", like_count))
+
+        title = clean_text(str(item.get("title", "")))
+        description = clean_text(str(item.get("description", item.get("desc", ""))))
+        topic_key = self._infer_topic_key(item, title)
+
+        return DiscoveredContent(
+            bvid=bvid,
+            title=title,
+            up_name=clean_text(up_name),
+            up_mid=up_mid,
+            cover_url=str(item.get("pic", "")),
+            duration=parse_duration(item.get("duration", 0)),
+            view_count=view_count,
+            like_count=like_count,
+            description=description,
+            topic_key=topic_key,
+            style_key=ContentDiscoveryEngine.infer_style_key(
+                title=title,
+                description=description,
+                source_strategy=self.name,
+            ),
+            source_strategy=self.name,
+        )
+
+    @staticmethod
+    def _infer_topic_key(item: dict[str, object], title: str) -> str:
+        """Infer topic_key from tags or title for ranking items."""
+        tags = item.get("tags", [])
+        if isinstance(tags, list) and tags:
+            first_tag = str(tags[0]).strip()
+            if first_tag:
+                return re.sub(r"\s+", "", first_tag).lower()[:32]
+        # Fallback: first meaningful segment of title
+        cleaned = re.sub(r"[【】\[\]《》「」\s]+", " ", title).strip()
+        parts = cleaned.split()
+        if parts:
+            return re.sub(r"\s+", "", parts[0]).lower()[:32]
+        return ""
+
+    @staticmethod
+    def _dedupe_ints(values: list[int]) -> list[int]:
+        seen: set[int] = set()
+        ordered: list[int] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            ordered.append(value)
+        return ordered

@@ -93,6 +93,8 @@ class DiscoveredContent:
     source_strategy: str = ""  # Which strategy found this
     relevance_score: float = 0.0  # 0.0 - 1.0 (based on user soul)
     relevance_reason: str = ""  # Why this is relevant to the user
+    pool_expression: str = ""  # Precomputed recommendation copy for fast popup paths
+    pool_topic_label: str = ""  # Precomputed personalized topic label for fast popup paths
     candidate_tier: str = "primary"  # Primary discovery vs backfill supply
     discovered_at: str = ""  # Cache timestamp for recency-aware ranking
     last_scored_at: str = ""  # Last relevance scoring timestamp
@@ -154,6 +156,7 @@ class ContentDiscoveryEngine:
         self._concurrency = concurrency
         self._target_primary_count = max(1, target_primary_count)
         self._backfill_target_count = max(self._target_primary_count, backfill_target_count)
+        self._eval_cache: dict[str, tuple[float, str]] = {}
 
     def register_strategy(self, strategy: DiscoveryStrategy) -> None:
         """Register a discovery strategy."""
@@ -211,7 +214,11 @@ class ContentDiscoveryEngine:
         return final_results
 
     async def evaluate_content(
-        self, content: DiscoveredContent, profile: SoulProfile
+        self,
+        content: DiscoveredContent,
+        profile: SoulProfile,
+        *,
+        source_context: str = "",
     ) -> float:
         """Evaluate how relevant a piece of content is for the user.
 
@@ -221,12 +228,23 @@ class ContentDiscoveryEngine:
         Args:
             content: Content to evaluate.
             profile: User's soul profile.
+            source_context: Discovery context hint for calibrating evaluation,
+                e.g. "search_query: 纪录片 原理" or "explore_domain: 城市建筑叙事".
 
         Returns:
             Relevance score (0.0 - 1.0).
         """
         if self._llm_service is None:
             return 0.0
+
+        # Check eval cache (same bvid in same profile → same score)
+        cache_key = f"{content.bvid}:{id(profile)}"
+        cached = self._eval_cache.get(cache_key)
+        if cached is not None:
+            score, reason = cached
+            content.relevance_score = score
+            content.relevance_reason = reason
+            return score
 
         from openbiliclaw.llm.prompts import build_content_evaluation_prompt
 
@@ -252,6 +270,7 @@ class ContentDiscoveryEngine:
                 "view_count": content.view_count,
                 "source_strategy": content.source_strategy,
             },
+            source_context=source_context or content.source_strategy,
         )
         try:
             llm_call = self._llm_service.complete_structured_task(
@@ -273,6 +292,7 @@ class ContentDiscoveryEngine:
 
         content.relevance_score = score
         content.relevance_reason = reason
+        self._eval_cache[cache_key] = (score, reason)
         return score
 
     @staticmethod
@@ -429,12 +449,6 @@ class ContentDiscoveryEngine:
         if limit <= 1 or len(results) <= 1:
             return results[:limit]
 
-        selected: list[DiscoveredContent] = []
-        deferred: list[DiscoveredContent] = []
-        seen_topics: set[str] = set()
-        seen_sources: set[str] = set()
-        style_counts: dict[str, int] = {}
-        source_counts: dict[str, int] = {}
         per_style_cap = ContentDiscoveryEngine._style_cap(limit)
         per_source_cap = ContentDiscoveryEngine._source_cap(limit)
         unique_source_target = min(
@@ -447,71 +461,132 @@ class ContentDiscoveryEngine:
                 }
             ),
         )
+
+        # Step 1: select diverse subset — prioritize unique topics, balanced styles/sources
+        selected, overflow = ContentDiscoveryEngine._select_diverse(
+            results,
+            limit=limit,
+            per_style_cap=per_style_cap,
+            per_source_cap=per_source_cap,
+            unique_source_target=unique_source_target,
+        )
+        if len(selected) >= limit:
+            return selected[:limit]
+
+        # Step 2: backfill from overflow with relaxed constraints
+        selected = ContentDiscoveryEngine._backfill_from_overflow(
+            selected, overflow,
+            limit=limit,
+            per_style_cap=per_style_cap,
+            per_source_cap=per_source_cap,
+        )
+        return selected[:limit]
+
+    @staticmethod
+    def _select_diverse(
+        results: list[DiscoveredContent],
+        *,
+        limit: int,
+        per_style_cap: int,
+        per_source_cap: int,
+        unique_source_target: int,
+    ) -> tuple[list[DiscoveredContent], list[DiscoveredContent]]:
+        """Select a diverse subset, deferring duplicates to overflow."""
+        selected: list[DiscoveredContent] = []
+        overflow: list[DiscoveredContent] = []
+        seen_topics: set[str] = set()
+        seen_sources: set[str] = set()
+        style_counts: dict[str, int] = {}
+        source_counts: dict[str, int] = {}
+
         for item in results:
-            topic_key = ContentDiscoveryEngine._topic_bucket(item)
-            style_key = ContentDiscoveryEngine._style_bucket(item)
-            source_key = ContentDiscoveryEngine._normalize_topic_token(item.source_strategy)
-            prioritize_new_source = (
-                bool(source_key)
-                and source_key not in seen_sources
+            topic = ContentDiscoveryEngine._topic_bucket(item)
+            style = ContentDiscoveryEngine._style_bucket(item)
+            source = ContentDiscoveryEngine._normalize_topic_token(item.source_strategy)
+            is_new_source = (
+                bool(source) and source not in seen_sources
                 and len(seen_sources) < unique_source_target
             )
-            if topic_key and topic_key in seen_topics:
-                deferred.append(item)
-                continue
-            if (
-                not prioritize_new_source
-                and style_key
-                and style_counts.get(style_key, 0) >= per_style_cap
-            ):
-                deferred.append(item)
-                continue
-            if source_key and source_counts.get(source_key, 0) >= per_source_cap:
-                deferred.append(item)
-                continue
-            if not prioritize_new_source and source_key and source_key in seen_sources:
-                deferred.append(item)
-                continue
-            selected.append(item)
-            if topic_key:
-                seen_topics.add(topic_key)
-            if style_key:
-                style_counts[style_key] = style_counts.get(style_key, 0) + 1
-            if source_key:
-                seen_sources.add(source_key)
-                source_counts[source_key] = source_counts.get(source_key, 0) + 1
-            if len(selected) >= limit:
-                return selected[:limit]
 
-        remaining: list[DiscoveredContent] = []
-        for item in deferred:
-            topic_key = ContentDiscoveryEngine._topic_bucket(item)
-            style_key = ContentDiscoveryEngine._style_bucket(item)
-            source_key = ContentDiscoveryEngine._normalize_topic_token(item.source_strategy)
-            if topic_key and topic_key in seen_topics:
-                remaining.append(item)
+            if topic and topic in seen_topics:
+                overflow.append(item)
                 continue
-            if style_key and style_counts.get(style_key, 0) >= per_style_cap:
-                remaining.append(item)
+            if not is_new_source and style and style_counts.get(style, 0) >= per_style_cap:
+                overflow.append(item)
                 continue
-            if source_key and source_counts.get(source_key, 0) >= per_source_cap:
-                remaining.append(item)
+            if source and source_counts.get(source, 0) >= per_source_cap:
+                overflow.append(item)
                 continue
+            if not is_new_source and source and source in seen_sources:
+                overflow.append(item)
+                continue
+
             selected.append(item)
-            if topic_key:
-                seen_topics.add(topic_key)
-            if style_key:
-                style_counts[style_key] = style_counts.get(style_key, 0) + 1
-            if source_key:
-                source_counts[source_key] = source_counts.get(source_key, 0) + 1
+            if topic:
+                seen_topics.add(topic)
+            if style:
+                style_counts[style] = style_counts.get(style, 0) + 1
+            if source:
+                seen_sources.add(source)
+                source_counts[source] = source_counts.get(source, 0) + 1
             if len(selected) >= limit:
                 break
-        if len(selected) < limit:
-            for item in remaining:
-                selected.append(item)
-                if len(selected) >= limit:
-                    break
-        return selected[:limit]
+
+        return selected, overflow
+
+    @staticmethod
+    def _backfill_from_overflow(
+        selected: list[DiscoveredContent],
+        overflow: list[DiscoveredContent],
+        *,
+        limit: int,
+        per_style_cap: int,
+        per_source_cap: int,
+    ) -> list[DiscoveredContent]:
+        """Fill remaining slots from overflow with relaxed topic constraint."""
+        seen_topics = {ContentDiscoveryEngine._topic_bucket(i) for i in selected} - {""}
+        style_counts: dict[str, int] = {}
+        source_counts: dict[str, int] = {}
+        for item in selected:
+            style = ContentDiscoveryEngine._style_bucket(item)
+            source = ContentDiscoveryEngine._normalize_topic_token(item.source_strategy)
+            if style:
+                style_counts[style] = style_counts.get(style, 0) + 1
+            if source:
+                source_counts[source] = source_counts.get(source, 0) + 1
+
+        # Pass 1: allow new topics from overflow
+        remaining: list[DiscoveredContent] = []
+        for item in overflow:
+            if len(selected) >= limit:
+                break
+            topic = ContentDiscoveryEngine._topic_bucket(item)
+            style = ContentDiscoveryEngine._style_bucket(item)
+            source = ContentDiscoveryEngine._normalize_topic_token(item.source_strategy)
+            if topic and topic in seen_topics:
+                remaining.append(item)
+                continue
+            if style and style_counts.get(style, 0) >= per_style_cap:
+                remaining.append(item)
+                continue
+            if source and source_counts.get(source, 0) >= per_source_cap:
+                remaining.append(item)
+                continue
+            selected.append(item)
+            if topic:
+                seen_topics.add(topic)
+            if style:
+                style_counts[style] = style_counts.get(style, 0) + 1
+            if source:
+                source_counts[source] = source_counts.get(source, 0) + 1
+
+        # Pass 2: fill any remaining slots unconditionally
+        for item in remaining:
+            if len(selected) >= limit:
+                break
+            selected.append(item)
+
+        return selected
 
     @staticmethod
     def _topic_bucket(item: DiscoveredContent) -> str:
@@ -548,84 +623,14 @@ class ContentDiscoveryEngine:
         reason: str = "",
         source_strategy: str = "",
     ) -> str:
-        text = " ".join([title, description, reason]).lower()
-        game_tokens = ("攻略", "机制", "强度", "实机", "联机", "mod", "杀戮尖塔", "爬塔")
-        news_tokens = ("突发", "最新", "局势", "锐评", "发布", "快讯", "回应", "自焚")
-        guide_tokens = (
-            "教程",
-            "入门",
-            "购买前",
-            "怎么做",
-            "建议",
-            "指南",
-            "统计",
-            "课程",
-            "导论",
-            "从零开始",
-            "原理图解",
-            "数学原理",
-            "透彻理解",
-            "一小时从",
+        from openbiliclaw.discovery.style_rules import infer_style_key as _infer
+
+        return _infer(
+            title=title,
+            description=description,
+            reason=reason,
+            source_strategy=source_strategy,
         )
-        story_tokens = (
-            "纪录片",
-            "纪录",
-            "故事",
-            "电影",
-            "小说史",
-            "讲了一个怎样",
-            "短片",
-            "全过程",
-            "制造过程",
-            "工艺难度",
-            "设计面面观",
-        )
-        visual_tokens = ("空镜", "混剪", "素材", "视觉", "厨向mad")
-        deep_tokens = (
-            "讲透",
-            "底层逻辑",
-            "为什么",
-            "如何诞生",
-            "实验经济学",
-            "大模型",
-            "人工智能",
-            "科幻",
-            "芯片",
-            "显微镜",
-            "纳米",
-            "定理",
-            "理论",
-            "原理",
-            "解析",
-            "哲学",
-            "控制论",
-            "混沌",
-            "自组织",
-            "世界观",
-            "设定",
-            "原型",
-            "战力系统",
-            "逻辑谜题",
-            "悖论",
-            "谜题",
-        )
-        if any(token in text for token in game_tokens):
-            return "game_strategy"
-        if any(token in text for token in news_tokens):
-            return "news_brief"
-        if any(token in text for token in guide_tokens):
-            return "practical_guide"
-        if any(token in text for token in story_tokens):
-            return "story_doc"
-        if any(token in text for token in visual_tokens):
-            return "visual_showcase"
-        if any(token in text for token in deep_tokens):
-            return "deep_dive"
-        if source_strategy in {"trending"}:
-            return "news_brief"
-        if source_strategy in {"explore"}:
-            return "story_doc"
-        return "light_chat"
 
     def _cache_results(self, results: list[DiscoveredContent]) -> None:
         if self._database is None or not results:
