@@ -10,11 +10,12 @@ from openbiliclaw.config import Config, LLMConfig, LLMProviderConfig
 from openbiliclaw.llm.base import (
     LLMProvider,
     LLMProviderError,
+    LLMRateLimitError,
     LLMResponse,
     LLMResponseError,
 )
 from openbiliclaw.llm.gemini_provider import gemini_sdk_available
-from openbiliclaw.llm.registry import build_llm_registry
+from openbiliclaw.llm.registry import RegistryBuildError, build_llm_registry
 
 
 @dataclass
@@ -25,6 +26,7 @@ class FakeProvider(LLMProvider):
     responses: list[LLMResponse] = field(default_factory=list)
     errors: list[Exception] = field(default_factory=list)
     health: bool = True
+    call_count: int = 0
 
     @property
     def name(self) -> str:
@@ -38,6 +40,7 @@ class FakeProvider(LLMProvider):
         max_tokens: int = 4096,
         json_mode: bool = False,
     ) -> LLMResponse:
+        self.call_count += 1
         if self.errors:
             raise self.errors.pop(0)
         if self.responses:
@@ -132,11 +135,23 @@ def test_build_llm_registry_downgrades_default_provider() -> None:
     assert registry.default_provider == "openai"
 
 
-def test_build_llm_registry_registers_ollama_as_local_default() -> None:
+def test_build_llm_registry_requires_explicit_ollama_config() -> None:
     config = Config(
         llm=LLMConfig(
             default_provider="openai",
             ollama=LLMProviderConfig(model="", base_url=""),
+        )
+    )
+
+    with pytest.raises(RegistryBuildError):
+        build_llm_registry(config)
+
+
+def test_build_llm_registry_registers_ollama_when_base_url_is_explicit() -> None:
+    config = Config(
+        llm=LLMConfig(
+            default_provider="openai",
+            ollama=LLMProviderConfig(model="", base_url="http://localhost:11434/v1"),
         )
     )
 
@@ -215,3 +230,37 @@ async def test_registry_health_check_all() -> None:
     assert results["openai"].available is True
     assert results["openai"].is_default is True
     assert results["ollama"].available is False
+
+
+@pytest.mark.asyncio
+async def test_registry_temporarily_cools_down_rate_limited_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 100.0}
+    monkeypatch.setattr("openbiliclaw.llm.base.time.monotonic", lambda: clock["now"])
+
+    openai = FakeProvider("openai", errors=[LLMRateLimitError("limited")])
+    claude = FakeProvider("claude")
+    registry = build_llm_registry(
+        Config(
+            llm=LLMConfig(
+                default_provider="openai",
+                openai=LLMProviderConfig(api_key="openai-key"),
+            )
+        ),
+        provider_overrides={
+            "openai": openai,
+            "claude": claude,
+        },
+        fallback_order=["openai", "claude"],
+    )
+
+    first = await registry.complete([{"role": "user", "content": "hi"}])
+    second = await registry.complete([{"role": "user", "content": "hi again"}])
+    clock["now"] += 61
+    third = await registry.complete([{"role": "user", "content": "welcome back"}])
+
+    assert first.provider == "claude"
+    assert second.provider == "claude"
+    assert third.provider == "openai"
+    assert openai.call_count == 2

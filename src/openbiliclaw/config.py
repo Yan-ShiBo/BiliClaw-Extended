@@ -99,6 +99,11 @@ class SchedulerConfig:
     discovery_cron: str = "0 */4 * * *"
     pool_target_count: int = 300
     account_sync_interval_hours: int = 6
+    speculation_interval_hours: int = 2
+    speculation_ttl_days: int = 3
+    speculation_cooldown_days: int = 7
+    speculation_confirmation_threshold: int = 3
+    speculation_max_active: int = 5
 
 
 @dataclass

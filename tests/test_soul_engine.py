@@ -106,9 +106,10 @@ async def test_build_initial_profile_reads_preference_and_saves_soul(tmp_path: P
     assert profile.motivational_drivers == ["建立判断确定性", "扩大理解边界"]
     assert profile.current_phase == "最近更像在主动吸收复杂信息，并整理自己的判断框架。"
     saved = json.loads((tmp_path / "memory" / "soul.json").read_text(encoding="utf-8"))
-    assert saved["core_traits"] == ["理性", "好奇", "克制"]
-    assert saved["cognitive_style"] == ["会先看结构", "偏好把问题讲透"]
-    assert saved["preferences"]["interests"][0]["name"] == "科技"
+    assert saved["core"]["core_traits"] == ["理性", "好奇", "克制"]
+    assert saved["surface"]["cognitive_style"] == ["会先看结构", "偏好把问题讲透"]
+    assert saved["interest"]["likes"][0]["domain"] == "知识"
+    assert saved["interest"]["likes"][0]["specifics"][0]["name"] == "科技"
 
 
 @pytest.mark.asyncio
@@ -675,7 +676,7 @@ async def test_learn_from_dialogue_rebuilds_profile_after_candidate_reaches_thre
     assert result["preference_updated"] is True
     assert result["profile_rebuilt"] is True
     assert memory.get_layer("preference").data["interests"][0]["name"] == "国际时事"
-    assert memory.get_layer("soul").data["core_traits"] == ["理性", "主动"]
+    assert memory.get_layer("soul").data["core"]["core_traits"] == ["理性", "主动"]
     cognition_updates = memory.load_cognition_updates()
     assert cognition_updates
     kinds = {str(item["kind"]) for item in cognition_updates}
@@ -761,8 +762,8 @@ async def test_process_feedback_batch_rebuilds_profile_when_preference_changes_s
 
     assert result["profile_rebuilt"] is True
     soul = memory.get_layer("soul").data
-    assert soul["core_traits"] == ["理性", "耐心", "好奇"]
-    assert "结构调整阶段" in soul["life_stage"]
+    assert soul["core"]["core_traits"] == ["理性", "耐心", "好奇"]
+    assert "结构调整阶段" in soul["role"]["life_stage"]
     cognition_updates = memory.load_cognition_updates()
     kinds = {str(item["kind"]) for item in cognition_updates}
     assert "dislike_added" in kinds

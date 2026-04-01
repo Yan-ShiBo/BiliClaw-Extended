@@ -63,7 +63,16 @@ class PreferenceAnalyzer:
 
         raw_preference = self._parse_response(response.content)
         normalized = self._normalize_preference(raw_preference)
-        return self.merge_preferences(existing_preference, normalized, now=datetime.now())
+        merged = self.merge_preferences(existing_preference, normalized, now=datetime.now())
+        # Preserve cognitive_style from LLM output (not modeled in PreferenceLayer)
+        raw_cs = raw_preference.get("cognitive_style")
+        if isinstance(raw_cs, list):
+            merged["cognitive_style"] = [str(s) for s in raw_cs if s]
+        elif "cognitive_style" not in merged:
+            existing_cs = existing_preference.get("cognitive_style")
+            if isinstance(existing_cs, list):
+                merged["cognitive_style"] = existing_cs
+        return merged
 
     def merge_preferences(
         self,
@@ -106,10 +115,13 @@ class PreferenceAnalyzer:
                 ),
             }
 
-        favorite_up_users = sorted({
-            *self._as_str_list(existing_preference.get("favorite_up_users", [])),
-            *self._as_str_list(new_preference.get("favorite_up_users", [])),
-        })
+        # Use LLM output as authoritative UP user list (LLM already sees
+        # existing_preference and decides which old names to keep).  Fall back
+        # to existing list only when the new batch contains no UP users at all.
+        new_up = self._as_str_list(new_preference.get("favorite_up_users", []))
+        favorite_up_users = sorted(set(new_up)) if new_up else sorted(
+            set(self._as_str_list(existing_preference.get("favorite_up_users", [])))
+        )
         disliked_topics = sorted({
             *self._as_str_list(existing_preference.get("disliked_topics", [])),
             *self._as_str_list(new_preference.get("disliked_topics", [])),
@@ -122,6 +134,9 @@ class PreferenceAnalyzer:
         context = self._as_dict(default_preference["context"]).copy()
         context.update(self._as_dict(existing_preference.get("context", {})))
         context.update(self._as_dict(new_preference.get("context", {})))
+
+        # Preserve speculative_interests from new analysis (for speculator seeding)
+        speculative = self._as_list(new_preference.get("speculative_interests", []))
 
         merged = {
             "interests": sorted(
@@ -141,6 +156,7 @@ class PreferenceAnalyzer:
             ),
             "disliked_topics": disliked_topics,
             "favorite_up_users": favorite_up_users,
+            "speculative_interests": speculative,
         }
         return merged
 
@@ -212,6 +228,18 @@ class PreferenceAnalyzer:
         normalized["favorite_up_users"] = self._as_str_list(
             raw_preference.get("favorite_up_users", [])
         )
+        # Preserve speculative interests from LLM output
+        raw_speculative = self._as_list(raw_preference.get("speculative_interests", []))
+        normalized["speculative_interests"] = [
+            {
+                "name": str(item.get("name", "")).strip(),
+                "category": str(item.get("category", "")).strip(),
+                "weight": self._clamp_weight(self._to_float(item.get("weight", 0.4))),
+                "reason": str(item.get("reason", "")),
+            }
+            for item in raw_speculative
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        ]
         return normalized
 
     def _normalize_interest(self, raw_item: dict[str, object]) -> dict[str, object]:

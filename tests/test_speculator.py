@@ -1,0 +1,402 @@
+"""Tests for speculative interest lifecycle."""
+
+from __future__ import annotations
+
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from openbiliclaw.soul.speculator import (
+    CooldownEntry,
+    InterestSpeculator,
+    SpeculativeInterest,
+    SpeculativeState,
+    _event_matches_speculation,
+    _tokenize,
+    expire_stale,
+    load_speculative_state,
+    observe_events,
+    promote_ready,
+    save_speculative_state,
+)
+
+# ---------------------------------------------------------------------------
+# Tokenization
+# ---------------------------------------------------------------------------
+
+
+def test_tokenize_basic():
+    tokens = _tokenize("博弈论 科普 视频")
+    assert "博弈论" in tokens
+    assert "科普" in tokens
+    assert "视频" in tokens
+
+
+def test_tokenize_filters_short():
+    tokens = _tokenize("a 好 hello")
+    assert "a" not in tokens
+    assert "好" not in tokens
+    assert "hello" in tokens
+
+
+# ---------------------------------------------------------------------------
+# Event matching
+# ---------------------------------------------------------------------------
+
+
+def test_event_matches_domain_substring():
+    spec = SpeculativeInterest(domain="博弈论", category="知识")
+    event = {"title": "纳什均衡与博弈论入门", "tags": ""}
+    assert _event_matches_speculation(event, spec) is True
+
+
+def test_event_matches_category_substring():
+    spec = SpeculativeInterest(domain="量子计算", category="前沿科技")
+    event = {"title": "前沿科技趋势解读", "tags": ""}
+    assert _event_matches_speculation(event, spec) is True
+
+
+def test_event_no_match():
+    spec = SpeculativeInterest(domain="建筑叙事", category="人文")
+    event = {"title": "今天吃什么", "tags": "美食"}
+    assert _event_matches_speculation(event, spec) is False
+
+
+def test_event_matches_token_overlap():
+    spec = SpeculativeInterest(domain="科技伦理与AI治理", category="科技哲学")
+    event = {"title": "AI治理的未来走向", "tags": "科技"}
+    assert _event_matches_speculation(event, spec) is True
+
+
+# ---------------------------------------------------------------------------
+# Observation
+# ---------------------------------------------------------------------------
+
+
+def test_observe_events_increments():
+    state = SpeculativeState(active=[
+        SpeculativeInterest(domain="博弈论", category="知识", status="active"),
+    ])
+    events = [
+        {"title": "博弈论科普：囚徒困境", "event_type": "view"},
+        {"title": "今天吃什么", "event_type": "view"},
+        {"title": "博弈论在经济学中的应用", "event_type": "view"},
+    ]
+    updated, count = observe_events(events, state)
+    assert count == 2
+    assert updated.active[0].confirmation_count == 2
+    assert len(updated.active[0].confirming_events) == 2
+
+
+def test_observe_skips_non_active():
+    state = SpeculativeState(active=[
+        SpeculativeInterest(domain="博弈论", status="promoted"),
+    ])
+    events = [{"title": "博弈论科普", "event_type": "view"}]
+    _, count = observe_events(events, state)
+    assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Promotion
+# ---------------------------------------------------------------------------
+
+
+def test_promote_ready():
+    state = SpeculativeState(active=[
+        SpeculativeInterest(
+            domain="博弈论", status="active",
+            confirmation_count=3, confirmation_threshold=3,
+        ),
+        SpeculativeInterest(
+            domain="建筑叙事", status="active",
+            confirmation_count=1, confirmation_threshold=3,
+        ),
+    ])
+    promoted, updated = promote_ready(state)
+    assert len(promoted) == 1
+    assert promoted[0].domain == "博弈论"
+    assert promoted[0].status == "promoted"
+    assert len(updated.active) == 1
+    assert updated.active[0].domain == "建筑叙事"
+    assert updated.total_promoted == 1
+
+
+def test_promote_none_ready():
+    state = SpeculativeState(active=[
+        SpeculativeInterest(domain="X", confirmation_count=1, confirmation_threshold=3),
+    ])
+    promoted, updated = promote_ready(state)
+    assert promoted == []
+    assert len(updated.active) == 1
+
+
+# ---------------------------------------------------------------------------
+# Expiry and cooldown
+# ---------------------------------------------------------------------------
+
+
+def test_expire_stale_creates_cooldown():
+    now = datetime.now()
+    old = now - timedelta(days=15)
+    state = SpeculativeState(active=[
+        SpeculativeInterest(
+            domain="过期方向", status="active",
+            created_at=old.isoformat(), ttl_days=14,
+        ),
+        SpeculativeInterest(
+            domain="还没过期", status="active",
+            created_at=now.isoformat(), ttl_days=14,
+        ),
+    ])
+    rejected, updated = expire_stale(state, now, cooldown_days=30)
+    assert len(rejected) == 1
+    assert rejected[0].domain == "过期方向"
+    assert rejected[0].status == "rejected"
+    assert len(updated.active) == 1
+    assert updated.active[0].domain == "还没过期"
+    assert len(updated.cooldown) == 1
+    assert updated.cooldown[0].domain == "过期方向"
+    assert updated.total_rejected == 1
+
+
+def test_expire_cleans_old_cooldowns():
+    now = datetime.now()
+    state = SpeculativeState(
+        active=[],
+        cooldown=[
+            CooldownEntry(
+                domain="旧冷却",
+                cooldown_until=(now - timedelta(days=1)).isoformat(),
+            ),
+            CooldownEntry(
+                domain="新冷却",
+                cooldown_until=(now + timedelta(days=10)).isoformat(),
+            ),
+        ],
+    )
+    _, updated = expire_stale(state, now)
+    assert len(updated.cooldown) == 1
+    assert updated.cooldown[0].domain == "新冷却"
+
+
+# ---------------------------------------------------------------------------
+# Serialization
+# ---------------------------------------------------------------------------
+
+
+def test_speculative_state_roundtrip():
+    state = SpeculativeState(
+        active=[
+            SpeculativeInterest(
+                domain="博弈论", category="知识", reason="test",
+                confidence=0.5, weight=0.4,
+                created_at="2026-01-01T00:00:00",
+                confirmation_count=2,
+            ),
+        ],
+        cooldown=[
+            CooldownEntry(
+                domain="过期", rejected_at="2026-01-01",
+                cooldown_until="2026-02-01",
+            ),
+        ],
+        last_generation_at="2026-01-01T00:00:00",
+        total_promoted=3,
+        total_rejected=5,
+    )
+    data = state.to_dict()
+    restored = SpeculativeState.from_dict(data)
+    assert len(restored.active) == 1
+    assert restored.active[0].domain == "博弈论"
+    assert restored.active[0].confirmation_count == 2
+    assert len(restored.cooldown) == 1
+    assert restored.total_promoted == 3
+    assert restored.total_rejected == 5
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+
+def test_save_and_load_speculative_state():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        state = SpeculativeState(
+            active=[SpeculativeInterest(domain="test", status="active")],
+            total_promoted=1,
+        )
+        save_speculative_state(data_dir, state)
+
+        loaded = load_speculative_state(data_dir)
+        assert len(loaded.active) == 1
+        assert loaded.active[0].domain == "test"
+        assert loaded.total_promoted == 1
+
+
+def test_load_missing_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state = load_speculative_state(Path(tmpdir))
+        assert state.active == []
+        assert state.cooldown == []
+
+
+# ---------------------------------------------------------------------------
+# InterestSpeculator
+# ---------------------------------------------------------------------------
+
+
+def test_speculator_observe():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+
+        # Pre-seed a speculation
+        state = SpeculativeState(active=[
+            SpeculativeInterest(
+                domain="博弈论", category="知识", status="active",
+                created_at=datetime.now().isoformat(),
+            ),
+        ])
+        save_speculative_state(data_dir, state)
+
+        matches = speculator.observe([
+            {"title": "博弈论入门", "event_type": "view"},
+        ])
+        assert matches == 1
+
+        # Verify persisted
+        reloaded = load_speculative_state(data_dir)
+        assert reloaded.active[0].confirmation_count == 1
+
+
+def test_speculator_ingest_seeds():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+
+        added = speculator.ingest_seeds([
+            {"name": "博弈论", "category": "知识", "reason": "test", "weight": 0.4},
+            {"name": "科技伦理", "category": "哲学", "reason": "test2", "weight": 0.5},
+        ])
+        assert added == 2
+
+        state = load_speculative_state(data_dir)
+        assert len(state.active) == 2
+        assert state.active[0].domain == "博弈论"
+
+
+def test_speculator_ingest_seeds_dedup():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+
+        speculator.ingest_seeds([
+            {"name": "博弈论", "category": "知识"},
+        ])
+        added = speculator.ingest_seeds([
+            {"name": "博弈论", "category": "知识"},  # duplicate
+            {"name": "新方向", "category": "其他"},
+        ])
+        assert added == 1  # Only new one
+
+
+def test_speculator_ingest_seeds_respects_cooldown():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        state = SpeculativeState(cooldown=[
+            CooldownEntry(
+                domain="博弈论",
+                cooldown_until=(datetime.now() + timedelta(days=10)).isoformat(),
+            ),
+        ])
+        save_speculative_state(data_dir, state)
+
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+        added = speculator.ingest_seeds([
+            {"name": "博弈论", "category": "知识"},
+        ])
+        assert added == 0
+
+
+def test_speculator_get_active():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        state = SpeculativeState(active=[
+            SpeculativeInterest(domain="A", status="active"),
+            SpeculativeInterest(domain="B", status="promoted"),
+            SpeculativeInterest(domain="C", status="active"),
+        ])
+        save_speculative_state(data_dir, state)
+
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+        active = speculator.get_active_speculations()
+        assert len(active) == 2
+        assert {s.domain for s in active} == {"A", "C"}
+
+
+async def test_speculator_tick_promotes():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        state = SpeculativeState(active=[
+            SpeculativeInterest(
+                domain="已确认", status="active",
+                confirmation_count=3, confirmation_threshold=3,
+                created_at=datetime.now().isoformat(),
+            ),
+        ])
+        save_speculative_state(data_dir, state)
+
+        speculator = InterestSpeculator(
+            llm_service=None, data_dir=data_dir,
+            generation_interval_hours=9999,  # don't generate
+        )
+
+        from openbiliclaw.soul.profile import OnionProfile
+
+        result = await speculator.tick(OnionProfile())
+        assert len(result.promoted) == 1
+        assert result.promoted[0].domain == "已确认"
+
+
+async def test_speculator_tick_expires():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        old = datetime.now() - timedelta(days=20)
+        state = SpeculativeState(active=[
+            SpeculativeInterest(
+                domain="过期的", status="active",
+                created_at=old.isoformat(), ttl_days=14,
+            ),
+        ])
+        save_speculative_state(data_dir, state)
+
+        speculator = InterestSpeculator(
+            llm_service=None, data_dir=data_dir,
+            generation_interval_hours=9999,
+        )
+
+        from openbiliclaw.soul.profile import OnionProfile
+
+        result = await speculator.tick(OnionProfile())
+        assert len(result.rejected) == 1
+        assert result.rejected[0].domain == "过期的"
+
+        # Verify cooldown was created
+        reloaded = load_speculative_state(data_dir)
+        assert len(reloaded.cooldown) == 1
+        assert reloaded.cooldown[0].domain == "过期的"
+
+
+def test_speculator_max_active_limit():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        speculator = InterestSpeculator(
+            llm_service=None, data_dir=data_dir, max_active=3,
+        )
+        added = speculator.ingest_seeds([
+            {"name": f"兴趣{i}", "category": "测试"}
+            for i in range(10)
+        ])
+        assert added == 3

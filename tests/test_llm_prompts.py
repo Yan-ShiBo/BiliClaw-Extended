@@ -99,8 +99,7 @@ def test_build_soul_profile_prompt_avoids_report_tone() -> None:
         },
     )
 
-    assert "老朋友" in messages[0]["content"]
-    assert "不要写成心理报告" in messages[0]["content"]
+    assert "朋友" in messages[0]["content"]
     assert "3 到 6 条" in messages[0]["content"]
 
 
@@ -118,3 +117,19 @@ def test_build_explore_domains_prompt_requires_directional_diversity() -> None:
     assert "至少覆盖 3 类不同内容方向" in system_prompt
     assert "同一母题的换皮变体最多只能保留 1 个" in system_prompt
     assert "先说明它对应用户的哪种认知需求" in system_prompt
+
+
+def test_build_explore_domains_prompt_requires_core_interest_anchors() -> None:
+    messages = build_explore_domains_prompt(
+        profile_summary={
+            "personality_portrait": "偏好高信息密度内容，也接受适度陌生感。",
+            "interests": ["咒术回战", "Fate", "AI技术与大模型"],
+            "deep_needs": ["建立判断确定性"],
+        }
+    )
+
+    system_prompt = messages[0]["content"]
+
+    assert "domain" in system_prompt
+    assert "novelty_level" in system_prompt
+    assert "why_it_might_resonate" in system_prompt

@@ -26,12 +26,11 @@ from .preference_analyzer import PreferenceAnalyzer
 from .profile import (
     AwarenessNote,
     InsightHypothesis,
-    SoulProfile,
+    OnionProfile,
     awareness_note_from_dict,
     awareness_note_to_dict,
     insight_hypothesis_from_dict,
     insight_hypothesis_to_dict,
-    preference_layer_from_dict,
 )
 from .profile_builder import ProfileBuilder
 
@@ -66,6 +65,9 @@ class SoulEngine:
     def __init__(self, llm: LLMProvider, memory: MemoryManager) -> None:
         from openbiliclaw.llm.service import LLMService
 
+        from .pipeline import ProfileUpdatePipeline
+        from .speculator import InterestSpeculator
+
         self._llm = llm
         self._memory = memory
         self._llm_service: LLMService = LLMService(registry=llm, memory=memory)
@@ -74,6 +76,22 @@ class SoulEngine:
         self._insight_analyzer = InsightAnalyzer(self._llm_service)
         self._preference_analyzer = PreferenceAnalyzer(self._llm_service)
         self._profile_builder = ProfileBuilder(self._llm_service)
+        data_dir = getattr(memory, "_data_dir", None)
+        self._speculator = InterestSpeculator(
+            llm_service=self._llm_service,
+            data_dir=data_dir,
+        )
+        self._pipeline = ProfileUpdatePipeline(
+            memory=memory,
+            preference_analyzer=self._preference_analyzer,
+            profile_builder=self._profile_builder,
+            speculator=self._speculator,
+        )
+
+    @property
+    def pipeline(self) -> Any:
+        """Access the ProfileUpdatePipeline for direct signal ingestion."""
+        return self._pipeline
 
     async def analyze_events(self, events: list[dict[str, Any]]) -> None:
         """Analyze new behavioral events and update all memory layers.
@@ -95,7 +113,7 @@ class SoulEngine:
         preference_layer.data.update(updated_preference)
         preference_layer.save()
 
-    async def build_initial_profile(self, history: list[dict[str, Any]]) -> SoulProfile:
+    async def build_initial_profile(self, history: list[dict[str, Any]]) -> OnionProfile:
         """Build an initial soul profile from historical data.
 
         Used on first run to bootstrap the user understanding model
@@ -105,11 +123,11 @@ class SoulEngine:
             history: Historical data from Bilibili API.
 
         Returns:
-            Initial SoulProfile.
+            Initial OnionProfile.
         """
         logger.info("Building initial soul profile from %d history items...", len(history))
         preference_layer = self._memory.get_layer("preference").data
-        profile = await self._profile_builder.build(
+        legacy_profile = await self._profile_builder.build(
             history=history,
             preference=preference_layer,
             awareness_notes=[
@@ -119,23 +137,31 @@ class SoulEngine:
                 insight_hypothesis_to_dict(item) for item in self._load_insights()
             ],
         )
-        profile.preferences = preference_layer_from_dict(preference_layer)
+        profile = OnionProfile.from_legacy(legacy_profile)
+        profile.populate_from_flat_preference(preference_layer)
         soul_layer = self._memory.get_layer("soul")
         soul_layer.data.clear()
         soul_layer.data.update(profile.to_dict())
         soul_layer.save()
+        self._memory.sync_profile_files(profile)
         return profile
 
-    async def get_profile(self) -> SoulProfile:
+    async def get_profile(self) -> OnionProfile:
         """Get the current soul profile.
 
         Returns:
-            Current SoulProfile from the soul memory layer.
+            Current OnionProfile from the soul memory layer.
+            Active speculative interests are attached as _active_speculations.
         """
         soul_data = self._memory.get_layer("soul").data
         if not soul_data:
             raise SoulProfileNotInitializedError("Soul profile has not been initialized yet.")
-        return SoulProfile.from_dict(soul_data)
+        profile = OnionProfile.from_dict(soul_data)
+        # Attach active speculations so downstream consumers (Discovery) can use them
+        active_specs = self._speculator.get_active_speculations()
+        if active_specs:
+            profile._active_speculations = active_specs  # type: ignore[attr-defined]
+        return profile
 
     async def update_from_feedback(self, feedback: dict[str, Any]) -> None:
         """Update soul understanding based on explicit user feedback.
@@ -246,7 +272,7 @@ class SoulEngine:
         profile_rebuilt = False
         if self._preference_changed_significantly(existing_preference, updated_preference):
             try:
-                profile = await self._profile_builder.build(
+                legacy_profile = await self._profile_builder.build(
                     history=[],
                     preference=updated_preference,
                     awareness_notes=[
@@ -256,11 +282,13 @@ class SoulEngine:
                         insight_hypothesis_to_dict(item) for item in self._load_insights()
                     ],
                 )
-                profile.preferences = preference_layer_from_dict(updated_preference)
+                profile = OnionProfile.from_legacy(legacy_profile)
+                profile.populate_from_flat_preference(updated_preference)
                 soul_layer = self._memory.get_layer("soul")
                 soul_layer.data.clear()
                 soul_layer.data.update(profile.to_dict())
                 soul_layer.save()
+                self._memory.sync_profile_files(profile)
                 profile_rebuilt = True
             except Exception:
                 logger.exception("Failed to rebuild soul profile after dialogue learning.")
@@ -319,7 +347,7 @@ class SoulEngine:
         profile_rebuilt = False
         if self._preference_changed_significantly(existing_preference, updated_preference):
             try:
-                profile = await self._profile_builder.build(
+                legacy_profile = await self._profile_builder.build(
                     history=[],
                     preference=updated_preference,
                     awareness_notes=[
@@ -329,11 +357,13 @@ class SoulEngine:
                         insight_hypothesis_to_dict(item) for item in self._load_insights()
                     ],
                 )
-                profile.preferences = preference_layer_from_dict(updated_preference)
+                profile = OnionProfile.from_legacy(legacy_profile)
+                profile.populate_from_flat_preference(updated_preference)
                 soul_layer = self._memory.get_layer("soul")
                 soul_layer.data.clear()
                 soul_layer.data.update(profile.to_dict())
                 soul_layer.save()
+                self._memory.sync_profile_files(profile)
                 profile_rebuilt = True
             except Exception:
                 logger.exception("Failed to rebuild soul profile after feedback refresh.")

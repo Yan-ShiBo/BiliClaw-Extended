@@ -611,6 +611,22 @@ class Database:
             clean_bvids,
         )
 
+    def evict_stale_pool_items(self, *, max_age_days: int = 14) -> int:
+        """Mark pool items older than *max_age_days* as stale."""
+        cursor = self._execute_write(
+            """
+            UPDATE content_cache
+            SET pool_status = 'stale'
+            WHERE pool_status = 'fresh'
+              AND discovered_at < datetime('now', '-' || ? || ' days')
+              AND NOT EXISTS (
+                SELECT 1 FROM recommendations AS r WHERE r.bvid = content_cache.bvid
+              )
+            """,
+            (max_age_days,),
+        )
+        return cursor.rowcount
+
     def get_pool_candidates_needing_copy(self, limit: int = 20) -> list[dict[str, Any]]:
         """Return fresh pool candidates missing precomputed popup copy."""
         cursor = self.conn.execute(
@@ -705,6 +721,35 @@ class Database:
             (bvid, expression, topic, confidence, presented),
         )
         return cursor.lastrowid or 0
+
+    def get_recent_recommendation_signals(self, *, limit: int = 30) -> list[dict[str, Any]]:
+        """Return recent recommendations with topic/source for scoring context."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.bvid, c.topic_key, c.source, r.created_at
+            FROM recommendations AS r
+            JOIN content_cache AS c ON c.bvid = r.bvid
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_feedback_signals(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent feedback with UP/topic info for score adjustment."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.feedback_type, c.up_mid, c.up_name, c.topic_key, c.source
+            FROM recommendations AS r
+            JOIN content_cache AS c ON c.bvid = r.bvid
+            WHERE r.feedback_type IS NOT NULL
+            ORDER BY r.feedback_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def get_recommendations(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get recommendation history ordered by newest first."""

@@ -55,8 +55,14 @@ async def test_profile_builder_creates_soul_profile_from_json() -> None:
     service = FakeStructuredService(
         json.dumps(
             {
-                "personality_portrait": "这是一个长期保持好奇心、偏好深度内容、做判断较为克制的人。"
-                * 8,
+                "personality_portrait": "我觉得你是那种看视频之前会先看弹幕密度的人。你不是随便刷刷就完了，"
+                "你得看明白——不管是技术原理还是游戏数值平衡，你都得追到底层逻辑那一层才算消化完。"
+                "心理学上这叫场独立型认知——就是你处理信息时不太受表面包装影响，会自己去拆结构。"
+                "你的开放性其实很高，但挑剔度也很高。这不矛盾——你是选择性开放，"
+                "不是什么都接受，而是对好东西的接收天线特别灵敏。"
+                "最近的你看起来在做一件事：在信息洪流和个人生活之间找平衡点。"
+                "一边追前沿科技，一边练传统功法——这在心理学里叫自主感和胜任感都到位了，"
+                "开始补身心整合。不是焦虑，是进阶。",
                 "core_traits": ["理性", "好奇", "谨慎"],
                 "cognitive_style": ["会先看结构", "对证据比较敏感", "偏好把问题讲透"],
                 "motivational_drivers": ["建立判断确定性", "持续扩展理解边界"],
@@ -76,7 +82,7 @@ async def test_profile_builder_creates_soul_profile_from_json() -> None:
         active_insights=[],
     )
 
-    assert profile.personality_portrait.startswith("这是一个长期保持好奇心")
+    assert profile.personality_portrait.startswith("我觉得你是那种")
     assert profile.core_traits == ["理性", "好奇", "谨慎"]
     assert profile.cognitive_style == ["会先看结构", "对证据比较敏感", "偏好把问题讲透"]
     assert profile.motivational_drivers == ["建立判断确定性", "持续扩展理解边界"]
@@ -180,8 +186,14 @@ async def test_profile_builder_can_use_unified_service() -> None:
     service = FakeStructuredService(
         json.dumps(
             {
-                "personality_portrait": "这是一个长期保持好奇心、偏好深度内容、做判断较为克制的人。"
-                * 8,
+                "personality_portrait": "我觉得你是那种看视频之前会先看弹幕密度的人。你不是随便刷刷就完了，"
+                "你得看明白——不管是技术原理还是游戏数值平衡，你都得追到底层逻辑那一层才算消化完。"
+                "心理学上这叫场独立型认知——就是你处理信息时不太受表面包装影响，会自己去拆结构。"
+                "你的开放性其实很高，但挑剔度也很高。这不矛盾——你是选择性开放，"
+                "不是什么都接受，而是对好东西的接收天线特别灵敏。"
+                "最近的你看起来在做一件事：在信息洪流和个人生活之间找平衡点。"
+                "一边追前沿科技，一边练传统功法——这在心理学里叫自主感和胜任感都到位了，"
+                "开始补身心整合。不是焦虑，是进阶。",
                 "core_traits": ["理性", "好奇", "谨慎"],
                 "cognitive_style": ["会先看结构", "偏好讲透"],
                 "motivational_drivers": ["扩大理解边界"],
@@ -212,8 +224,14 @@ async def test_profile_builder_injects_old_friend_tone_in_prompt() -> None:
     service = FakeStructuredService(
         json.dumps(
             {
-                "personality_portrait": "这是一个长期保持好奇心、偏好深度内容、做判断较为克制的人。"
-                * 8,
+                "personality_portrait": "我觉得你是那种看视频之前会先看弹幕密度的人。你不是随便刷刷就完了，"
+                "你得看明白——不管是技术原理还是游戏数值平衡，你都得追到底层逻辑那一层才算消化完。"
+                "心理学上这叫场独立型认知——就是你处理信息时不太受表面包装影响，会自己去拆结构。"
+                "你的开放性其实很高，但挑剔度也很高。这不矛盾——你是选择性开放，"
+                "不是什么都接受，而是对好东西的接收天线特别灵敏。"
+                "最近的你看起来在做一件事：在信息洪流和个人生活之间找平衡点。"
+                "一边追前沿科技，一边练传统功法——这在心理学里叫自主感和胜任感都到位了，"
+                "开始补身心整合。不是焦虑，是进阶。",
                 "core_traits": ["理性", "好奇", "谨慎"],
                 "cognitive_style": ["会先看结构", "偏好讲透"],
                 "motivational_drivers": ["扩大理解边界"],
@@ -244,11 +262,10 @@ async def test_profile_builder_injects_old_friend_tone_in_prompt() -> None:
         ],
     )
 
-    assert "老朋友" in str(service.calls[0]["system_instruction"])
-    assert "认知风格" in str(service.calls[0]["system_instruction"])
-    assert "不要把兴趣 topic 堆成画像主体" in str(service.calls[0]["system_instruction"])
+    assert "朋友" in str(service.calls[0]["system_instruction"])
+    assert "人格画像" in str(service.calls[0]["system_instruction"])
+    assert "core_traits" in str(service.calls[0]["system_instruction"])
     assert "<recent_awareness>" in str(service.calls[0]["user_input"])
-    assert "建立判断确定性" in str(service.calls[0]["user_input"])
     assert "<active_insights>" in str(service.calls[0]["user_input"])
 
 

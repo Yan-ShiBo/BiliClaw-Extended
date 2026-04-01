@@ -74,6 +74,10 @@ class GeminiProvider(LLMProvider):
             temperature=temperature,
             max_output_tokens=max_tokens,
             response_mime_type="application/json" if json_mode else None,
+            thinking_config=(
+                types.ThinkingConfig(thinking_budget=0) if json_mode else None
+            ),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         response = await self._request_with_retry(
             model=self._model,
@@ -135,7 +139,9 @@ class GeminiProvider(LLMProvider):
         return LLMProviderError(f"gemini request failed: {exc}")
 
     def _is_retryable(self, exc: LLMProviderError) -> bool:
-        return isinstance(exc, (LLMProviderError, LLMRateLimitError, LLMTimeoutError))
+        if isinstance(exc, LLMRateLimitError):
+            return False
+        return isinstance(exc, (LLMProviderError, LLMTimeoutError))
 
     def _render_messages(self, messages: list[dict[str, str]]) -> str:
         chunks: list[str] = []

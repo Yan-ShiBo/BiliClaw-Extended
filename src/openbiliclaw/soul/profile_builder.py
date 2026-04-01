@@ -67,7 +67,7 @@ class ProfileBuilder:
         except (LLMProviderError, LLMServiceError) as exc:
             raise SoulProfileBuildError(str(exc)) from exc
         payload = self._parse_response(response.content)
-        return SoulProfile(
+        profile = SoulProfile(
             personality_portrait=str(payload.get("personality_portrait", "")),
             core_traits=self._as_str_list(payload.get("core_traits")),
             cognitive_style=self._as_str_list(payload.get("cognitive_style")),
@@ -77,6 +77,9 @@ class ProfileBuilder:
             life_stage=str(payload.get("life_stage", "")),
             deep_needs=self._as_str_list(payload.get("deep_needs")),
         )
+        # Attach raw MBTI data so OnionProfile.from_legacy() can pick it up
+        profile._raw_mbti = payload.get("mbti")  # type: ignore[attr-defined]
+        return profile
 
     def _parse_response(self, content: str) -> dict[str, object]:
         text = content.strip()

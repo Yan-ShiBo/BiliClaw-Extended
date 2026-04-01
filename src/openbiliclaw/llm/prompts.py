@@ -297,9 +297,34 @@ def build_search_queries_prompt(
 
 <output_schema>
 {
-  "queries": ["纪录片 原理", "摄影 构图", "历史 长视频 深度"]
+  "queries": [
+    "纪录片 原理",
+    "摄影 构图 深度讲解",
+    "历史 长视频 深度",
+    "认知科学 决策 机制",
+    "城市规划 纪录片"
+  ]
 }
 </output_schema>
+
+<examples>
+假设用户高权重兴趣是"历史纪录片、深度讲解"，认知风格偏好"结构化分析、高信息密度"：
+
+巩固类示例（~40%）：
+- "冷战 外交 深度解析"（已有兴趣的细分角度，非直接重复）
+- "考古 纪录片 最新发现"（同领域但切入点新）
+
+探索类示例（~60%）：
+- "认知科学 决策 机制"（上游学科，桥接：结构化分析偏好）
+- "城市规划 发展史 纪录片"（相邻领域，桥接：纪录片风格+系统视角）
+- "法律 案件 深度复盘"（跨领域，桥接：深度讲解+逻辑推理）
+- "气候变化 数据可视化"（跨领域，桥接：高信息密度+宏观视角）
+
+坏的 query：
+- "历史 纪录片"（和已有兴趣完全重合，无新意）
+- "美食"（与用户认知风格无桥接关系，随机发散）
+- "博弈论 纳什均衡 策略模型"（三个 query 本质相同，浪费多样性配额）
+</examples>
 """.strip()
     user_prompt = "\n\n".join(
         [
@@ -383,7 +408,9 @@ def build_trending_rids_prompt(
 <rules>
 1. 输出必须是严格 JSON，不要附带解释。
 2. 只返回 3 到 5 个最相关的分区 rid，不包含 0。
-3. 如果不确定，优先选择知识、科技、影视、纪录片相关分区。
+3. 选出的 rid 必须横跨至少 3 个不同的一级分区大类（如知识、科技、影视、生活、游戏等），
+   避免全部落在同一大类下，以保证热门内容来源的多样性。
+4. 如果不确定，优先选择知识、科技、影视、纪录片相关分区。
 </rules>
 
 <output_schema>
@@ -409,27 +436,44 @@ def build_content_evaluation_prompt(
     *,
     profile_summary: dict[str, object],
     content_summary: dict[str, object],
+    source_context: str = "",
 ) -> list[dict[str, str]]:
-    """Build a structured prompt for content relevance evaluation."""
-    system_prompt = """
-<task>
-你要评估一个 B 站内容与这个用户画像的匹配度。
-</task>
+    """Build a structured prompt for content relevance evaluation.
 
-<rules>
-1. 输出必须是严格 JSON，不要附带解释。
-2. score 范围必须在 0 到 1 之间。
-3. reason 只写一句中文，解释为什么这个人会喜欢或不喜欢这个内容。
-4. 不要只说“因为热门”或“因为看过类似的”，要结合用户画像。
-</rules>
+    Args:
+        profile_summary: User profile summary.
+        content_summary: Content metadata.
+        source_context: Discovery context hint (e.g. search / trending / explore).
+    """
+    source_hint = ""
+    if source_context:
+        source_hint = (
+            "\n<discovery_context>\n"
+            f"{source_context}\n"
+            "</discovery_context>\n\n"
+        )
 
-<output_schema>
-{
-  "score": 0.78,
-  "reason": "这个视频的讲解深度和表达方式更贴近你长期偏好的高信息密度内容。"
-}
-</output_schema>
-""".strip()
+    system_prompt = (
+        "<task>\n"
+        + source_hint
+        + "你要评估一个 B 站内容与这个用户画像的匹配度。\n"
+        "</task>\n\n"
+        "<rules>\n"
+        "1. 输出必须是严格 JSON，不要附带解释。\n"
+        "2. score 范围必须在 0 到 1 之间。\n"
+        "3. reason 只写一句中文，解释为什么这个人会喜欢或不喜欢这个内容。\n"
+        "4. 不要只说\"因为热门\"或\"因为看过类似的\"，要结合用户画像。\n"
+        "5. 根据发现路径调整评判宽容度：search 要求高度匹配；"
+        "trending 来源的内容已经过大众验证，只要不在用户讨厌列表中且内容质量过关，基础分应 ≥ 0.6，若还能和画像产生关联则给更高分；"
+        "related_chain 允许适度偏移；explore 只要心理需求层面说得通就应该给较高分，即使主题完全陌生也不应因此大幅扣分。\n"
+        "</rules>\n\n"
+        "<output_schema>\n"
+        "{\n"
+        '  "score": 0.78,\n'
+        '  "reason": "这个视频的讲解深度和表达方式更贴近你长期偏好的高信息密度内容。"\n'
+        "}\n"
+        "</output_schema>"
+    )
     user_prompt = "\n\n".join(
         [
             "<profile_summary>",
@@ -513,6 +557,12 @@ def build_explore_domains_prompt(
    信息处理偏好或内在驱动力，再解释这种陌生内容为什么仍然可能打动这个人。
 6. novelty_level 范围必须在 0.4 到 0.8 之间。
 7. 每个 domain 生成 1 到 2 个适合 B 站搜索的 query，不能写抽象句子。
+8. 不同 domain 的 query 之间词汇重叠率要低；每个 query 必须包含一个内容形式词
+   （如 纪录片/深度讲解/科普/测评/vlog/解说/手书/混剪），
+   不同 domain 尽量使用不同的形式词，以保证搜索结果在风格维度上有差异。
+9. 反信息茧房：不同 domain 的 query 第一个实词（核心主题词）必须两两不同，
+   禁止仅替换修饰词而保留相同核心名词；至少 2 个 domain 必须来自用户
+   已有兴趣领域之外的全新方向。
 </rules>
 
 <output_schema>
@@ -535,6 +585,69 @@ def build_explore_domains_prompt(
             "</profile_summary>",
         ]
     )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def build_speculation_generation_prompt(
+    *,
+    profile_summary: str,
+    existing_speculations: list[str],
+    cooldown_domains: list[str],
+    confirmed_domains: list[str],
+    count: int = 5,
+) -> list[dict[str, str]]:
+    """Build a prompt for generating speculative interest directions."""
+    system_prompt = """
+<task>
+你是一个用户兴趣探索引擎。根据用户的已确认画像，推测用户可能感兴趣但尚未接触的领域。
+你需要找到心理学上的桥接关系——从已有兴趣模式中推断出合理的新方向。
+</task>
+
+<rules>
+1. 每个猜测必须有 reason 说明心理学桥接逻辑（为什么从已有兴趣能推出这个新方向）
+2. 不能重复已有兴趣、已在探索中的方向、或冷却期的方向
+3. 方向应具体到可以搜索到内容（不要太抽象）
+4. confidence 范围 0.3-0.6，越有把握越高
+5. 优先选择跨领域的交叉方向，而非已有兴趣的简单延伸
+6. 输出严格 JSON，不要附带解释
+</rules>
+
+<bridge_examples>
+- 策略游戏 + 数据分析 → 博弈论科普（共通：系统性思维+决策优化）
+- 日本动画 + 高审美门槛 → 欧美独立动画/实验动画（共通：视觉叙事品味）
+- 深度时事解读 + 历史兴趣 → 地缘政治纪录片（共通：结构化理解世界）
+- 硬核科技 + 哲学思考 → 科技伦理/AI 治理（共通：技术与人文交叉）
+- 音乐制作 + 编程 → 算法作曲/生成式音乐（共通：创造性+技术思维）
+</bridge_examples>
+
+<output_schema>
+{
+  "speculations": [
+    {
+      "domain": "具体的兴趣方向名称",
+      "category": "所属大类",
+      "reason": "心理学桥接推理：从X兴趣+Y特质→可能喜欢此方向，因为...",
+      "confidence": 0.45
+    }
+  ]
+}
+</output_schema>
+""".strip()
+
+    exclude_list = sorted(set(existing_speculations + cooldown_domains + confirmed_domains))
+    exclude_text = "以下方向不要重复：" + "、".join(exclude_list) if exclude_list else "无排除项"
+    user_prompt = "\n\n".join([
+        "<user_profile>",
+        profile_summary,
+        "</user_profile>",
+        "<exclude_domains>",
+        exclude_text,
+        "</exclude_domains>",
+        f"请生成 {count} 个猜测兴趣方向。",
+    ])
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},

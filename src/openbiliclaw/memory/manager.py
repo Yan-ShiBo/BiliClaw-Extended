@@ -116,6 +116,23 @@ class MemoryManager:
         for layer in self._layers.values():
             layer.save()
 
+    def sync_profile_files(self, profile: object) -> None:
+        """Write soul_profile.json + soul_profile.md dual files."""
+        from openbiliclaw.soul.profile import OnionProfile
+        from openbiliclaw.soul.profile_renderer import sync_profile_files
+
+        if isinstance(profile, OnionProfile):
+            sync_profile_files(profile, self._data_dir)
+        elif isinstance(profile, dict):
+            onion = OnionProfile.from_dict(profile)
+            sync_profile_files(onion, self._data_dir)
+
+    def append_changelog(self, entry: str) -> None:
+        """Append a changelog entry to soul_changelog.md."""
+        from openbiliclaw.soul.profile_renderer import append_changelog
+
+        append_changelog(entry, self._data_dir)
+
     def load_feedback_state(self) -> dict[str, object]:
         """Load feedback-processing cursor state from disk."""
         default_state = {
@@ -288,23 +305,75 @@ class MemoryManager:
         awareness = self._layers["awareness"].data.get("notes", [])
         insights = self._layers["insight"].data.get("hypotheses", [])
 
-        return {
-            "soul_summary": {
+        # Support both onion format (nested "core" key) and legacy flat format
+        is_onion = "core" in soul and isinstance(soul.get("core"), dict)
+        if is_onion:
+            core_data = soul.get("core", {})
+            values_data = soul.get("values_layer", {})
+            role_data = soul.get("role", {})
+            interest_data = soul.get("interest", {})
+            mbti_data = core_data.get("mbti", {})
+            soul_summary: dict[str, Any] = {
+                "personality_portrait": soul.get("personality_portrait", ""),
+                "core_traits": self._as_str_list(core_data.get("core_traits", [])),
+                "values": self._as_str_list(values_data.get("values", [])),
+                "life_stage": str(role_data.get("life_stage", "")),
+                "deep_needs": self._as_str_list(core_data.get("deep_needs", [])),
+                "mbti_type": str(mbti_data.get("type", "")),
+                "motivational_drivers": self._as_str_list(
+                    values_data.get("motivational_drivers", [])
+                ),
+            }
+            # Flatten interest tree for preference summary
+            flat_interests: list[dict[str, object]] = []
+            for dom in self._as_dict_list(interest_data.get("likes", [])):
+                for spec in self._as_dict_list(dom.get("specifics", [])):
+                    flat_interests.append({
+                        "name": spec.get("name", ""),
+                        "category": dom.get("domain", ""),
+                        "weight": self._to_float(spec.get("weight", 0.0)),
+                    })
+                if not dom.get("specifics"):
+                    flat_interests.append({
+                        "name": dom.get("domain", ""),
+                        "category": dom.get("domain", ""),
+                        "weight": self._to_float(dom.get("weight", 0.0)),
+                    })
+            flat_disliked: list[str] = []
+            for dom in self._as_dict_list(interest_data.get("dislikes", [])):
+                flat_disliked.append(str(dom.get("domain", "")))
+            preference_summary: dict[str, Any] = {
+                "top_interests": self._top_interests(flat_interests),
+                "style": preference.get("style", {}),
+                "exploration_openness": preference.get("exploration_openness", 0.5),
+                "disliked_topics": flat_disliked[:5],
+                "favorite_up_users": self._as_str_list(
+                    interest_data.get("favorite_up_users", [])
+                )[:5],
+            }
+        else:
+            soul_summary = {
                 "personality_portrait": soul.get("personality_portrait", ""),
                 "core_traits": self._as_str_list(soul.get("core_traits", [])),
                 "values": self._as_str_list(soul.get("values", [])),
                 "life_stage": str(soul.get("life_stage", "")),
                 "deep_needs": self._as_str_list(soul.get("deep_needs", [])),
-            },
-            "preference_summary": {
+            }
+            preference_summary = {
                 "top_interests": self._top_interests(preference.get("interests", [])),
                 "style": preference.get("style", {}),
                 "exploration_openness": preference.get("exploration_openness", 0.5),
-                "disliked_topics": self._as_str_list(preference.get("disliked_topics", []))[:5],
+                "disliked_topics": self._as_str_list(
+                    preference.get("disliked_topics", [])
+                )[:5],
                 "favorite_up_users": self._as_str_list(
                     preference.get("favorite_up_users", [])
                 )[:5],
-            },
+            }
+
+        return {
+            "soul_summary": soul_summary,
+            "preference_summary": preference_summary,
             "recent_awareness": self._recent_awareness(awareness),
             "active_insights": self._active_insights(insights),
         }
@@ -371,6 +440,12 @@ class MemoryManager:
         if not isinstance(raw_value, list):
             return []
         return [str(item) for item in raw_value]
+
+    @staticmethod
+    def _as_dict_list(raw_value: object) -> list[dict[str, Any]]:
+        if not isinstance(raw_value, list):
+            return []
+        return [item for item in raw_value if isinstance(item, dict)]
 
     @staticmethod
     def _to_float(raw_value: object) -> float:

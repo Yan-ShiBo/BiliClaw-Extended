@@ -8,6 +8,7 @@ import pytest
 
 from openbiliclaw.llm.base import (
     LLMProviderError,
+    LLMRateLimitError,
     LLMResponseError,
     LLMTimeoutError,
 )
@@ -94,6 +95,32 @@ async def test_openai_provider_maps_timeout(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_openai_provider_does_not_retry_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = OpenAIProvider(api_key="test-key")
+    calls = {"count": 0}
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    async def fake_sleep(_: float) -> None:
+        pytest.fail("rate-limited requests should not sleep for provider retries")
+
+    async def fake_create(**_: object) -> SimpleNamespace:
+        calls["count"] += 1
+        raise RateLimitError("too many requests")
+
+    monkeypatch.setattr(provider._client.chat.completions, "create", fake_create)
+    monkeypatch.setattr("openbiliclaw.llm.openai_provider.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(LLMRateLimitError):
+        await provider.complete([{"role": "user", "content": "hi"}])
+
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_openai_provider_rejects_empty_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -154,9 +181,38 @@ async def test_claude_provider_maps_provider_error(monkeypatch: pytest.MonkeyPat
         await provider.complete([{"role": "user", "content": "hi"}])
 
 
+@pytest.mark.asyncio
+async def test_claude_provider_does_not_retry_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeProvider(api_key="test-key")
+    calls = {"count": 0}
+
+    async def fake_sleep(_: float) -> None:
+        pytest.fail("rate-limited requests should not sleep for provider retries")
+
+    async def fake_create(**_: object) -> SimpleNamespace:
+        calls["count"] += 1
+        raise RuntimeError("rate limit exceeded")
+
+    monkeypatch.setattr(provider._client.messages, "create", fake_create)
+    monkeypatch.setattr("openbiliclaw.llm.claude_provider.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(LLMRateLimitError):
+        await provider.complete([{"role": "user", "content": "hi"}])
+
+    assert calls["count"] == 1
+
+
 def test_deepseek_provider_defaults() -> None:
     provider = DeepSeekProvider(api_key="test-key")
     assert provider.name == "deepseek"
+
+
+def test_openai_provider_disables_sdk_retries() -> None:
+    provider = OpenAIProvider(api_key="test-key")
+
+    assert provider._client.max_retries == 0
 
 
 def test_ollama_provider_defaults() -> None:
@@ -229,6 +285,37 @@ async def test_gemini_provider_normalizes_response(
     assert "[USER]" in str(captured["contents"])
     config = captured["config"]
     assert config.response_mime_type == "application/json"  # type: ignore[attr-defined]
+    assert config.thinking_config is not None  # type: ignore[attr-defined]
+    assert config.thinking_config.thinking_budget == 0  # type: ignore[attr-defined]
+    assert config.automatic_function_calling is not None  # type: ignore[attr-defined]
+    assert config.automatic_function_calling.disable is True  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not gemini_sdk_available(), reason="google-genai is not installed")
+async def test_gemini_provider_does_not_retry_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = GeminiProvider(api_key="test-key")
+    calls = {"count": 0}
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    async def fake_sleep(_: float) -> None:
+        pytest.fail("rate-limited requests should not sleep for provider retries")
+
+    async def fake_generate_content(**_: object) -> SimpleNamespace:
+        calls["count"] += 1
+        raise RateLimitError("too many requests")
+
+    monkeypatch.setattr(provider._client.aio.models, "generate_content", fake_generate_content)
+    monkeypatch.setattr("openbiliclaw.llm.gemini_provider.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(LLMRateLimitError):
+        await provider.complete([{"role": "user", "content": "hi"}])
+
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio

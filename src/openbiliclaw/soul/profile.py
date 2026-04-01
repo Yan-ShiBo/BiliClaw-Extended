@@ -365,3 +365,528 @@ def _as_int(raw_value: object) -> int:
         except ValueError:
             return 0
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Onion Model — five-layer personality profile
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MBTIDimension:
+    """A single MBTI dimension with pole and strength."""
+
+    pole: str = ""  # "E"|"I", "S"|"N", "T"|"F", "J"|"P"
+    strength: float = 0.5  # 0.0 - 1.0
+
+
+@dataclass
+class MBTI:
+    """MBTI personality type with dimensional strengths."""
+
+    type: str = ""  # e.g. "INTJ"
+    dimensions: dict[str, MBTIDimension] = field(default_factory=dict)
+    confidence: float = 0.0
+    inferred_from: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CoreLayer:
+    """Innermost layer — stable personality traits and deep needs."""
+
+    core_traits: list[str] = field(default_factory=list)
+    deep_needs: list[str] = field(default_factory=list)
+    mbti: MBTI = field(default_factory=MBTI)
+
+
+@dataclass
+class ValuesLayer:
+    """Values and motivational drivers."""
+
+    values: list[str] = field(default_factory=list)
+    motivational_drivers: list[str] = field(default_factory=list)
+
+
+@dataclass
+class InterestSpecific:
+    """A narrow interest within a broad domain."""
+
+    name: str = ""
+    weight: float = 0.5
+
+
+@dataclass
+class InterestDomain:
+    """A broad interest domain containing narrow specifics."""
+
+    domain: str = ""
+    weight: float = 0.5
+    specifics: list[InterestSpecific] = field(default_factory=list)
+    first_seen: str = ""
+    last_seen: str = ""
+    source: str = ""
+
+
+@dataclass
+class InterestLayer:
+    """Likes, dislikes (tree-shaped), and favorite creators."""
+
+    likes: list[InterestDomain] = field(default_factory=list)
+    dislikes: list[InterestDomain] = field(default_factory=list)
+    favorite_up_users: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RoleLayer:
+    """Life stage and current phase."""
+
+    life_stage: str = ""
+    current_phase: str = ""
+
+
+@dataclass
+class SurfaceLayer:
+    """Outermost layer — observable cognitive style and content preferences."""
+
+    cognitive_style: list[str] = field(default_factory=list)
+    style: StylePreference = field(default_factory=StylePreference)
+    context: ContextMode = field(default_factory=ContextMode)
+    exploration_openness: float = 0.5
+
+
+@dataclass
+class OnionProfile:
+    """Five-layer onion model personality profile.
+
+    Layers (inner to outer): Core → Values → Interest → Role → Surface.
+    """
+
+    core: CoreLayer = field(default_factory=CoreLayer)
+    values_layer: ValuesLayer = field(default_factory=ValuesLayer)
+    interest: InterestLayer = field(default_factory=InterestLayer)
+    role: RoleLayer = field(default_factory=RoleLayer)
+    surface: SurfaceLayer = field(default_factory=SurfaceLayer)
+
+    personality_portrait: str = ""
+
+    recent_awareness: list[AwarenessNote] = field(default_factory=list)
+    active_insights: list[InsightHypothesis] = field(default_factory=list)
+
+    created_at: str = ""
+    updated_at: str = ""
+    version: int = 2
+
+    # -- Backward-compatible shim properties ----------------------------------
+
+    @property
+    def core_traits(self) -> list[str]:
+        return self.core.core_traits
+
+    @property
+    def deep_needs(self) -> list[str]:
+        return self.core.deep_needs
+
+    @property
+    def cognitive_style(self) -> list[str]:
+        return self.surface.cognitive_style
+
+    @property
+    def motivational_drivers(self) -> list[str]:
+        return self.values_layer.motivational_drivers
+
+    @property
+    def values(self) -> list[str]:
+        return self.values_layer.values
+
+    @property
+    def life_stage(self) -> str:
+        return self.role.life_stage
+
+    @property
+    def current_phase(self) -> str:
+        return self.role.current_phase
+
+    @property
+    def preferences(self) -> PreferenceLayer:
+        """Synthesize a flat PreferenceLayer from onion layers."""
+        flat_interests: list[InterestTag] = []
+        for dom in self.interest.likes:
+            if dom.specifics:
+                for spec in dom.specifics:
+                    flat_interests.append(
+                        InterestTag(name=spec.name, category=dom.domain, weight=spec.weight)
+                    )
+            else:
+                flat_interests.append(
+                    InterestTag(name=dom.domain, category=dom.domain, weight=dom.weight)
+                )
+        flat_disliked: list[str] = []
+        for dom in self.interest.dislikes:
+            flat_disliked.append(dom.domain)
+            for spec in dom.specifics:
+                flat_disliked.append(spec.name)
+        return PreferenceLayer(
+            interests=flat_interests,
+            style=self.surface.style,
+            context=self.surface.context,
+            exploration_openness=self.surface.exploration_openness,
+            disliked_topics=flat_disliked,
+            favorite_up_users=self.interest.favorite_up_users,
+        )
+
+    # -- Mutation helpers ------------------------------------------------------
+
+    def populate_from_flat_preference(self, preference_data: dict[str, object]) -> None:
+        """Update interest and surface layers from a flat preference dict."""
+        pref = preference_layer_from_dict(preference_data)
+        # Build interest tree from flat tags
+        domain_map: dict[str, InterestDomain] = {}
+        for tag in pref.interests:
+            key = tag.category or tag.name
+            if key not in domain_map:
+                domain_map[key] = InterestDomain(
+                    domain=key,
+                    weight=tag.weight,
+                    source=tag.source,
+                )
+            dom = domain_map[key]
+            if tag.name != key:
+                dom.specifics.append(InterestSpecific(name=tag.name, weight=tag.weight))
+            if tag.weight > dom.weight:
+                dom.weight = tag.weight
+        self.interest = InterestLayer(
+            likes=list(domain_map.values()),
+            dislikes=[
+                InterestDomain(domain=topic, weight=0.9) for topic in pref.disliked_topics
+            ],
+            favorite_up_users=list(pref.favorite_up_users),
+        )
+        self.surface.style = pref.style
+        self.surface.context = pref.context
+        self.surface.exploration_openness = pref.exploration_openness
+
+    # -- Serialization --------------------------------------------------------
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "personality_portrait": self.personality_portrait,
+            "core": _core_layer_to_dict(self.core),
+            "values_layer": _values_layer_to_dict(self.values_layer),
+            "interest": _interest_layer_to_dict(self.interest),
+            "role": _role_layer_to_dict(self.role),
+            "surface": _surface_layer_to_dict(self.surface),
+            "recent_awareness": [awareness_note_to_dict(n) for n in self.recent_awareness],
+            "active_insights": [insight_hypothesis_to_dict(h) for h in self.active_insights],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, raw_data: dict[str, object]) -> OnionProfile:
+        if "core" not in raw_data and "core_traits" in raw_data:
+            return cls.from_legacy(SoulProfile.from_dict(raw_data))
+        return cls(
+            version=_as_int(raw_data.get("version", 2)),
+            personality_portrait=str(raw_data.get("personality_portrait", "")),
+            core=_core_layer_from_dict(raw_data.get("core")),
+            values_layer=_values_layer_from_dict(raw_data.get("values_layer")),
+            interest=_interest_layer_from_dict(raw_data.get("interest")),
+            role=_role_layer_from_dict(raw_data.get("role")),
+            surface=_surface_layer_from_dict(raw_data.get("surface")),
+            recent_awareness=[
+                awareness_note_from_dict(item)
+                for item in _as_list(raw_data.get("recent_awareness"))
+                if isinstance(item, dict)
+            ],
+            active_insights=[
+                insight_hypothesis_from_dict(item)
+                for item in _as_list(raw_data.get("active_insights"))
+                if isinstance(item, dict)
+            ],
+            created_at=str(raw_data.get("created_at", "")),
+            updated_at=str(raw_data.get("updated_at", "")),
+        )
+
+    @classmethod
+    def from_legacy(cls, soul: SoulProfile) -> OnionProfile:
+        """Migrate a flat SoulProfile into the onion structure."""
+        # Group flat InterestTags into tree by category
+        domain_map: dict[str, InterestDomain] = {}
+        for tag in soul.preferences.interests:
+            key = tag.category or tag.name
+            if key not in domain_map:
+                domain_map[key] = InterestDomain(
+                    domain=key,
+                    weight=tag.weight,
+                    first_seen=tag.first_seen.isoformat() if tag.first_seen else "",
+                    last_seen=tag.last_seen.isoformat() if tag.last_seen else "",
+                    source=tag.source,
+                )
+            dom = domain_map[key]
+            if tag.name != key:
+                dom.specifics.append(InterestSpecific(name=tag.name, weight=tag.weight))
+            if tag.weight > dom.weight:
+                dom.weight = tag.weight
+
+        likes = list(domain_map.values())
+
+        dislikes = [
+            InterestDomain(domain=topic, weight=0.9)
+            for topic in soul.preferences.disliked_topics
+        ]
+
+        # Extract MBTI if the builder attached raw data
+        raw_mbti = getattr(soul, "_raw_mbti", None)
+        mbti = _mbti_from_dict(raw_mbti) if raw_mbti else MBTI()
+
+        return cls(
+            core=CoreLayer(
+                core_traits=list(soul.core_traits),
+                deep_needs=list(soul.deep_needs),
+                mbti=mbti,
+            ),
+            values_layer=ValuesLayer(
+                values=list(soul.values),
+                motivational_drivers=list(soul.motivational_drivers),
+            ),
+            interest=InterestLayer(
+                likes=likes,
+                dislikes=dislikes,
+                favorite_up_users=list(soul.preferences.favorite_up_users),
+            ),
+            role=RoleLayer(
+                life_stage=soul.life_stage,
+                current_phase=soul.current_phase,
+            ),
+            surface=SurfaceLayer(
+                cognitive_style=list(soul.cognitive_style),
+                style=soul.preferences.style,
+                context=soul.preferences.context,
+                exploration_openness=soul.preferences.exploration_openness,
+            ),
+            personality_portrait=soul.personality_portrait,
+            recent_awareness=list(soul.recent_awareness),
+            active_insights=list(soul.active_insights),
+            created_at=soul.created_at,
+            updated_at=soul.updated_at,
+            version=2,
+        )
+
+    def to_llm_context(self) -> str:
+        parts: list[str] = []
+        if self.personality_portrait:
+            parts.append(f"## 用户画像\n{self.personality_portrait}")
+        if self.core.core_traits:
+            parts.append(f"## 核心特质\n{', '.join(self.core.core_traits)}")
+        if self.core.mbti.type:
+            mbti = self.core.mbti
+            parts.append(f"## MBTI\n{mbti.type} (置信度: {mbti.confidence:.0%})")
+        if self.values_layer.values:
+            parts.append(f"## 价值观\n{', '.join(self.values_layer.values)}")
+        if self.values_layer.motivational_drivers:
+            parts.append(f"## 内在驱动力\n{', '.join(self.values_layer.motivational_drivers)}")
+        if self.role.current_phase:
+            parts.append(f"## 当前阶段\n{self.role.current_phase}")
+        if self.core.deep_needs:
+            parts.append(f"## 深层需求\n{', '.join(self.core.deep_needs)}")
+        if self.interest.likes:
+            lines: list[str] = []
+            for dom in self.interest.likes[:5]:
+                spec_names = ", ".join(s.name for s in dom.specifics[:3])
+                detail = f" ({spec_names})" if spec_names else ""
+                lines.append(f"- {dom.domain}{detail}")
+            parts.append("## 兴趣\n" + "\n".join(lines))
+        if self.interest.dislikes:
+            dislike_names = ", ".join(d.domain for d in self.interest.dislikes[:5])
+            parts.append(f"## 不喜欢\n{dislike_names}")
+        # Speculative interests (set externally via attach_speculations)
+        speculations = getattr(self, "_active_speculations", None)
+        if speculations:
+            spec_lines = [
+                f"- {s.get('domain', '')}（{s.get('reason', '')}）"
+                if isinstance(s, dict) else f"- {s.domain}（{s.reason}）"
+                for s in speculations[:5]
+            ]
+            parts.append("## 猜测兴趣（待验证）\n" + "\n".join(spec_lines))
+        if self.active_insights:
+            insights_text = "\n".join(
+                f"- {i.hypothesis} (置信度: {i.confidence:.0%})"
+                for i in self.active_insights
+            )
+            parts.append(f"## 当前洞察\n{insights_text}")
+        if self.recent_awareness:
+            notes = "\n".join(
+                f"- [{n.date}] {n.observation}" for n in self.recent_awareness[:5]
+            )
+            parts.append(f"## 近期观察\n{notes}")
+        return "\n\n".join(parts) if parts else "（尚未建立用户画像）"
+
+
+# -- Onion layer serialization helpers ----------------------------------------
+
+
+def _mbti_dimension_to_dict(dim: MBTIDimension) -> dict[str, object]:
+    return {"pole": dim.pole, "strength": dim.strength}
+
+
+def _mbti_dimension_from_dict(raw: object) -> MBTIDimension:
+    data = raw if isinstance(raw, dict) else {}
+    return MBTIDimension(
+        pole=str(data.get("pole", "")),
+        strength=_as_float(data.get("strength", 0.5), 0.5),
+    )
+
+
+def _mbti_to_dict(mbti: MBTI) -> dict[str, object]:
+    return {
+        "type": mbti.type,
+        "dimensions": {k: _mbti_dimension_to_dict(v) for k, v in mbti.dimensions.items()},
+        "confidence": mbti.confidence,
+        "inferred_from": mbti.inferred_from,
+    }
+
+
+def _mbti_from_dict(raw: object) -> MBTI:
+    data = raw if isinstance(raw, dict) else {}
+    raw_dims = data.get("dimensions")
+    dims: dict[str, MBTIDimension] = {}
+    if isinstance(raw_dims, dict):
+        for k, v in raw_dims.items():
+            dims[str(k)] = _mbti_dimension_from_dict(v)
+    return MBTI(
+        type=str(data.get("type", "")),
+        dimensions=dims,
+        confidence=_as_float(data.get("confidence", 0.0), 0.0),
+        inferred_from=_as_str_list(data.get("inferred_from")),
+    )
+
+
+def _core_layer_to_dict(layer: CoreLayer) -> dict[str, object]:
+    return {
+        "core_traits": layer.core_traits,
+        "deep_needs": layer.deep_needs,
+        "mbti": _mbti_to_dict(layer.mbti),
+    }
+
+
+def _core_layer_from_dict(raw: object) -> CoreLayer:
+    data = raw if isinstance(raw, dict) else {}
+    return CoreLayer(
+        core_traits=_as_str_list(data.get("core_traits")),
+        deep_needs=_as_str_list(data.get("deep_needs")),
+        mbti=_mbti_from_dict(data.get("mbti")),
+    )
+
+
+def _values_layer_to_dict(layer: ValuesLayer) -> dict[str, object]:
+    return {
+        "values": layer.values,
+        "motivational_drivers": layer.motivational_drivers,
+    }
+
+
+def _values_layer_from_dict(raw: object) -> ValuesLayer:
+    data = raw if isinstance(raw, dict) else {}
+    return ValuesLayer(
+        values=_as_str_list(data.get("values")),
+        motivational_drivers=_as_str_list(data.get("motivational_drivers")),
+    )
+
+
+def _interest_specific_to_dict(spec: InterestSpecific) -> dict[str, object]:
+    return {"name": spec.name, "weight": spec.weight}
+
+
+def _interest_specific_from_dict(raw: object) -> InterestSpecific:
+    data = raw if isinstance(raw, dict) else {}
+    return InterestSpecific(
+        name=str(data.get("name", "")),
+        weight=_as_float(data.get("weight", 0.5), 0.5),
+    )
+
+
+def _interest_domain_to_dict(dom: InterestDomain) -> dict[str, object]:
+    return {
+        "domain": dom.domain,
+        "weight": dom.weight,
+        "specifics": [_interest_specific_to_dict(s) for s in dom.specifics],
+        "first_seen": dom.first_seen,
+        "last_seen": dom.last_seen,
+        "source": dom.source,
+    }
+
+
+def _interest_domain_from_dict(raw: object) -> InterestDomain:
+    data = raw if isinstance(raw, dict) else {}
+    return InterestDomain(
+        domain=str(data.get("domain", "")),
+        weight=_as_float(data.get("weight", 0.5), 0.5),
+        specifics=[
+            _interest_specific_from_dict(item)
+            for item in _as_list(data.get("specifics"))
+            if isinstance(item, dict)
+        ],
+        first_seen=str(data.get("first_seen", "")),
+        last_seen=str(data.get("last_seen", "")),
+        source=str(data.get("source", "")),
+    )
+
+
+def _interest_layer_to_dict(layer: InterestLayer) -> dict[str, object]:
+    return {
+        "likes": [_interest_domain_to_dict(d) for d in layer.likes],
+        "dislikes": [_interest_domain_to_dict(d) for d in layer.dislikes],
+        "favorite_up_users": layer.favorite_up_users,
+    }
+
+
+def _interest_layer_from_dict(raw: object) -> InterestLayer:
+    data = raw if isinstance(raw, dict) else {}
+    return InterestLayer(
+        likes=[
+            _interest_domain_from_dict(item)
+            for item in _as_list(data.get("likes"))
+            if isinstance(item, dict)
+        ],
+        dislikes=[
+            _interest_domain_from_dict(item)
+            for item in _as_list(data.get("dislikes"))
+            if isinstance(item, dict)
+        ],
+        favorite_up_users=_as_str_list(data.get("favorite_up_users")),
+    )
+
+
+def _role_layer_to_dict(layer: RoleLayer) -> dict[str, object]:
+    return {
+        "life_stage": layer.life_stage,
+        "current_phase": layer.current_phase,
+    }
+
+
+def _role_layer_from_dict(raw: object) -> RoleLayer:
+    data = raw if isinstance(raw, dict) else {}
+    return RoleLayer(
+        life_stage=str(data.get("life_stage", "")),
+        current_phase=str(data.get("current_phase", "")),
+    )
+
+
+def _surface_layer_to_dict(layer: SurfaceLayer) -> dict[str, object]:
+    return {
+        "cognitive_style": layer.cognitive_style,
+        "style": style_preference_to_dict(layer.style),
+        "context": context_mode_to_dict(layer.context),
+        "exploration_openness": layer.exploration_openness,
+    }
+
+
+def _surface_layer_from_dict(raw: object) -> SurfaceLayer:
+    data = raw if isinstance(raw, dict) else {}
+    return SurfaceLayer(
+        cognitive_style=_as_str_list(data.get("cognitive_style")),
+        style=style_preference_from_dict(data.get("style")),
+        context=context_mode_from_dict(data.get("context")),
+        exploration_openness=_as_float(data.get("exploration_openness", 0.5), 0.5),
+    )

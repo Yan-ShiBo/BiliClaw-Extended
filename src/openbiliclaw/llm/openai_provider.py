@@ -41,6 +41,7 @@ class OpenAIProvider(LLMProvider):
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url or None,
+            max_retries=0,
         )
 
     @property
@@ -126,7 +127,9 @@ class OpenAIProvider(LLMProvider):
 
     def _is_retryable(self, exc: LLMProviderError) -> bool:
         """Whether a mapped exception should be retried."""
-        return isinstance(exc, (LLMProviderError, LLMRateLimitError, LLMTimeoutError))
+        if isinstance(exc, LLMRateLimitError):
+            return False
+        return isinstance(exc, (LLMProviderError, LLMTimeoutError))
 
     def _extra_headers(self) -> dict[str, str]:
         """Return optional provider-specific request headers."""

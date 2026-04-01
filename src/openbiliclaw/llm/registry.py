@@ -153,10 +153,11 @@ def _maybe_ollama_provider(
     if "ollama" in overrides:
         return overrides["ollama"]
 
-    base_url = config.llm.ollama.base_url or "http://localhost:11434/v1"
-    model = config.llm.ollama.model
-    if not model and not base_url:
+    raw_base_url = config.llm.ollama.base_url.strip()
+    model = config.llm.ollama.model.strip()
+    if not model and not raw_base_url:
         return None
+    base_url = raw_base_url or "http://localhost:11434/v1"
     return OllamaProvider(
         api_key=config.llm.ollama.api_key or "ollama",
         model=model or "llama3",

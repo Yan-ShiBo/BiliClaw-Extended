@@ -7,6 +7,7 @@ dynamically selecting and switching between providers.
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -111,9 +112,12 @@ class LLMRegistry:
     Supports dynamic registration and selection of providers.
     """
 
+    _RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
         self._default: str = ""
+        self._rate_limited_until: dict[str, float] = {}
 
     def register(self, provider: LLMProvider, *, default: bool = False) -> None:
         """Register a provider.
@@ -169,17 +173,29 @@ class LLMRegistry:
 
         for provider_name in self._fallback_order():
             attempted.append(provider_name)
+            if self._provider_on_cooldown(provider_name):
+                last_error = LLMRateLimitError(
+                    f"Provider {provider_name} is cooling down after rate limit."
+                )
+                logger.warning("Provider %s is cooling down after rate limit.", provider_name)
+                continue
             provider = self.get(provider_name)
             try:
-                return await provider.complete(
+                response = await provider.complete(
                     messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     json_mode=json_mode,
                 )
+                self._rate_limited_until.pop(provider_name, None)
+                return response
             except LLMResponseError:
                 raise
-            except (LLMProviderError, LLMRateLimitError, LLMTimeoutError) as exc:
+            except LLMRateLimitError as exc:
+                last_error = exc
+                self._mark_rate_limited(provider_name)
+                logger.warning("Provider %s failed, trying next fallback.", provider_name)
+            except (LLMProviderError, LLMTimeoutError) as exc:
                 last_error = exc
                 logger.warning("Provider %s failed, trying next fallback.", provider_name)
 
@@ -218,3 +234,17 @@ class LLMRegistry:
             self._default,
             *[name for name in self.available_providers if name != self._default],
         ]
+
+    def _provider_on_cooldown(self, provider_name: str) -> bool:
+        until = self._rate_limited_until.get(provider_name)
+        if until is None:
+            return False
+        if until > time.monotonic():
+            return True
+        self._rate_limited_until.pop(provider_name, None)
+        return False
+
+    def _mark_rate_limited(self, provider_name: str) -> None:
+        self._rate_limited_until[provider_name] = (
+            time.monotonic() + self._RATE_LIMIT_COOLDOWN_SECONDS
+        )

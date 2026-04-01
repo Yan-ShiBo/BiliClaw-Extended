@@ -124,4 +124,6 @@ class ClaudeProvider(LLMProvider):
 
     def _is_retryable(self, exc: LLMProviderError) -> bool:
         """Whether a mapped exception should be retried."""
-        return isinstance(exc, (LLMProviderError, LLMRateLimitError, LLMTimeoutError))
+        if isinstance(exc, LLMRateLimitError):
+            return False
+        return isinstance(exc, (LLMProviderError, LLMTimeoutError))
