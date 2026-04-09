@@ -19,10 +19,10 @@ OpenBiliClaw is an open-source AI Agent for personalized content recommendation 
 >
 > OpenBiliClaw is not a SaaS and not a multi-tenant platform. Each user installs a private instance that builds an understanding of one person — you — and never mixes your profile, memories, or recommendation signals with anyone else's.
 >
-> - **Your data stays on your disk** — The soul profile, five-layer memory, dialogue history, and Bilibili behaviour logs all live in a local SQLite file (`data/openbiliclaw.db`). No cloud accounts, no server-side aggregation, no third-party brokers.
+> - **Your data stays on your disk** — The soul profile, five-layer memory, dialogue history, and Bilibili behaviour logs all live in a local SQLite file (`data/openbiliclaw.db`). No cloud accounts, no server-side aggregation, no third-party brokers; no remote switch can change your instance.
 > - **Your keys, your call** — LLM calls use your own API key, Bilibili auth uses your own cookie, and you can revoke both at any moment.
 > - **A profile that can't be duplicated** — Each Agent's MBTI, cognitive style, deep needs, and speculative interests are generated from your behaviour alone, with zero overlap with any other OpenBiliClaw user, and cannot be copied or transferred.
-> - **Fully controllable** — Open the `data/` directory to inspect every piece of raw data, and export, modify, or wipe it whenever you want. No remote switch can change your instance.
+> - **Train it any way you want** — This is not a black-box recommender. You can reshape the profile on the fly by sending feedback on every recommendation, tell the Agent who you are through Socratic dialogue, write custom Skills to extend the discovery strategies, swap in a different LLM per module (soul / discovery / recommendation / evaluation), or edit the profile fields directly in `data/openbiliclaw.db`. How this Agent grows is entirely your call.
 >
 > Every recommendation comes from an AI that knows exactly one person: you.
 
