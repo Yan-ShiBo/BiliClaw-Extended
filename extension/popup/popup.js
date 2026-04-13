@@ -1539,7 +1539,7 @@ async function loadProfileSummary({ force = false } = {}) {
 
   try {
     const summary = normalizeProfileSummary(await fetchProfileSummary({ limit: 3 }));
-    state.profile = normalizeProfileSummary(summary);
+    state.profile = summary;
     state.profileCognitionHistory = buildNextCognitionHistoryState(null, summary);
     state.expandedCognitionIndex = null;
   } catch {

@@ -95,6 +95,105 @@
 
 </details>
 
+## 🚀 快速开始
+
+### ⚡ Quick Install
+
+**终端一条命令(推荐):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
+```
+
+**复制粘贴给 AI 智能体(Claude Code / Codex CLI / OpenClaw / Cursor 等):**
+
+```text
+请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md 的说明帮我部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch — 会丢关键指令)
+```
+
+**让 AI 智能体用 Docker 部署：**
+
+```text
+请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md 的说明帮我用 Docker Compose 部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch)
+```
+
+支持 macOS / Linux / WSL2。依赖只有 `git` 和 `python3`（3.11+）。脚本会自动克隆仓库、安装依赖、启动后端、做健康检查，然后提示你选择 LLM 提供商（OpenAI / Gemini / DeepSeek / Claude 等）并填写对应的 API Key 和 B 站 Cookie。凭据就绪后自动完成首次初始化（拉取历史、生成画像、填充推荐池），直接达到可用状态。
+
+> 💡 **Windows 用户？** 如果你已经装了 Docker Desktop，推荐直接用上面的 Docker 方式部署，开箱即用。否则请先安装 [WSL2](https://learn.microsoft.com/zh-cn/windows/wsl/install) 再用终端命令安装。
+
+<details>
+<summary>手动安装 / 手动配置 / 浏览器插件</summary>
+
+> 人类维护者可以参考 [docs/agent-install.md](docs/agent-install.md)(给智能体看的精简契约)和 [docs/agent-deployment.md](docs/agent-deployment.md)(详细排查说明)。
+
+#### 手动安装
+
+```bash
+# 克隆项目
+git clone https://github.com/whiteguo233/OpenBiliClaw.git
+cd OpenBiliClaw
+
+# 使用 uv (推荐)
+uv sync
+
+# 或使用 pip
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+#### 手动配置
+
+```bash
+# 复制配置模板
+cp config.example.toml config.toml
+
+# 编辑配置（设置 LLM API Key 等）
+vim config.toml
+```
+
+#### 运行
+
+```bash
+# 一键初始化（拉取历史 · 生成画像 · 首轮发现）
+openbiliclaw init
+
+# 手动触发内容发现
+openbiliclaw discover
+
+# 查看推荐
+openbiliclaw recommend
+
+# 查看用户画像
+openbiliclaw profile
+```
+
+#### 浏览器插件安装
+
+后端运行后，安装 Chrome 插件即可在 B 站页面使用推荐和行为采集：
+
+```bash
+cd extension
+npm install
+npm run package        # 构建 + 打包为 .zip
+```
+
+打包完成后在 `extension/` 目录下生成 `openbiliclaw-extension-v*.zip`。
+
+**加载到 Chrome：**
+
+1. 打开 `chrome://extensions/`，开启右上角「开发者模式」
+2. 方式一：点击「加载已解压的扩展程序」，选择 `extension/` 目录（开发调试用）
+3. 方式二：将生成的 `.zip` 文件拖入扩展页面安装
+
+安装后访问 bilibili.com，插件侧边栏即可展示推荐内容。
+
+#### Docker 部署
+
+> 📦 也支持 Docker 一键部署，详见 [Docker 部署指南](docs/docker-deployment.md)
+
+</details>
+
 ## ✨ 核心特性
 
 - 🧠 **五层灵魂画像** — 事件→偏好→觉察→洞察→灵魂，推断 MBTI、认知风格和深层需求，像心理咨询师一样理解你
@@ -168,100 +267,6 @@ OpenBiliClaw/
 ├── docs/                      # 项目文档
 └── tests/                     # 测试 (650+)
 ```
-
-## 🚀 快速开始
-
-### ⚡ Quick Install
-
-**终端一条命令(推荐):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
-```
-
-**复制粘贴给 AI 智能体(Claude Code / Codex CLI / OpenClaw / Cursor 等):**
-
-```text
-请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md 的说明帮我部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch — 会丢关键指令)
-```
-
-**让 AI 智能体用 Docker 部署：**
-
-```text
-请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md 的说明帮我用 Docker Compose 部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch)
-```
-
-支持 macOS / Linux / WSL2。依赖只有 `git` 和 `python3`（3.11+）。脚本会自动克隆仓库、安装依赖、启动后端、做健康检查，然后提示你选择 LLM 提供商（OpenAI / Gemini / DeepSeek / Claude 等）并填写对应的 API Key 和 B 站 Cookie。凭据就绪后自动完成首次初始化（拉取历史、生成画像、填充推荐池），直接达到可用状态。
-
-> 💡 **Windows 用户？** 如果你已经装了 Docker Desktop，推荐直接用上面的 Docker 方式部署，开箱即用。否则请先安装 [WSL2](https://learn.microsoft.com/zh-cn/windows/wsl/install) 再用终端命令安装。
-
-> 人类维护者可以参考 [docs/agent-install.md](docs/agent-install.md)(给智能体看的精简契约)和 [docs/agent-deployment.md](docs/agent-deployment.md)(详细排查说明)。
-
-### 手动安装
-
-```bash
-# 克隆项目
-git clone https://github.com/whiteguo233/OpenBiliClaw.git
-cd OpenBiliClaw
-
-# 使用 uv (推荐)
-uv sync
-
-# 或使用 pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-### 手动配置
-
-```bash
-# 复制配置模板
-cp config.example.toml config.toml
-
-# 编辑配置（设置 LLM API Key 等）
-vim config.toml
-```
-
-### 运行
-
-```bash
-# 一键初始化（拉取历史 · 生成画像 · 首轮发现）
-openbiliclaw init
-
-# 手动触发内容发现
-openbiliclaw discover
-
-# 查看推荐
-openbiliclaw recommend
-
-# 查看用户画像
-openbiliclaw profile
-```
-
-### 浏览器插件安装
-
-后端运行后，安装 Chrome 插件即可在 B 站页面使用推荐和行为采集：
-
-```bash
-cd extension
-npm install
-npm run package        # 构建 + 打包为 .zip
-```
-
-打包完成后在 `extension/` 目录下生成 `openbiliclaw-extension-v*.zip`。
-
-**加载到 Chrome：**
-
-1. 打开 `chrome://extensions/`，开启右上角「开发者模式」
-2. 方式一：点击「加载已解压的扩展程序」，选择 `extension/` 目录（开发调试用）
-3. 方式二：将生成的 `.zip` 文件拖入扩展页面安装
-
-安装后访问 bilibili.com，插件侧边栏即可展示推荐内容。
-
-### Docker 部署
-
-> 📦 也支持 Docker 一键部署，详见 [Docker 部署指南](docs/docker-deployment.md)
 
 ## 🛠️ 技术栈
 

@@ -41,6 +41,85 @@ All data lives in a single SQLite file on your disk. LLM calls use your own API 
 > | Explains why | "Guess you'll like" | None | Friend-like explanations |
 > | Customizable | No | Low | Swap LLMs / edit profile / write Skills |
 
+## 🚀 Quick Start
+
+### ⚡ Quick Install
+
+**One terminal command (recommended):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
+```
+
+**Paste to an AI coding agent (Claude Code / Codex CLI / OpenClaw / Cursor etc.):**
+
+```text
+Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
+```
+
+**Have an AI agent deploy with Docker:**
+
+```text
+Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md to deploy the OpenBiliClaw backend via Docker Compose (use Bash `curl` to fetch the document, NOT WebFetch).
+```
+
+Works on macOS, Linux and WSL2. The only prerequisites are `git` and `python3` (3.11+). The script auto-clones the repo, installs dependencies, starts the backend, runs a health check, and prompts you to choose an LLM provider (OpenAI / Gemini / DeepSeek / Claude etc.) and fill in the corresponding API key and Bilibili cookie. Once credentials are set, it automatically runs first-time init (fetches history, builds your soul profile, fills the recommendation pool) so you're ready to go immediately.
+
+> 💡 **On Windows?** If you already have Docker Desktop, use the Docker method above — it works out of the box. Otherwise, install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) first, then use the terminal command.
+
+<details>
+<summary>Manual installation / configuration / browser extension</summary>
+
+> Human reference: [docs/agent-install.md](docs/agent-install.md) (short agent-facing contract) and [docs/agent-deployment.md](docs/agent-deployment.md) (long-form troubleshooting).
+
+#### Manual installation
+
+```bash
+# Clone
+git clone https://github.com/whiteguo233/OpenBiliClaw.git
+cd OpenBiliClaw
+
+# Using uv (recommended)
+uv sync
+
+# Or using pip
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+#### Manual configuration
+
+```bash
+# Copy config template
+cp config.example.toml config.toml
+
+# Edit config (set LLM API keys, etc.)
+vim config.toml
+```
+
+#### Run
+
+```bash
+# One-command init (fetch history · build profile · first discovery)
+openbiliclaw init
+
+# Manual content discovery
+openbiliclaw discover
+
+# Get recommendations
+openbiliclaw recommend
+
+# View user profile
+openbiliclaw profile
+```
+
+#### Docker Deployment
+
+> 📦 Docker deployment is also supported. See the [Docker Deployment Guide](docs/docker-deployment.md) for details.
+
+</details>
+
 ## ✨ Key Features
 
 - 🧠 **Five-Layer Soul Profile** — Event → Preference → Awareness → Insight → Soul, inferring MBTI, cognitive style, and deep needs — like a psychologist understanding you
@@ -114,80 +193,6 @@ OpenBiliClaw/
 ├── docs/                      # Documentation
 └── tests/                     # Tests (650+)
 ```
-
-## 🚀 Quick Start
-
-### ⚡ Quick Install
-
-**One terminal command (recommended):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
-```
-
-**Paste to an AI coding agent (Claude Code / Codex CLI / OpenClaw / Cursor etc.):**
-
-```text
-Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
-```
-
-**Have an AI agent deploy with Docker:**
-
-```text
-Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md to deploy the OpenBiliClaw backend via Docker Compose (use Bash `curl` to fetch the document, NOT WebFetch).
-```
-
-Works on macOS, Linux and WSL2. The only prerequisites are `git` and `python3` (3.11+). The script auto-clones the repo, installs dependencies, starts the backend, runs a health check, and prompts you to choose an LLM provider (OpenAI / Gemini / DeepSeek / Claude etc.) and fill in the corresponding API key and Bilibili cookie. Once credentials are set, it automatically runs first-time init (fetches history, builds your soul profile, fills the recommendation pool) so you're ready to go immediately.
-
-> 💡 **On Windows?** If you already have Docker Desktop, use the Docker method above — it works out of the box. Otherwise, install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) first, then use the terminal command.
-
-> Human reference: [docs/agent-install.md](docs/agent-install.md) (short agent-facing contract) and [docs/agent-deployment.md](docs/agent-deployment.md) (long-form troubleshooting).
-
-### Manual installation
-
-```bash
-# Clone
-git clone https://github.com/whiteguo233/OpenBiliClaw.git
-cd OpenBiliClaw
-
-# Using uv (recommended)
-uv sync
-
-# Or using pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-### Manual configuration
-
-```bash
-# Copy config template
-cp config.example.toml config.toml
-
-# Edit config (set LLM API keys, etc.)
-vim config.toml
-```
-
-### Run
-
-```bash
-# One-command init (fetch history · build profile · first discovery)
-openbiliclaw init
-
-# Manual content discovery
-openbiliclaw discover
-
-# Get recommendations
-openbiliclaw recommend
-
-# View user profile
-openbiliclaw profile
-```
-
-### Docker Deployment
-
-> 📦 Docker deployment is also supported. See the [Docker Deployment Guide](docs/docker-deployment.md) for details.
 
 ## 🛠️ Tech Stack
 
