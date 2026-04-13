@@ -99,16 +99,16 @@
 
 ### ⚡ Quick Install
 
-**终端一条命令(推荐):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
-```
-
-**复制粘贴给 AI 智能体(Claude Code / Codex CLI / OpenClaw / Cursor 等):**
+**⭐ 复制粘贴给 AI 智能体一键部署（推荐，Claude Code / Codex CLI / Cursor 等都支持）：**
 
 ```text
 请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md 的说明帮我部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch — 会丢关键指令)
+```
+
+**终端一条命令：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
 ```
 
 **让 AI 智能体用 Docker 部署：**

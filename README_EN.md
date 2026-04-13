@@ -45,16 +45,16 @@ All data lives in a single SQLite file on your disk. LLM calls use your own API 
 
 ### ⚡ Quick Install
 
-**One terminal command (recommended):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
-```
-
-**Paste to an AI coding agent (Claude Code / Codex CLI / OpenClaw / Cursor etc.):**
+**⭐ Paste to an AI coding agent for one-click deploy (recommended — works with Claude Code / Codex CLI / Cursor etc.):**
 
 ```text
 Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
+```
+
+**One terminal command:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
 ```
 
 **Have an AI agent deploy with Docker:**
