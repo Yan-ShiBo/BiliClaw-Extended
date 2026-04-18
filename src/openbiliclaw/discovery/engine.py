@@ -657,6 +657,7 @@ class ContentDiscoveryEngine:
             profile_summary=profile_data,
             content_items=content_items,
             source_context=source_context or (batch[0].source_strategy if batch else ""),
+            source_platform=(batch[0].source_platform or "bilibili") if batch else "bilibili",
         )
 
         _VALID_STYLES = {

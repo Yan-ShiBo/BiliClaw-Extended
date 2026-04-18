@@ -9,6 +9,12 @@ if TYPE_CHECKING:
     from openbiliclaw.soul.tone import ToneProfile
 
 
+_PLATFORM_DISPLAY_NAMES: dict[str, str] = {
+    "bilibili": "B 站",
+    "xiaohongshu": "小红书",
+}
+
+
 def _platform_content_label(source_platform: str) -> str:
     """Return platform-specific content label for prompts."""
     return "B 站内容" if source_platform == "bilibili" else "内容"
@@ -19,7 +25,51 @@ def _platform_friend_label(source_platform: str) -> str:
     return "老B友" if source_platform == "bilibili" else "朋友"
 
 
-def _render_tone_profile(tone_profile: ToneProfile | None) -> str:
+def _platform_display_name(source_platform: str) -> str:
+    """Return a human-readable platform name ("B 站" / "小红书")."""
+    return _PLATFORM_DISPLAY_NAMES.get(source_platform, "内容")
+
+
+def _friend_label_from_mix(source_platform_mix: dict[str, float] | None) -> str:
+    """Pick a friend label that fits the user's observed source mix.
+
+    None / empty → bilibili default (back-compat). Single-source uses that
+    platform's label. Multi-source collapses to a platform-neutral "熟人"
+    so the prompt doesn't lean on one platform's in-group slang.
+    """
+    if not source_platform_mix:
+        return "老B友"
+    if len(source_platform_mix) == 1:
+        return _platform_friend_label(next(iter(source_platform_mix)))
+    return "熟人"
+
+
+def _tone_context_line(source_platform_mix: dict[str, float] | None) -> str:
+    """First line of the tone block — describes which platforms to sound native on."""
+    if not source_platform_mix:
+        return "请保持“老B友”基调：懂 B 站语境，像熟人聊天，不像客服。"
+    if len(source_platform_mix) == 1:
+        platform = next(iter(source_platform_mix))
+        friend = _platform_friend_label(platform)
+        display = _platform_display_name(platform)
+        return f"请保持“{friend}”基调：懂 {display} 语境，像熟人聊天，不像客服。"
+    top = [
+        platform
+        for platform, _ in sorted(
+            source_platform_mix.items(), key=lambda kv: kv[1], reverse=True
+        )[:3]
+    ]
+    display_list = " / ".join(_platform_display_name(p) for p in top)
+    return (
+        f"请保持朋友感基调：这个用户横跨 {display_list}，不同平台的梗都接得住，"
+        "但不要把一个站的黑话硬塞进另一个站的语境。像熟人聊天，不像客服。"
+    )
+
+
+def _render_tone_profile(
+    tone_profile: ToneProfile | None,
+    source_platform_mix: dict[str, float] | None = None,
+) -> str:
     """Render tone profile guidance for prompt builders."""
     tone = tone_profile or {
         "density": "balanced",
@@ -28,7 +78,7 @@ def _render_tone_profile(tone_profile: ToneProfile | None) -> str:
         "directness": "balanced",
     }
     return (
-        "请保持“老B友”基调：懂 B 站语境，像熟人聊天，不像客服。\n"
+        _tone_context_line(source_platform_mix) + "\n"
         f"- 信息密度: {tone['density']}\n"
         f"- 情绪温度: {tone['warmth']}\n"
         f"- 梗感强度: {tone['playfulness']}\n"
@@ -42,13 +92,18 @@ def build_socratic_dialogue_prompt(
     core_memory_text: str,
     tone_profile: ToneProfile | None,
     history: list[dict[str, str]],
+    source_platform_mix: dict[str, float] | None = None,
 ) -> list[dict[str, str]]:
     """Build chat messages for Socratic dialogue generation."""
+    friend_label = _friend_label_from_mix(source_platform_mix)
     system_prompt = "\n\n".join(
         [
             "你是 OpenBiliClaw，一个像朋友一样理解用户的 AI 伙伴。",
-            "请使用苏格拉底式对话风格：温和、追问动机、确认理解，但整体更像会接话的老B友，不像客服，也不要像咨询师。",
-            _render_tone_profile(tone_profile),
+            (
+                "请使用苏格拉底式对话风格：温和、追问动机、确认理解，"
+                f"但整体更像会接话的{friend_label}，不像客服，也不要像咨询师。"
+            ),
+            _render_tone_profile(tone_profile, source_platform_mix),
             "以下是当前用户的 core memory，请把它作为理解用户的背景，而不是机械复述：",
             core_memory_text,
         ]
@@ -138,6 +193,7 @@ def build_soul_profile_prompt(
     recent_awareness: list[dict[str, object]] | None = None,
     active_insights: list[dict[str, object]] | None = None,
     tone_profile: ToneProfile | None,
+    source_platform_mix: dict[str, float] | None = None,
 ) -> list[dict[str, str]]:
     """Build a structured prompt for initial soul-profile generation."""
     system_prompt = """
@@ -240,7 +296,9 @@ def build_soul_profile_prompt(
 }
 </output_schema>
 """.strip()
-    system_prompt = "\n\n".join([system_prompt, _render_tone_profile(tone_profile)])
+    system_prompt = "\n\n".join(
+        [system_prompt, _render_tone_profile(tone_profile, source_platform_mix)]
+    )
     normalized_awareness = recent_awareness or []
     normalized_insights = active_insights or []
     user_prompt = "\n\n".join(
@@ -771,6 +829,7 @@ def build_batch_content_evaluation_prompt(
     profile_summary: dict[str, object],
     content_items: list[dict[str, object]],
     source_context: str = "",
+    source_platform: str = "bilibili",
 ) -> list[dict[str, str]]:
     """Build a prompt that evaluates multiple content items in one LLM call.
 
@@ -788,7 +847,7 @@ def build_batch_content_evaluation_prompt(
     system_prompt = (
         "<task>\n"
         + source_hint
-        + "你要批量评估多个 B 站内容与这个用户画像的匹配度。\n"
+        + "你要批量评估多个 " + _platform_content_label(source_platform) + "与这个用户画像的匹配度。\n"
         "</task>\n\n"
         "<rules>\n"
         "1. 输出必须是严格 JSON 数组，不要附带解释。\n"
@@ -866,7 +925,9 @@ def build_recommendation_expression_prompt(
 }
 </output_schema>
 """.strip()
-    system_prompt = "\n\n".join([system_prompt, _render_tone_profile(tone_profile)])
+    system_prompt = "\n\n".join(
+        [system_prompt, _render_tone_profile(tone_profile, {source_platform: 1.0})]
+    )
     user_prompt = "\n\n".join(
         [
             "<profile_summary>",
@@ -913,7 +974,9 @@ def build_batch_expression_prompt(
         "]\n"
         "</output_schema>"
     )
-    system_prompt = "\n\n".join([system_prompt, _render_tone_profile(tone_profile)])
+    system_prompt = "\n\n".join(
+        [system_prompt, _render_tone_profile(tone_profile, {source_platform: 1.0})]
+    )
     user_prompt = "\n\n".join(
         [
             "<profile_summary>",
@@ -936,6 +999,7 @@ def build_delight_reason_prompt(
     content_summary: dict[str, object],
     reason_stub: str,
     tone_profile: ToneProfile | None,
+    source_platform: str = "bilibili",
 ) -> list[dict[str, str]]:
     """Build a prompt for generating a delight reason explanation.
 
@@ -966,7 +1030,9 @@ def build_delight_reason_prompt(
         "}\n"
         "</output_schema>"
     )
-    system_prompt = "\n\n".join([system_prompt, _render_tone_profile(tone_profile)])
+    system_prompt = "\n\n".join(
+        [system_prompt, _render_tone_profile(tone_profile, {source_platform: 1.0})]
+    )
     user_prompt = "\n\n".join(
         [
             "<profile_summary>",

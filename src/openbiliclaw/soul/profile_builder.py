@@ -55,6 +55,8 @@ class ProfileBuilder:
         awareness_notes: list[dict[str, Any]],
         active_insights: list[dict[str, Any]],
     ) -> SoulProfile:
+        raw_mix = preference.get("source_platform_mix") if isinstance(preference, dict) else None
+        source_mix = raw_mix if isinstance(raw_mix, dict) and raw_mix else None
         messages = build_soul_profile_prompt(
             history_summary=self._summarize_history(history),
             preference_summary=preference,
@@ -65,6 +67,7 @@ class ProfileBuilder:
                 preference_summary=preference,
                 recent_feedback=[],
             ),
+            source_platform_mix=source_mix,
         )
         try:
             response = await self.registry.complete_structured_task(

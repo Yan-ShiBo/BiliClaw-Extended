@@ -448,6 +448,7 @@ class RecommendationEngine:
             },
             reason_stub=reason_stub,
             tone_profile=tone_profile,
+            source_platform=content.source_platform or "bilibili",
         )
         try:
             response = await self._llm.complete_structured_task(

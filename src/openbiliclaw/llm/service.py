@@ -177,11 +177,14 @@ class LLMService:
     ) -> LLMResponse:
         """Generate a Socratic dialogue reply using core memory context."""
         tone_profile = self._build_dialogue_tone_profile()
+        preference_raw = self.memory.get_layer("preference").data
+        source_mix = preference_layer_from_dict(preference_raw).source_platform_mix
         prompt_messages = build_socratic_dialogue_prompt(
             user_message=user_message,
             core_memory_text="",
             tone_profile=tone_profile,
             history=[],
+            source_platform_mix=source_mix or None,
         )
         return await self.complete_with_core_memory(
             system_instruction=prompt_messages[0]["content"],
