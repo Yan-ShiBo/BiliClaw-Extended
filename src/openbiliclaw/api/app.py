@@ -106,12 +106,17 @@ def create_app(
 
     app = FastAPI(title="OpenBiliClaw API", default_response_class=JSONResponse)
 
-    # Workaround for h11 Content-Length mismatch on CJK text.
-    # GZip middleware forces chunked transfer encoding, which bypasses
-    # h11's Content-Length check entirely.
+    # GZip middleware: only compress responses ≥ 500 bytes.
+    # ``minimum_size=0`` was previously used as a sledgehammer workaround
+    # for an h11 Content-Length mismatch on CJK text in older starlette
+    # versions, but the side-effect was that 204/empty responses were
+    # also force-compressed (gzip header alone is ~20 bytes > original
+    # body), tripping h11's strict size check on every poll. Modern
+    # starlette already encodes JSON bodies as UTF-8 bytes for
+    # Content-Length, so the original workaround is no longer needed.
     from starlette.middleware.gzip import GZipMiddleware
 
-    app.add_middleware(GZipMiddleware, minimum_size=0)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -880,7 +885,6 @@ def create_app(
         finally:
             if concurrency is not None:
                 concurrency.chat_active = False
-        # Use JSONResponse to avoid h11 Content-Length mismatch on CJK text
         return JSONResponse(content={"reply": reply})
 
     def _record_probe_cognition(
