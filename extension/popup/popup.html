@@ -672,27 +672,42 @@
       background: rgba(0, 0, 0, 0.04);
     }
 
+    /* Nav buttons (‹ / ›). 28×28 visible target plus a transparent
+       ::before that extends the hit area to 36×36 — keeps the visual
+       compact in the kicker row while staying comfortably clickable
+       in a popup. */
     .delight-banner-nav {
-      width: 18px;
-      height: 18px;
-      border: 0;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.04);
-      color: var(--text-secondary);
-      font-size: 14px;
+      position: relative;
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(251, 114, 153, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--brand-strong);
+      font-size: 18px;
+      font-weight: 700;
       line-height: 1;
       cursor: pointer;
       padding: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+    }
+    .delight-banner-nav::before {
+      content: "";
+      position: absolute;
+      inset: -4px;
     }
     .delight-banner-nav:hover:not(:disabled) {
-      background: rgba(0, 0, 0, 0.1);
-      color: var(--text-main);
+      background: rgba(251, 114, 153, 0.14);
+      border-color: rgba(251, 114, 153, 0.45);
+    }
+    .delight-banner-nav:active:not(:disabled) {
+      transform: scale(0.94);
     }
     .delight-banner-nav:disabled {
-      opacity: 0.3;
+      opacity: 0.32;
       cursor: default;
     }
 
