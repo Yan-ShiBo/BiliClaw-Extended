@@ -135,9 +135,11 @@ class ProfileBuilder:
             )
 
         portrait = str(payload.get("personality_portrait", "")).strip()
-        if len(portrait) < 200:
+        portrait_len = len(portrait)
+        if portrait_len < 120 or portrait_len > 320:
             raise SoulProfileBuildError(
-                "LLM soul profile portrait must be at least 200 characters long."
+                f"LLM soul profile portrait length out of range "
+                f"(got {portrait_len}, expected 120-320 chars)."
             )
 
         if not str(payload.get("current_phase", "")).strip():

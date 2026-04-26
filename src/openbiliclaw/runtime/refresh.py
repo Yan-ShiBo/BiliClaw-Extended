@@ -116,6 +116,16 @@ class ContinuousRefreshController:
     notification_cooldown_hours: int = 2
     delight_cooldown_hours: int = 4
     check_interval_seconds: int = 60
+    # Proactive probe-push loop runs much less frequently than the main
+    # refresh loop.  Probes aren't streaming content — once the active
+    # set has been delivered, the only reason to push again is when a
+    # slot rotates (user feedback / TTL).  10 min is enough to surface
+    # newly generated probes without hammering the user.
+    proactive_push_interval_seconds: int = 600
+    # Soul pipeline tick runs every minute to drain buffers, but the
+    # speculator inside the pipeline doesn't need that cadence — its
+    # gating happens upstream now in pipeline.tick().  Kept explicit so
+    # we can tune in tests.
     discovery_limit: int = 30
     pool_target_count: int = 600
     _manual_refresh_task: asyncio.Task[None] | None = None
@@ -378,13 +388,19 @@ class ContinuousRefreshController:
             await asyncio.sleep(self.check_interval_seconds)
 
     async def _loop_proactive_push(self) -> None:
-        """Delight + interest probe push — lightweight, never blocks."""
+        """Delight + interest probe push — lightweight, never blocks.
+
+        Runs on a longer cadence than the main refresh loop because
+        probes/delight are not streaming content — once the active set
+        has been delivered, additional pushes within minutes only
+        contribute notification fatigue.
+        """
         while True:
             with suppress(Exception):
                 await self._publish_delight_if_available()
             with suppress(Exception):
                 await self._publish_interest_probe_if_available()
-            await asyncio.sleep(self.check_interval_seconds)
+            await asyncio.sleep(self.proactive_push_interval_seconds)
 
     async def _tick_xhs_producer(self) -> None:
         """Invoke the xhs search task producer if one is configured."""

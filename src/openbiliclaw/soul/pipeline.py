@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -574,6 +574,15 @@ class ProfileUpdatePipeline:
             else {layer.value: LayerBuffer(layer=layer) for layer in _BUFFERED_LAYERS}
         )
         self._total_ingested = 0
+        # Track when we last ran the speculator tick so we can throttle
+        # idle ticks while still letting layer-updates trigger fresh
+        # speculator passes.  See `tick()` body for usage.
+        self._last_speculator_tick_at: datetime | None = None
+        # Minimum interval between speculator ticks when no layer was
+        # updated.  Pipeline.tick itself runs every minute, but the
+        # speculator only needs periodic expire/promote checks; idle
+        # cadence at 30 minutes is plenty.
+        self._speculator_idle_min_interval = timedelta(minutes=30)
 
     def set_embedding_service(self, embedding_service: Any) -> None:
         """Attach or replace the embedding service for semantic operations."""
@@ -653,9 +662,24 @@ class ProfileUpdatePipeline:
                 if update_result:
                     result.layers_updated.append(update_result)
 
-        # Speculator tick: expire → promote → generate
+        # Speculator tick: expire → promote → generate.
+        # Pipeline.tick runs every minute, but the speculator doesn't
+        # need that cadence in steady state — once active is full and
+        # nothing has changed, ticking only burns I/O and prints log
+        # noise.  Only run when:
+        #   (a) a layer was actually flushed in this pipeline pass — the
+        #       profile materially changed, so probes might be stale
+        #   (b) idle interval (30 min) has elapsed since the last tick —
+        #       safety net so expire/promote still happens for users
+        #       whose profile is stable but who interact with probes
         if self._speculator:
-            await self._run_speculator_tick(result)
+            should_tick_speculator = bool(result.layers_updated) or (
+                self._last_speculator_tick_at is None
+                or now - self._last_speculator_tick_at >= self._speculator_idle_min_interval
+            )
+            if should_tick_speculator:
+                await self._run_speculator_tick(result)
+                self._last_speculator_tick_at = now
 
         # Cognition cycle: throttled awareness + insight regeneration.
         # Runs at most once per configured interval (default 12h).

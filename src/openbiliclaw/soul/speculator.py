@@ -417,6 +417,7 @@ class InterestSpeculator:
         max_active: int = 5,
         max_primary_interests: int = 15,
         max_secondary_interests: int = 60,
+        min_confidence: float = 0.48,
     ) -> None:
         self._llm_service = llm_service
         self._data_dir = data_dir
@@ -427,6 +428,11 @@ class InterestSpeculator:
         self._max_active = max_active
         self._max_primary_interests = max_primary_interests
         self._max_secondary_interests = max_secondary_interests
+        # Quality gate: discard candidates whose self-rated confidence
+        # falls below this threshold.  LLM confidence range is 0.3-0.6
+        # so 0.48 keeps the upper-half of self-rated guesses and drops
+        # the model's own "I'm not sure" hedges.
+        self._min_confidence = min_confidence
 
     def _load_state(self) -> SpeculativeState:
         if self._data_dir:
@@ -518,12 +524,17 @@ class InterestSpeculator:
             result.generated = [s for s in state.active if s.status == "active"]
 
         self._save_state(state)
-        logger.info(
-            "Speculator force_tick: generated=%d, promoted=%d, rejected=%d",
-            len(result.generated),
-            len(result.promoted),
-            len(result.rejected),
-        )
+        # Only log at INFO when something meaningful happened, otherwise
+        # demote to DEBUG so idle force_ticks don't pollute the log.
+        if result.generated or result.promoted or result.rejected:
+            logger.info(
+                "Speculator force_tick: generated=%d, promoted=%d, rejected=%d",
+                len(result.generated),
+                len(result.promoted),
+                len(result.rejected),
+            )
+        else:
+            logger.debug("Speculator force_tick: no-op (active full, nothing to expire/promote)")
         return result
 
     def observe(self, events: list[dict[str, Any]]) -> int:
@@ -722,7 +733,18 @@ class InterestSpeculator:
             logger.warning("Speculation generation failed", exc_info=True)
             return state
 
+        # Set of user's existing top-level like domain names (lowercase).
+        # Used as a quality check: an LLM-generated probe whose ``domain``
+        # equals one of the user's actual like domains is a lazy probe
+        # (e.g. domain="娱乐" when user already has 娱乐 0.95) — drop it.
+        like_domain_set = {
+            str(getattr(d, "domain", "")).strip().lower()
+            for d in getattr(profile.interest, "likes", [])
+            if str(getattr(d, "domain", "")).strip()
+        }
+
         candidates: list[SpeculativeInterest] = []
+        rejected_reasons: list[str] = []
         for item in raw:
             domain = str(item.get("domain", "")).strip()
             if not domain or domain.lower() in existing_domains:
@@ -735,11 +757,33 @@ class InterestSpeculator:
                 if isinstance(s, str) and str(s).strip()
             ]
             confidence = float(item.get("confidence", 0.4))
+            reason_text = str(item.get("reason", "")).strip()
+
+            # ── Quality gate ────────────────────────────────────────
+            # Skip low-confidence probes (LLM's own hedges).
+            if confidence < self._min_confidence:
+                rejected_reasons.append(
+                    f"{domain} (conf={confidence:.2f} < {self._min_confidence})"
+                )
+                continue
+            # Skip probes whose domain is just the user's main axis name.
+            if domain.lower() in like_domain_set:
+                rejected_reasons.append(f"{domain} (domain shadows existing like)")
+                continue
+            # Skip probes with no actionable specifics.
+            if len(specifics) < 2:
+                rejected_reasons.append(f"{domain} (specifics<2)")
+                continue
+            # Skip probes whose reason is implausibly short (LLM phoning it in).
+            if len(reason_text) < 20:
+                rejected_reasons.append(f"{domain} (reason<20chars)")
+                continue
+
             candidates.append(
                 SpeculativeInterest(
                     domain=domain,
                     category=str(item.get("category", "")),
-                    reason=str(item.get("reason", "")),
+                    reason=reason_text,
                     experience_mode=_normalize_experience_mode(item.get("experience_mode")),
                     entry_load=_normalize_entry_load(item.get("entry_load")),
                     confidence=confidence,
@@ -749,6 +793,13 @@ class InterestSpeculator:
                     confirmation_threshold=self._confirmation_threshold,
                     specifics=specifics,
                 )
+            )
+
+        if rejected_reasons:
+            logger.info(
+                "Speculator quality gate dropped %d candidate(s): %s",
+                len(rejected_reasons),
+                "; ".join(rejected_reasons),
             )
 
         for candidate in _select_diverse_candidates(candidates, limit=slots):
