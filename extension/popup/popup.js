@@ -553,7 +553,68 @@ function renderSpeculativeInterests(container, items) {
       row.append(specs);
     }
 
+    // Inline action buttons on active speculations so the user can give
+    // feedback directly from the profile section without waiting for a
+    // WebSocket push or opening the messages inbox.
+    if ((item.status || "active") === "active" && item.domain) {
+      const actions = document.createElement("div");
+      actions.className = "spec-actions";
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.className = "probe-btn is-confirm";
+      confirmBtn.textContent = "喜欢";
+      confirmBtn.addEventListener("click", () =>
+        handleSpecResponse(item.domain, "confirm", row),
+      );
+
+      const rejectBtn = document.createElement("button");
+      rejectBtn.className = "probe-btn is-reject";
+      rejectBtn.textContent = "不喜欢";
+      rejectBtn.addEventListener("click", () =>
+        handleSpecResponse(item.domain, "reject", row),
+      );
+
+      actions.append(confirmBtn, rejectBtn);
+      row.append(actions);
+    }
+
     container.append(row);
+  }
+}
+
+async function handleSpecResponse(domain, responseType, rowEl) {
+  if (!domain) return;
+  // Disable buttons immediately so double-click can't fire twice.
+  if (rowEl instanceof HTMLElement) {
+    rowEl.querySelectorAll(".probe-btn").forEach((b) => {
+      if (b instanceof HTMLButtonElement) b.disabled = true;
+    });
+  }
+  try {
+    await respondToInterestProbe(domain, responseType);
+    if (rowEl instanceof HTMLElement) {
+      rowEl.replaceChildren();
+      const msg = document.createElement("p");
+      msg.className = "spec-result";
+      msg.textContent =
+        responseType === "confirm"
+          ? `好，「${domain}」记住了。`
+          : `好，「${domain}」先不看了。`;
+      rowEl.append(msg);
+      setTimeout(() => rowEl.remove(), 2500);
+    }
+    // Drop matching message-card from inbox state too, so the badge is in sync.
+    state.messages = state.messages.filter((m) => m.domain !== domain);
+    if (state.pendingProbe?.domain === domain) state.pendingProbe = null;
+    updateMessageBadge();
+    void loadProfileSummary({ force: true });
+  } catch (err) {
+    console.error("spec response failed:", err);
+    if (rowEl instanceof HTMLElement) {
+      rowEl.querySelectorAll(".probe-btn").forEach((b) => {
+        if (b instanceof HTMLButtonElement) b.disabled = false;
+      });
+    }
   }
 }
 
@@ -1499,15 +1560,22 @@ function getProfileCognitionItems(summary) {
 }
 
 // Split a long prose portrait into reader-friendly paragraphs.
-// LLM-generated portraits are 600-1000 chars of continuous Chinese
-// text — rendered as a single block they read like a wall and the
-// user's eye can't find a stopping point. Group sentences (split on
-// 。！？.!?) until either ~150 chars accumulate or a natural turn
-// connector ("但"/"最近"/"所以"/"不过"/"另外"/"于是") starts a new
-// thought. Render each group as its own ``<p>``.
+// Old prompt produced 600-1000 char walls that needed aggressive
+// splitting on every turn connector ("但"/"最近"/...). The new prompt
+// caps portraits around 200-260 chars, where the same aggressive
+// splitter chops the text into 5 isolated 1-2-sentence chunks that
+// visually read as a list, not a flowing reflection.
+//
+// Heuristic: short portraits render as a single paragraph; only longer
+// ones get sentence-grouped. Target paragraph length scales with total
+// length so we don't over-fragment medium portraits either.
 function splitPortraitToParagraphs(text) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return [];
+  const totalLen = trimmed.length;
+
+  if (totalLen < 280) return [trimmed];
+
   const sentences = trimmed
     .split(/(?<=[。！？.!?])\s*/)
     .map((s) => s.trim())
@@ -1515,7 +1583,9 @@ function splitPortraitToParagraphs(text) {
   if (sentences.length <= 1) return sentences;
 
   const TURN_PREFIXES = ["但", "不过", "然而", "最近", "所以", "因此", "另外", "其实", "于是"];
-  const TARGET_PARAGRAPH_LEN = 150;
+  // Aim for ~3 paragraphs regardless of total length, with a minimum
+  // grouping of 180 chars so we never produce <2-sentence stubs.
+  const targetLen = Math.max(180, Math.ceil(totalLen / 3));
 
   const paragraphs = [];
   let buffer = [];
@@ -1530,7 +1600,9 @@ function splitPortraitToParagraphs(text) {
 
   for (const sentence of sentences) {
     const isTurn = TURN_PREFIXES.some((p) => sentence.startsWith(p));
-    if (buffer.length > 0 && (bufferLen >= TARGET_PARAGRAPH_LEN || isTurn)) {
+    // Only split on turn-connector once the current paragraph already
+    // has some weight — otherwise short opening sentences get orphaned.
+    if (buffer.length > 0 && (bufferLen >= targetLen || (isTurn && bufferLen >= 100))) {
       flush();
     }
     buffer.push(sentence);
@@ -2418,6 +2490,9 @@ async function loadProfileSummary({ force = false } = {}) {
     if (!state.online) {
       renderProfileSummary(normalizeProfileSummary({ initialized: false }));
     } else if (state.profile) {
+      // Cached path: still hydrate inbox so reopening popup with a
+      // warm profile cache still surfaces the active speculations.
+      hydrateInboxFromSpeculations(state.profile.speculative_interests);
       renderProfileSummary(state.profile);
     }
     return;
@@ -2439,9 +2514,54 @@ async function loadProfileSummary({ force = false } = {}) {
     };
     state.expandedCognitionIndex = null;
   }
+  // Hydrate after every successful or fallback profile load so the
+  // inbox stays in sync with the speculator state (the backend dedupes
+  // its WebSocket pushes via ``probed_domains``, so already-pushed
+  // probes won't re-arrive on reconnect).
+  hydrateInboxFromSpeculations(state.profile?.speculative_interests);
   state.profileLoaded = true;
   renderProfileSummary(state.profile);
   maybeLoadMoreCognitionHistory();
+}
+
+function hydrateInboxFromSpeculations(speculations) {
+  if (!Array.isArray(speculations)) return;
+  // Speculator regenerates probes on a runtime cycle; older actives may
+  // have rotated to cooldown.  We must REPLACE the interest.probe slice
+  // of state.messages with the current active set, otherwise the inbox
+  // accumulates stale entries from past cycles and drifts away from
+  // what the profile section shows.
+  // Delight messages are preserved untouched — they live on a separate
+  // lifecycle (delight/pending endpoint).
+  const activeDomains = new Set(
+    speculations
+      .filter((s) => s && s.domain && (!s.status || s.status === "active"))
+      .map((s) => s.domain),
+  );
+  // Drop interest.probe entries no longer in the active set.
+  state.messages = state.messages.filter((m) => {
+    const type = m?.type || "interest.probe";
+    if (type !== "interest.probe") return true;
+    return m.domain && activeDomains.has(m.domain);
+  });
+  // Add any current active probes not yet in state.messages.
+  const existingDomains = new Set(
+    state.messages
+      .filter((m) => (m?.type || "interest.probe") === "interest.probe" && m?.domain)
+      .map((m) => m.domain),
+  );
+  for (const item of speculations) {
+    if (!item || (item.status && item.status !== "active") || !item.domain) continue;
+    if (existingDomains.has(item.domain)) continue;
+    state.messages.push({
+      type: "interest.probe",
+      domain: item.domain,
+      reason: item.reason || "",
+      specifics: Array.isArray(item.specifics) ? item.specifics : [],
+    });
+    existingDomains.add(item.domain);
+  }
+  updateMessageBadge();
 }
 
 async function loadMoreCognitionHistory() {
@@ -3004,6 +3124,11 @@ async function initializePopup() {
   );
   setHint("先看看本地后端连上没。");
   await initializeRecommendations();
+  // Always fetch profile-summary on startup so the messages inbox is
+  // populated regardless of which tab the user lands on.  Without this
+  // the inbox stays empty until the user manually opens the profile
+  // tab (the place where loadProfileSummary historically fired).
+  void loadProfileSummary();
   connectRuntimeStream();
 }
 
