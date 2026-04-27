@@ -4,6 +4,46 @@
 
 ---
 
+## v0.3.0: 多源架构回归 + 推荐稳态重写（2026-04-28）
+
+### 多源（multi-source）
+
+- 重新合入此前被回滚的 Phase 0 + Phase 1 多源架构（content_id 兼容层 / SourceAdapter / SourceRecipe / BilibiliAdapter），并叠加 Phase 2 完整投产
+- 新增 `xiaohongshu_adapter` 与 `web_adapter`，支持小红书与通用 web 源
+- 浏览器插件加 `host_permissions: *://*.xiaohongshu.com/*`，并新增对应 content scripts (`xiaohongshu.js`)、main-world token sniffer (`xhs-token-sniffer.js`)、background `xhs-task-dispatcher`
+- popup 文案/动作面、设置页、收藏夹/概览均按多源接入更新
+
+### 推荐池多样性 / discovery 渠道平衡
+
+- trending / explore 在评估前按 rid / domain 做 round-robin 交错，让 30 条 hard-cap 公平覆盖各分区
+- 新增 `Database.trim_topic_group_overflow`，每 refresh tick 触发，把任意 `topic_group` 在 fresh pool 的占比压在 ~10% 以内（实测把 `人工智能 / related_chain` 的 207 条压回 60）
+- `_build_source_replenishment_plan` 把全部缺货 source 合并到一次 `discover()` 并行 fan-out，告别"每轮一种 source"的 60s 串行
+- `trim_pool_to_target_count` 加 `source_share_quotas`，三段桶（protected / negotiable_untracked / negotiable_tracked）保护 under-quota 源不被 score-only 修剪误伤
+- `cache_content` UPSERT 时把 `pool_status='suppressed'` 自动复活为 `'fresh'`，让 trending 这类慢更新源能复用 B 站 ranking 不变的池子
+- `_SOURCE_TARGET_SHARES` trending 比例 3 → 1，匹配实际稳态（~46）而不是 120 这个永远摸不到的目标
+
+### 换一批（reshuffle）性能：2.6s → 0.6s
+
+- `_merge_topic_supergroups` 的 embedding 调用 sequential await → `asyncio.gather`
+- embedding cache key 由 `label | sample_titles`（每轮变 → 0% 命中）改为 `label only`（命中率 ~100%）
+- popup 的 10 条 recommendation insert 由 10 次独立 commit 合并为单 transaction（消除 fsync 串行阻塞）
+- 在每个 refresh tick 后 prewarm 所有 `topic_group` 的 embedding —— 新 label 进池时由后台付 API round-trip 而不是用户点击时
+
+### 本地 embedding 兜底
+
+- `OllamaProvider.embed()`：通过 Ollama 原生 `/api/embeddings` 拿向量，失败返空降级
+- `build_embedding_service` 按 provider 选默认 model：`gemini → gemini-embedding-001`，`openai → text-embedding-3-small`，`ollama → bge-m3`
+- 新 CLI 命令 `openbiliclaw setup-embedding`：探测 `localhost:11434`、流式拉 `bge-m3`、写 `[llm.embedding]` 配置；同样的 wizard 也在 `init` 末尾询问
+- `install.sh` / `agent-install.md` / `README.md` / `README_EN.md` / `docs/docker-deployment.md` 全部加了"可选启用本地 Ollama embedding"指引
+
+### 工程
+
+- 测试：新增 trending/explore 的 interleave 回归、`trim_topic_group_overflow` 跨源 cap、`trim_pool` 三桶保护、`cache_content` 复活、Ollama embed mock + URL 处理、registry 默认 model 选择、wizard 探测/拉取/持久化共 ~20 个新测试
+- 类型：所有改动通过 `mypy strict`
+- 多端 lint 干净（ruff + 扩展的 tsc/node test）
+
+---
+
 ## M8: 插件后端 API（进行中）
 
 ### 兴趣探针丰富度修正：保留大胆探索，但不再塌成同一体验轴
