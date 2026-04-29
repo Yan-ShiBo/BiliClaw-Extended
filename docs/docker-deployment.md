@@ -36,14 +36,22 @@ cd OpenBiliClaw
 # 2. 启动容器（首次会构建镜像，后续仅增量）
 docker compose up -d --build
 
-# 3. 一键初始化（交互式引导配置 + B 站认证 + 画像生成 + 首轮发现）
+# 3. 一键初始化：交互式向导 + B 站认证 + 画像生成 + 首轮发现
+#    首次运行预计 2–5 分钟（拉历史 / LLM 调用 / 多策略发现）
 docker exec -it openbiliclaw-backend openbiliclaw init
 
 # 4. 健康状态：HEALTHCHECK 会让 docker compose ps 在容器真正可服务后才显示 healthy
 docker compose ps
 ```
 
-`init` 命令会引导你完成所有必要的配置，包括设置 LLM API Key 和 B 站认证。
+`init` 是 v0.3.5+ 的 4 阶段交互式向导，自动检测 `config.toml` 缺哪些配置并按需引导：
+
+1. **Phase 1 — 选 LLM 服务**：菜单首选「本地 Ollama」（免费 / 离线 / 无需 API Key，推荐新手）。如果你已有 OpenAI / Claude / Gemini / DeepSeek 等 Key 也可以直接选。「OpenAI 协议兼容自建网关」（Azure / vLLM / LMStudio / OneAPI 等）是单独的菜单项，不要和「OpenAI 官方」混淆。
+2. **Phase 2 — 给所选服务填配置**：每个选项只问该选项需要的字段。Ollama 只问模型名；云厂商只问 API Key；OpenAI 协议兼容自建网关问 Base URL + API Key + 模型名。
+3. **Phase 3 — Embedding（独立提问）**：跟随主 LLM / 本地 Ollama bge-m3 / 自定义 OpenAI 兼容 / 指定其他 provider，4 选 1。
+4. **Phase 4 — Per-module 覆盖（高级，默认跳过）**：可单独给 soul / discovery / recommendation / evaluation 指定不同模型。
+
+接着会引导你贴 B 站 Cookie（向导内有 F12 → Network 取 cookie 的 5 步教程），最后才进入真正的 init 阶段：拉历史、生成画像、跑首轮发现。整个流程会打印进度，不要以为卡住了——LLM 单次响应可能就要 10–30s。
 
 > 💡 **AI agent 一句话部署**：把下面这句粘到 Claude Code / Codex CLI / Cursor / OpenClaw：
 > ```
@@ -75,16 +83,20 @@ docker exec -it openbiliclaw-backend vi /app/runtime/config.toml
 
 ### LLM 配置
 
-支持多种 LLM 提供商，在配置文件中设置 `default_provider` 和对应的 `api_key`：
+`init` 向导会按你选的 provider 自动写好 `[llm.<provider>]` 段。如果你想手动改，下面是 v0.3.5+ 的对照表（按推荐顺序排列）：
 
-- **openai** — GPT-4o（默认）
-- **claude** — Claude Sonnet
-- **gemini** — Gemini 2.5 Flash
-- **deepseek** — DeepSeek Chat
-- **ollama** — 本地模型（需确保容器能访问宿主机的 Ollama 服务）
-- **openrouter** — 通过 OpenRouter 访问多种模型
+| Provider | 是否要 Key | 适合谁 | 备注 |
+|---|---|---|---|
+| `ollama` | ❌ | 不想花钱 / 想离线用 / 刚接触本项目 | Docker 里要把 `[llm.ollama] base_url` 设成 `http://host.docker.internal:11434/v1` 才能从容器访问宿主机的 Ollama |
+| `openai` | ✅ | 已有 OpenAI 账户 | base_url 留空 = `https://api.openai.com/v1`；填了就是 OpenAI 协议兼容服务（Azure / vLLM / LMStudio / OneAPI / 自建网关），写到同一段 |
+| `claude` | ✅ | Anthropic 账户 | — |
+| `gemini` | ✅ | Google AI Studio 账户 | 部分免费额度可用 |
+| `deepseek` | ✅ | 国内可直连 | OpenAI 兼容协议 |
+| `openrouter` | ✅ | 想一个 Key 跑多家模型 | 按调用计费 |
 
-还可为不同模块（soul / discovery / recommendation / evaluation）指定不同的模型，例如用便宜的模型做内容发现评估，用高质量模型做灵魂画像生成。
+> 「OpenAI 官方」 ≠ 「OpenAI 协议兼容自建网关」：v0.3.6+ 向导把这两个拆成独立菜单项，避免心智混淆。后端写到同一个 `[llm.openai]` 段，区分点是 `base_url` 字段。
+
+**Per-module 覆盖（可选）**：在 `[llm.soul]` / `[llm.discovery]` / `[llm.recommendation]` / `[llm.evaluation]` 段单独指定 `provider` + `model`。典型用法：发现 / 评估走便宜模型，灵魂画像走高质量模型。详见 [docs/modules/config.md](modules/config.md)。
 
 ## 日常命令
 

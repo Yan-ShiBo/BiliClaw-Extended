@@ -64,16 +64,23 @@ docker compose up -d --build
 docker exec -it openbiliclaw-backend openbiliclaw init
 ```
 
-初始化会顺序完成：
+> ⏱  **首次运行预计 2–5 分钟**。LLM 单次响应可能就要 10–30s，全程会打印进度，不要以为卡住了。
 
-1. 检查 LLM 配置
-2. 检查 B 站认证
-3. 拉取历史
-4. 写入事件并分析偏好
-5. 生成初始画像
-6. 自动补首轮内容池
+`init` 是 v0.3.5+ 的 4 阶段交互式向导，会自动检测缺什么并按需补齐：
 
-如果当前终端是交互式，且还没配置 API Key 或 B 站 Cookie，`init` 会直接引导输入。
+1. **Phase 1 — LLM 服务选择**：菜单首选「本地 Ollama」（免费 / 离线 / 无需 API Key）；其他云厂商按需选；「OpenAI 协议兼容自建网关」是单独的菜单项。
+2. **Phase 2 — 给所选服务填配置**：每个选项只问该选项需要的字段（Ollama 只问模型名；云厂商问 Key + 模型；OpenAI 协议兼容问 Base URL + Key + 模型）。
+3. **Phase 3 — Embedding（独立提问）**：4 选 1（跟随主 LLM / Ollama bge-m3 / 自定义 OpenAI 兼容 / 其他 provider）。
+4. **Phase 4 — Per-module 覆盖**（高级，默认跳过）。
+
+接着引导你贴 B 站 Cookie（向导内有 F12 → Network 取 cookie 的 5 步教程），最后才进入真正的 init 阶段：
+
+1. 拉取 B 站历史 / 收藏 / 关注（≈ 20–60s）
+2. 分析偏好（LLM 调用，≈ 30–90s）
+3. 生成初始画像（LLM 调用，≈ 30–60s）
+4. 自动补首轮内容池（多策略并发 + LLM 评估，≈ 1–3 分钟）
+
+如果当前终端**不是**交互式（CI / 服务器脚本），`init` 不会等待输入，而是直接报错——这是为了避免把脚本挂死。这时改用 `python3 scripts/agent_bootstrap.py --provider ... --llm-api-key ... --bilibili-cookie ...`（详见 [docs/agent-install.md](agent-install.md)）。
 
 ### 3. 给 OpenClaw 保留一个本地 workspace
 
@@ -117,7 +124,9 @@ cp config.example.toml config.toml
 openbiliclaw init
 ```
 
-如果 `config.toml` 里还缺 API Key 或 B 站 Cookie，交互式终端会提示补齐。
+> ⏱  **首次运行预计 2–5 分钟**。同 Docker 路径，触发同一份 4 阶段交互式向导（LLM → Embedding → Cookie），后跑实际 init（拉历史 / 生成画像 / 首轮发现）。
+
+如果你想跳过交互式向导（自动化场景），用 `scripts/agent_bootstrap.py` 的命令行 flag 一次性把所有字段传进去——见 [docs/agent-install.md](agent-install.md)。
 
 ## OpenClaw 如何发现并调用
 

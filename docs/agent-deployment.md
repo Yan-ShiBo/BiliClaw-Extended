@@ -87,10 +87,18 @@ python3 scripts/agent_bootstrap.py \
 | `--project-dir` | 目标仓库目录。默认当前目录。 |
 | `--mode` | `auto`（默认，有 Docker 走 Docker，否则 local）、`docker`、`local`。 |
 | `--reuse-from PATH` | 从另一份 OpenBiliClaw 目录复用 API Key / Bilibili Cookie。 |
-| `--provider NAME` | 强制切换默认 LLM provider（openai/claude/gemini/deepseek/ollama/openrouter）。 |
+| `--provider NAME` | 强制切换默认 LLM provider（openai/claude/gemini/deepseek/ollama/openrouter）。OpenAI 协议兼容自建网关也填 `openai`，配合 `--llm-base-url`。 |
 | `--llm-api-key KEY` | 给当前（或 `--provider` 指定的）provider 写入 API Key。 |
+| `--llm-base-url URL` | （v0.3.5+）覆盖该 provider 的 `base_url`。**OpenAI 协议兼容服务必填**（Azure / vLLM / LMStudio / OneAPI / 自建网关）。 |
+| `--llm-model NAME` | （v0.3.5+）覆盖该 provider 的 chat 模型名。 |
+| `--embedding-provider NAME` | （v0.3.5+）embedding provider。空字符串 = 跟随主 LLM；填 `ollama` 走本地 bge-m3 兜底；填其他 provider 则单独走该家。 |
+| `--embedding-model NAME` | （v0.3.5+）embedding 模型名（典型: `bge-m3`、`text-embedding-3-small`）。 |
+| `--embedding-base-url URL` | （v0.3.5+）自托管 embedding 网关的 base_url，会写到对应 `[llm.<provider>]` 段。 |
+| `--embedding-api-key KEY` | （v0.3.5+）自托管 embedding 网关的 API Key。 |
+| `--module-override MODULE=PROVIDER:MODEL` | （v0.3.5+，可重复）per-module LLM 覆盖。MODULE ∈ {soul, discovery, recommendation, evaluation}。例：`--module-override discovery=deepseek:deepseek-chat`。 |
 | `--bilibili-cookie VALUE` | 直接写入 Bilibili Cookie，同时落盘到 `data/bilibili_cookie.json`。 |
 | `--skip-start` | 只准备配置和依赖，不启动服务。 |
+| `--skip-init` | （v0.3.7 起默认 **不要加**）凭据齐全 + 后端健康后，bootstrap 会自动跑 `openbiliclaw init`。只有当用户显式说「先别跑 init」或你只是给已经初始化过的实例补凭据时才加这个 flag。 |
 | `--skip-health-check` | 启动服务但不等 `/api/health`。 |
 | `--host`, `--port` | local 模式下 API 监听地址，默认 `127.0.0.1:8420`。 |
 
@@ -109,7 +117,10 @@ python3 scripts/agent_bootstrap.py \
 {"status": "ok", "message": "dependencies_installed", "details": {}}
 {"status": "ok", "message": "local_started", "details": {"host": "127.0.0.1", "port": 8420}}
 {"status": "complete", "message": "backend_healthy", "details": {"health_url": "...", "missing": []}}
+{"status": "ok", "message": "init_complete", "details": {}}
 ```
+
+> v0.3.7+ 多了最后这一行 `init_complete`：当凭据齐全 + 后端健康 + 没加 `--skip-init` 时，`agent_bootstrap.py` 会自动跑 `openbiliclaw init`（拉历史 / 生成画像 / 跑首轮发现），完事后再发这条事件。失败则发 `init_failed`，但不影响 bootstrap 退出码。
 
 最后一行的 `status` 字段是整体结论：
 
@@ -158,23 +169,43 @@ curl -sS "$HEALTH_URL"   # $HEALTH_URL 来自最后一条 BOOTSTRAP_STATUS 的 d
 docker exec -it openbiliclaw-backend openbiliclaw config-show
 ```
 
-### 7. （可选）首次初始化
+### 7. 首次初始化（v0.3.7 起默认自动跑）
 
-当凭据都齐了，可以在本地模式下手动跑一次：
+**v0.3.7 之前**：`init` 是「部署后可选」步骤，需要你手动触发。
+**v0.3.7+ 改了**：当凭据齐全（`config_summary.missing == []`）+ 后端健康（`backend_healthy`）后，`agent_bootstrap.py` 会自动调用 `openbiliclaw init`，把推荐链路真正接通。
+
+**为什么改成默认跑**：用户期望「一句话装机」之后打开扩展能直接看到推荐。如果 `init` 没跑，画像没生成、历史没拉、内容池是空的，用户等于没装好。
+
+**首次运行 ≈ 2–5 分钟**（拉历史 / LLM 调用 / 多策略发现）。bootstrap 会把 init 的 stdout 流式打到你的终端，进度全程可见。
+
+要**显式跳过** init（比如只给已初始化的实例补一个 cookie），加 `--skip-init`：
 
 ```bash
-uv run openbiliclaw init         # 如果使用 uv
-# 或
-.venv/bin/openbiliclaw init       # 如果走 pip + venv
+python3 scripts/agent_bootstrap.py \
+  --project-dir . \
+  --bilibili-cookie "$NEW_COOKIE" \
+  --skip-init
 ```
 
-Docker 模式：
+要**手动重跑** init（任何时候，不通过 bootstrap）：
 
 ```bash
+# local + uv
+uv run openbiliclaw init
+# local + venv
+.venv/bin/openbiliclaw init
+# Docker
 docker exec -it openbiliclaw-backend openbiliclaw init
 ```
 
-`init` 会拉取 B 站历史、生成初始画像并补齐第一轮内容池。这一步**不是**部署必需的——服务跑起来就算部署完成——但用户通常希望你顺手做完。
+事件流里会出现 `init_complete` 或 `init_failed`：
+
+```json
+{"status": "ok", "message": "init_complete", "details": {}}
+{"status": "warning", "message": "init_failed", "details": {"error": "..."}}
+```
+
+`init_failed` 不会让 bootstrap 整体退出失败——后端服务仍在跑，只是用户需要手动重试 `openbiliclaw init`。
 
 ### 8. 报告给用户
 
