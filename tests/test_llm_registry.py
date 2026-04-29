@@ -165,6 +165,33 @@ def test_build_llm_registry_registers_ollama_when_base_url_is_explicit() -> None
     assert registry.available_providers == ["ollama"]
 
 
+def test_build_llm_registry_auto_registers_ollama_when_embedding_wants_it() -> None:
+    """If [llm.embedding] provider="ollama" but [llm.ollama] is empty, the
+    registry must still register Ollama — otherwise build_embedding_service
+    can't resolve the provider and silently falls back to the default LLM,
+    so the user's "I want local embedding" preference is ignored.
+
+    Real-world manifestation: setup-embedding wizard wrote only
+    [llm.embedding] but left [llm.ollama] empty; the backend kept calling
+    Gemini's embedding API for every reshuffle even though config said
+    ollama.
+    """
+    from openbiliclaw.config import EmbeddingConfig
+
+    config = Config(
+        llm=LLMConfig(
+            default_provider="gemini",
+            gemini=LLMProviderConfig(api_key="test-key", model="gemini-2.0-flash"),
+            ollama=LLMProviderConfig(model="", base_url=""),
+            embedding=EmbeddingConfig(provider="ollama", model="bge-m3"),
+        )
+    )
+    registry = build_llm_registry(config)
+    assert "ollama" in registry.available_providers
+    # Default provider is still gemini (we don't pollute chat selection)
+    assert registry.default_provider == "gemini"
+
+
 def test_build_embedding_service_picks_bge_m3_default_for_ollama(
     tmp_path,
 ) -> None:

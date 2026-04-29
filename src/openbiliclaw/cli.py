@@ -644,12 +644,20 @@ def _ollama_pull_model(model: str, host: str = "http://localhost:11434") -> bool
 
 
 def _save_embedding_provider_config(provider: str, model: str) -> None:
-    """Persist the embedding provider/model selection to config.toml."""
+    """Persist the embedding provider/model selection to config.toml.
+
+    When ``provider="ollama"``, also fill ``[llm.ollama] base_url`` so the
+    LLM registry's ``_maybe_ollama_provider`` actually registers Ollama
+    (otherwise ``build_embedding_service`` can't resolve the provider and
+    silently falls back to the default LLM provider for embedding).
+    """
     from openbiliclaw.config import load_config_with_diagnostics, save_config
 
     config, diagnostics = load_config_with_diagnostics()
     config.llm.embedding.provider = provider
     config.llm.embedding.model = model
+    if provider == "ollama" and not config.llm.ollama.base_url.strip():
+        config.llm.ollama.base_url = "http://localhost:11434/v1"
     save_config(config, diagnostics.config_path)
 
 

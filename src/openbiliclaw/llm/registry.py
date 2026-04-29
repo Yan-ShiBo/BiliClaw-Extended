@@ -201,7 +201,16 @@ def _maybe_ollama_provider(config: Config, overrides: dict[str, LLMProvider]) ->
 
     raw_base_url = config.llm.ollama.base_url.strip()
     model = config.llm.ollama.model.strip()
-    if not model and not raw_base_url:
+
+    # Embedding-driven registration: when [llm.embedding] provider="ollama",
+    # the user wants Ollama for embedding even if they never configured it
+    # for chat completions. Auto-register so build_embedding_service can
+    # actually reach it. The setup-embedding wizard only writes the
+    # [llm.embedding] section, so this path is the live experience for
+    # anyone who opted into local embedding fallback.
+    embedding_wants_ollama = config.llm.embedding.provider.strip().lower() == "ollama"
+
+    if not model and not raw_base_url and not embedding_wants_ollama:
         return None
     base_url = raw_base_url or "http://localhost:11434/v1"
     return OllamaProvider(
