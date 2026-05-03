@@ -218,7 +218,6 @@ class LLMDelightScorer:
                     max_tokens=2048,
                     caller="recommendation.delight_score",
                 )
-                parsed = json.loads(str(getattr(response, "content", "")).strip())
             except Exception:
                 logger.warning(
                     "Delight LLM batch scoring failed for %d candidates",
@@ -226,15 +225,19 @@ class LLMDelightScorer:
                     exc_info=True,
                 )
                 continue
-            if not isinstance(parsed, list):
+
+            entries = _extract_delight_entries(
+                str(getattr(response, "content", "")), expected_count=len(batch)
+            )
+            if not entries:
                 logger.warning(
-                    "Delight LLM batch returned non-list payload: %s",
-                    type(parsed).__name__,
+                    "Delight LLM batch produced 0 parseable entries for %d candidates "
+                    "(provider response shape mismatch?)",
+                    len(batch),
                 )
                 continue
-            for entry in parsed:
-                if not isinstance(entry, dict):
-                    continue
+
+            for entry in entries:
                 bvid = str(entry.get("bvid", "")).strip()
                 if not bvid:
                     continue
@@ -245,6 +248,87 @@ class LLMDelightScorer:
                 )
 
         return results
+
+
+def _extract_delight_entries(content: str, *, expected_count: int) -> list[dict[str, Any]]:
+    """Extract a list of {bvid, score, rationale, hook} from an LLM response.
+
+    Different LLM providers/models in JSON mode return different root
+    shapes:
+      - DeepSeek typically returns a clean ``[...]`` list (matching the
+        prompt's <output_schema>).
+      - mimo-v2.5-pro tends to wrap in an object: ``{"results": [...]}``,
+        ``{"items": [...]}``, ``{"delights": [...]}``, or sometimes emits
+        multiple root JSON objects newline-separated (causing
+        ``json.JSONDecodeError: Extra data``).
+      - Some models echo the schema as a single object when batch=1.
+
+    This helper unifies all three: try tolerant parse → unwrap dict
+    keys → fall back to JSONL line-by-line. Returns an empty list only
+    if no valid entry could be extracted.
+    """
+    from openbiliclaw.llm.json_utils import parse_llm_json_tolerant
+
+    text = content.strip()
+    if not text:
+        return []
+
+    parsed = parse_llm_json_tolerant(text)
+    entries = _coerce_to_entry_list(parsed)
+    if entries:
+        return entries
+
+    # JSONL fallback: parser failed or returned None — try splitting
+    # on newlines and parsing each line as a standalone JSON object.
+    # Handles mimo's "Extra data" mode where multiple roots are emitted.
+    salvaged: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            piece = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        sub = _coerce_to_entry_list(piece)
+        if sub:
+            salvaged.extend(sub)
+    if salvaged:
+        return salvaged[:expected_count] if expected_count > 0 else salvaged
+
+    return []
+
+
+def _coerce_to_entry_list(data: Any) -> list[dict[str, Any]]:
+    """Normalize parsed JSON into a flat list of entry dicts.
+
+    Accepts:
+      - ``list[dict]``: returned as-is (filtered to dicts only)
+      - ``dict`` with one of {results, items, delights, data, scores,
+        candidates, output, list, array}: unwrap that key
+      - single ``dict`` with a ``bvid`` field: wrap in a list
+      - anything else: empty list
+    """
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        for wrap_key in (
+            "results",
+            "items",
+            "delights",
+            "data",
+            "scores",
+            "candidates",
+            "output",
+            "list",
+            "array",
+        ):
+            inner = data.get(wrap_key)
+            if isinstance(inner, list):
+                return [item for item in inner if isinstance(item, dict)]
+        if "bvid" in data:
+            return [data]
+    return []
 
 
 def _build_delight_profile_summary(profile: Any) -> dict[str, object]:
