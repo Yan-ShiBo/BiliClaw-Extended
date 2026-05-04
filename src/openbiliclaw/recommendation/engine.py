@@ -316,8 +316,18 @@ class RecommendationEngine:
             if expression_mode == "precomputed":
                 rec.expression = item.pool_expression.strip()
                 rec.topic_label = item.pool_topic_label.strip()
-                # Fallback when precomputed copy is missing
+                # v0.3.57+: pool gate (get_pool_candidates SQL) now requires
+                # pool_expression / pool_topic_label non-empty before a row
+                # is considered in-pool, so this fallback path should never
+                # fire in production. Keep it as a race-window safety net
+                # and log loudly when it does — the warning is the canary.
                 if not rec.expression:
+                    logger.warning(
+                        "Pool gate leak: bvid=%s pool_expression empty at "
+                        "serve time (expected to be filtered out by "
+                        "get_pool_candidates SQL). Falling back to template.",
+                        item.bvid,
+                    )
                     rec.expression = self._fallback_expression(item)
                 if not rec.topic_label:
                     rec.topic_label = self._fallback_topic_label(profile)

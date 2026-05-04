@@ -801,6 +801,8 @@ class Database:
                 FROM content_cache
                 WHERE COALESCE(pool_status, 'fresh') = 'fresh'
                   AND COALESCE(feedback_type, '') != 'dislike'
+                  AND COALESCE(pool_expression, '') != ''
+                  AND COALESCE(pool_topic_label, '') != ''
                   AND (
                     source_platform != 'xiaohongshu'
                     OR content_url LIKE '%xsec_token=%'
@@ -840,6 +842,8 @@ class Database:
                     FROM content_cache
                     WHERE COALESCE(pool_status, 'fresh') = 'fresh'
                       AND COALESCE(feedback_type, '') != 'dislike'
+                      AND COALESCE(pool_expression, '') != ''
+                      AND COALESCE(pool_topic_label, '') != ''
                       AND (
                         source_platform != 'xiaohongshu'
                         OR content_url LIKE '%xsec_token=%'
@@ -869,13 +873,21 @@ class Database:
         return self._balance_pool_rows(rows, limit=limit)
 
     def count_pool_candidates(self) -> int:
-        """Return how many fresh candidates are immediately available for reshuffle."""
+        """Return how many fresh candidates are immediately available for reshuffle.
+
+        v0.3.57+: matches ``get_pool_candidates`` precompute gate — rows
+        without ``pool_expression`` / ``pool_topic_label`` are excluded so
+        the popup's "还有 N 条" never overstates what serve() can actually
+        return.
+        """
         cursor = self.conn.execute(
             """
             SELECT bvid, source, source_platform, content_url
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
               AND COALESCE(feedback_type, '') != 'dislike'
+              AND COALESCE(pool_expression, '') != ''
+              AND COALESCE(pool_topic_label, '') != ''
               AND NOT EXISTS (
                 SELECT 1
                 FROM recommendations AS r

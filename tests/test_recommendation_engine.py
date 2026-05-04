@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -61,28 +62,59 @@ def _build_profile() -> SoulProfile:
     )
 
 
-def _seed_pool(db: Database, items: list[DiscoveredContent]) -> None:
-    """Insert DiscoveredContent items into content_cache for pool-based tests."""
+def _seed_pool(
+    db: Database,
+    items: list[DiscoveredContent],
+    *,
+    precomputed: bool = True,
+) -> None:
+    """Insert DiscoveredContent items into content_cache for pool-based tests.
+
+    v0.3.57+: ``get_pool_candidates`` now requires ``pool_expression`` and
+    ``pool_topic_label`` non-empty before returning a row. This helper
+    fills both with placeholder strings by default so legacy tests stay
+    green; pass ``precomputed=False`` to assert pool-gate behavior on
+    incomplete rows.
+    """
     for item in items:
-        db.cache_content(
-            item.bvid,
-            title=item.title,
-            up_name=item.up_name,
-            up_mid=item.up_mid,
-            duration=item.duration,
-            tags=item.tags,
-            topic_key=item.topic_key,
-            topic_group=item.topic_group,
-            style_key=item.style_key,
-            description=item.description,
-            cover_url=item.cover_url,
-            view_count=item.view_count,
-            like_count=item.like_count,
-            relevance_score=item.relevance_score,
-            relevance_reason=item.relevance_reason,
-            candidate_tier=item.candidate_tier,
-            source=item.source_strategy,
-        )
+        kwargs: dict[str, Any] = {
+            "title": item.title,
+            "up_name": item.up_name,
+            "up_mid": item.up_mid,
+            "duration": item.duration,
+            "tags": item.tags,
+            "topic_key": item.topic_key,
+            "topic_group": item.topic_group,
+            "style_key": item.style_key,
+            "description": item.description,
+            "cover_url": item.cover_url,
+            "view_count": item.view_count,
+            "like_count": item.like_count,
+            "relevance_score": item.relevance_score,
+            "relevance_reason": item.relevance_reason,
+            "candidate_tier": item.candidate_tier,
+            "source": item.source_strategy,
+        }
+        if precomputed:
+            kwargs["pool_expression"] = item.pool_expression or "测试推荐文案"
+            kwargs["pool_topic_label"] = item.pool_topic_label or "测试主题"
+        # Use cache_content directly so precomputed=False genuinely leaves
+        # pool copy empty (helpful for future gate-behavior tests).
+        db.cache_content(item.bvid, **kwargs)
+
+
+def _seed_visible(db: Database, bvid: str, **kwargs: Any) -> None:
+    """v0.3.57+ shorthand: cache a content row visible to the pool gate.
+
+    Equivalent to ``cache_content`` but ``pool_expression`` /
+    ``pool_topic_label`` default to non-empty placeholders so the row
+    passes ``get_pool_candidates``'s precompute gate. Tests that
+    explicitly assert the gate hides empty rows must use ``cache_content``
+    directly.
+    """
+    kwargs.setdefault("pool_expression", "测试推荐文案")
+    kwargs.setdefault("pool_topic_label", "测试主题")
+    db.cache_content(bvid, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -230,14 +262,14 @@ async def test_generate_recommendations_reads_from_cache_when_discovered_missing
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1A",
             title="A",
             up_name="UPA",
             source="search",
             view_count=10,
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1B",
             title="B",
             up_name="UPB",
@@ -303,7 +335,7 @@ async def test_generate_recommendations_reads_cached_relevance_score() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1LOW",
             title="低相关高播放",
             up_name="UPA",
@@ -312,7 +344,7 @@ async def test_generate_recommendations_reads_cached_relevance_score() -> None:
             relevance_score=0.41,
             candidate_tier="primary",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1HIGH",
             title="高相关低播放",
             up_name="UPB",
@@ -418,7 +450,7 @@ async def test_generate_recommendations_balances_topics_from_cache() -> None:
 
         # Dominant source + dominant topic at the relevance head
         for index in range(25):
-            db.cache_content(
+            _seed_visible(db,
                 f"BVAI{index}",
                 title=f"AI 高分候选 {index}",
                 up_name="AI 频道",
@@ -431,7 +463,7 @@ async def test_generate_recommendations_balances_topics_from_cache() -> None:
             )
         # Long tail: lower scores but distinct topic groups
         for index in range(5):
-            db.cache_content(
+            _seed_visible(db,
                 f"BVGAME{index}",
                 title=f"游戏候选 {index}",
                 up_name="游戏频道",
@@ -443,7 +475,7 @@ async def test_generate_recommendations_balances_topics_from_cache() -> None:
                 topic_group="游戏",
             )
         for index in range(5):
-            db.cache_content(
+            _seed_visible(db,
                 f"BVDOC{index}",
                 title=f"纪录片候选 {index}",
                 up_name="纪录片频道",
@@ -455,7 +487,7 @@ async def test_generate_recommendations_balances_topics_from_cache() -> None:
                 topic_group="纪录片",
             )
         for index in range(5):
-            db.cache_content(
+            _seed_visible(db,
                 f"BVHIST{index}",
                 title=f"历史候选 {index}",
                 up_name="历史频道",
@@ -487,14 +519,14 @@ async def test_generate_recommendations_does_not_repeat_history() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1A",
             title="A",
             up_name="UPA",
             source="search",
             view_count=10,
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1B",
             title="B",
             up_name="UPB",
@@ -523,14 +555,14 @@ async def test_generate_recommendations_skips_recently_viewed_content() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1SEEN",
             title="已经看过的内容",
             up_name="UPA",
             source="search",
             relevance_score=0.97,
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1NEW",
             title="还没看过",
             up_name="UPB",
@@ -704,7 +736,7 @@ async def test_reshuffle_recommendations_uses_pool_reason_without_waiting_expres
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1POOL",
             title="讲透地缘政治的链路",
             up_name="观察站",
@@ -736,7 +768,7 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1A",
             title="第一条",
             up_name="UPA",
@@ -744,7 +776,7 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
             relevance_score=0.95,
             relevance_reason="第一条基础理由。",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1B",
             title="第二条",
             up_name="UPB",
@@ -752,7 +784,7 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
             relevance_score=0.94,
             relevance_reason="第二条基础理由。",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1C",
             title="第三条",
             up_name="UPC",
@@ -781,6 +813,10 @@ async def test_append_recommendations_skips_excluded_bvids() -> None:
 
 @pytest.mark.asyncio
 async def test_reshuffle_recommendations_hides_missing_precomputed_copy() -> None:
+    """v0.3.57+: rows without pool_expression/pool_topic_label are hidden by
+    the pool gate; reshuffle should return zero recommendations rather than
+    falling back to a placeholder template."""
+
     class _ExplodingLLM(_DummyLLM):
         async def complete_structured_task(self, **kwargs) -> LLMResponse:  # type: ignore[override]
             raise RuntimeError("expression generation should not run in reshuffle path")
@@ -788,6 +824,8 @@ async def test_reshuffle_recommendations_hides_missing_precomputed_copy() -> Non
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
+        # v0.3.57 gate test: must use cache_content directly so pool
+        # copy stays empty and the gate hides the row.
         db.cache_content(
             "BV1EMPTY",
             title="还没生成推荐文案",
@@ -803,15 +841,22 @@ async def test_reshuffle_recommendations_hides_missing_precomputed_copy() -> Non
             limit=1,
         )
 
+        # Pool gate hides the row entirely — no fallback fires.
+        assert recommendations == []
+
+        # Once precompute fills the copy, the row becomes visible.
+        db.update_pool_copy("BV1EMPTY", expression="LLM 文案", topic_label="LLM topic")
+        recommendations = await engine.reshuffle_recommendations(
+            profile=_build_profile(),
+            limit=1,
+        )
         assert len(recommendations) == 1
-        # Missing pool_expression gets a fallback instead of empty string
-        assert recommendations[0].expression != ""
-        assert recommendations[0].topic_label != ""
+        assert recommendations[0].expression == "LLM 文案"
+        assert recommendations[0].topic_label == "LLM topic"
 
         history = db.get_recommendations(limit=10)
-        # Fallback expression is stored in DB too
-        assert history[0]["expression"] != ""
-        assert history[0]["topic"] != ""
+        assert history[0]["expression"] == "LLM 文案"
+        assert history[0]["topic"] == "LLM topic"
 
 
 @pytest.mark.asyncio
@@ -819,7 +864,7 @@ async def test_reshuffle_recommendations_skips_recently_viewed_content() -> None
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1SEEN",
             title="已经看过的地缘政治分析",
             up_name="观察站",
@@ -827,7 +872,7 @@ async def test_reshuffle_recommendations_skips_recently_viewed_content() -> None
             relevance_score=0.93,
             relevance_reason="这条本来很像你会点开的内容。",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BV1NEW",
             title="还没看过的纪录片",
             up_name="纪录片研究所",
@@ -856,7 +901,7 @@ async def test_reshuffle_recommendations_spreads_styles_before_backfill() -> Non
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BVGAME1",
             title="杀戮尖塔2 全英雄基础流派攻略",
             up_name="卡牌研究所",
@@ -866,7 +911,7 @@ async def test_reshuffle_recommendations_spreads_styles_before_backfill() -> Non
             style_key="game_strategy",
             topic_key="游戏:杀戮尖塔2",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVGAME2",
             title="杀戮尖塔2 17分钟实机演示",
             up_name="IGN",
@@ -876,7 +921,7 @@ async def test_reshuffle_recommendations_spreads_styles_before_backfill() -> Non
             style_key="game_strategy",
             topic_key="游戏:杀戮尖塔2",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVNEWS1",
             title="美国关税政策又有新变化",
             up_name="国际观察",
@@ -886,7 +931,7 @@ async def test_reshuffle_recommendations_spreads_styles_before_backfill() -> Non
             style_key="news_brief",
             topic_key="国际时事:贸易",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVDOC1",
             title="塔可夫斯基《潜行者》到底讲了什么",
             up_name="猫鲨Catshark",
@@ -937,7 +982,7 @@ async def test_reshuffle_recommendations_caps_topic_and_style_for_larger_batches
             ("BVMUSIC1", "音乐视觉 1", "trending", 0.9, "visual_showcase", "music:1", "音乐"),
         ]
         for bvid, title, source, score, style, topic, group in items:
-            db.cache_content(
+            _seed_visible(db,
                 bvid,
                 title=title,
                 up_name=f"{source}-频道",
@@ -975,7 +1020,7 @@ async def test_reshuffle_recommendations_backfills_to_requested_limit_when_style
         # has a distinct broad topic so backfill can reach `limit`.
         topics = ["生活随笔", "职场闲谈", "读书片段", "城市漫步", "餐桌小记", "音乐碎片"]
         for index, topic in enumerate(topics):
-            db.cache_content(
+            _seed_visible(db,
                 f"BVLIGHT{index + 1}",
                 title=f"轻聊候选 {index + 1}",
                 up_name="轻聊频道",
@@ -1000,6 +1045,10 @@ async def test_reshuffle_recommendations_backfills_to_requested_limit_when_style
 
 @pytest.mark.asyncio
 async def test_reshuffle_recommendations_hides_missing_copy_instead_of_style_fallback() -> None:
+    """v0.3.57+: even when style_key is set, missing pool_expression/topic_label
+    keeps the row out of the pool. The old behavior — falling back to a
+    style-keyed template — is no longer acceptable."""
+
     class _ExplodingLLM(_DummyLLM):
         async def complete_structured_task(self, **kwargs) -> LLMResponse:  # type: ignore[override]
             raise RuntimeError("expression generation should not run in reshuffle path")
@@ -1007,6 +1056,7 @@ async def test_reshuffle_recommendations_hides_missing_copy_instead_of_style_fal
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
+        # v0.3.57 gate test: cache_content directly, pool copy stays empty.
         db.cache_content(
             "BVSTYLE",
             title="杀戮尖塔2 角色强度排行",
@@ -1023,12 +1073,8 @@ async def test_reshuffle_recommendations_hides_missing_copy_instead_of_style_fal
             limit=1,
         )
 
-        # Fallback expression based on style_key when precomputed copy missing
-        assert (
-            "game_strategy" in recommendations[0].content.style_key
-            or recommendations[0].expression != ""
-        )
-        assert recommendations[0].topic_label != ""
+        # Pool gate hides the row regardless of style_key richness.
+        assert recommendations == []
 
 
 @pytest.mark.asyncio
@@ -1036,7 +1082,7 @@ async def test_reshuffle_recommendations_spreads_topic_keys_before_backfill() ->
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BVINT1",
             title="讲透中东局势的来龙去脉",
             up_name="国际观察",
@@ -1045,7 +1091,7 @@ async def test_reshuffle_recommendations_spreads_topic_keys_before_backfill() ->
             relevance_reason="这条会接住你最近那股想把国际时事看透的劲头。",
             topic_key="国际时事:地缘政治",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVINT2",
             title="伊朗问题的底层链路",
             up_name="世界现场",
@@ -1054,7 +1100,7 @@ async def test_reshuffle_recommendations_spreads_topic_keys_before_backfill() ->
             relevance_reason="这条延续了你最近盯国际新闻时那种爱追因果的状态。",
             topic_key="国际时事:地缘政治",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVTECH1",
             title="OpenAI 新模型到底强在哪",
             up_name="技术拆机局",
@@ -1063,7 +1109,7 @@ async def test_reshuffle_recommendations_spreads_topic_keys_before_backfill() ->
             relevance_reason="这条会对上你最近想把模型能力边界搞清楚的劲头。",
             topic_key="AI:大模型",
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVDOC1",
             title="城市纪录片里的空间叙事",
             up_name="纪录片研究所",
@@ -1092,7 +1138,7 @@ async def test_reshuffle_recommendations_spreads_topics_in_same_batch() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BVINT1",
             title="讲透中东局势的来龙去脉",
             up_name="国际观察",
@@ -1101,7 +1147,7 @@ async def test_reshuffle_recommendations_spreads_topics_in_same_batch() -> None:
             relevance_reason="这条会接住你最近那股想把国际时事看透的劲头。",
             tags=["国际时事", "地缘政治"],
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVINT2",
             title="伊朗问题的底层链路",
             up_name="世界现场",
@@ -1110,7 +1156,7 @@ async def test_reshuffle_recommendations_spreads_topics_in_same_batch() -> None:
             relevance_reason="这条延续了你最近盯国际新闻时那种爱追因果的状态。",
             tags=["国际时事", "地缘政治"],
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVTECH1",
             title="OpenAI 新模型到底强在哪",
             up_name="技术拆机局",
@@ -1119,7 +1165,7 @@ async def test_reshuffle_recommendations_spreads_topics_in_same_batch() -> None:
             relevance_reason="这条会对上你最近想把模型能力边界搞清楚的劲头。",
             tags=["AI", "大模型"],
         )
-        db.cache_content(
+        _seed_visible(db,
             "BVDOC1",
             title="城市纪录片里的空间叙事",
             up_name="纪录片研究所",
@@ -1418,7 +1464,7 @@ async def test_classify_pool_backlog_fills_metadata() -> None:
         db.initialize()
 
         # Insert 2 XHS items with NO metadata
-        db.cache_content(
+        _seed_visible(db,
             "xhs_001",
             title="莫氏鸡煲在家复刻",
             up_name="美食博主",
@@ -1431,7 +1477,7 @@ async def test_classify_pool_backlog_fills_metadata() -> None:
             topic_key="",
             relevance_score=0.0,
         )
-        db.cache_content(
+        _seed_visible(db,
             "xhs_002",
             title="宝可梦PVP配队",
             up_name="游戏玩家",
@@ -1480,7 +1526,7 @@ async def test_classify_pool_backlog_skips_already_classified() -> None:
         db.initialize()
 
         # Already classified bilibili item
-        db.cache_content(
+        _seed_visible(db,
             "BV_classified",
             title="已分类的内容",
             up_name="UP主",
@@ -1517,7 +1563,7 @@ def test_re_ingest_does_not_overwrite_classified_fields() -> None:
         db.initialize()
 
         # First insert: classified content (as if classify_pool_backlog ran)
-        db.cache_content(
+        _seed_visible(db,
             "xhs_reingest",
             title="莫氏鸡煲在家复刻",
             up_name="美食博主",
@@ -1531,7 +1577,7 @@ def test_re_ingest_does_not_overwrite_classified_fields() -> None:
         )
 
         # Second insert: extension re-sends same note with empty metadata
-        db.cache_content(
+        _seed_visible(db,
             "xhs_reingest",
             title="莫氏鸡煲在家复刻",
             up_name="美食博主",
@@ -1593,7 +1639,7 @@ async def test_precompute_delight_scores_uses_llm_batch_scorer() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         db = Database(Path(tmpdir) / "test.db")
         db.initialize()
-        db.cache_content(
+        _seed_visible(db,
             "BV1BACKFILL",
             title="讲透复杂系统的连接方式",
             up_name="系统观察者",

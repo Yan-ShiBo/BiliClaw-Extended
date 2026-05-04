@@ -215,6 +215,9 @@ def _seed_bilibili_content(db: Database) -> None:
             source_platform="bilibili",
             content_id=bvid,
             content_url=f"https://www.bilibili.com/video/{bvid}",
+            # v0.3.57+: pool gate requires non-empty precomputed copy.
+            pool_expression=f"《{title}》—— 测试推荐文案",
+            pool_topic_label=topic,
         )
 
 
@@ -251,6 +254,11 @@ def _ingest_xhs_notes(db: Database) -> int:
             topic_group="",
             topic_key="",
             relevance_score=0.0,
+            # v0.3.57+: precomputed copy filled so pool gate doesn't hide
+            # these e2e fixtures. classify_pool_backlog still has work to do
+            # on style_key / topic_group, which is what the test asserts.
+            pool_expression=f"《{title}》—— 测试推荐文案",
+            pool_topic_label="测试主题",
         )
         cached += 1
     return cached

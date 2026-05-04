@@ -334,7 +334,14 @@ def test_needs_replenishment_when_pool_empty() -> None:
 def test_needs_replenishment_false_when_pool_full() -> None:
     db, _ = _make_db()
     for i in range(60):
-        db.cache_content(f"BV{i}", title=f"T{i}", up_name="UP", source="search")
+        db.cache_content(
+            f"BV{i}",
+            title=f"T{i}",
+            up_name="UP",
+            source="search",
+            pool_expression="x",
+            pool_topic_label="y",
+        )
     curator = PoolCurator(db)
     assert curator.needs_replenishment() is False
 
@@ -346,13 +353,27 @@ def test_needs_replenishment_false_when_pool_full() -> None:
 
 def test_evict_stale_pool_items_marks_old_items() -> None:
     db, _ = _make_db()
-    db.cache_content("BV_OLD", title="Old", up_name="UP", source="search")
+    db.cache_content(
+        "BV_OLD",
+        title="Old",
+        up_name="UP",
+        source="search",
+        pool_expression="x",
+        pool_topic_label="y",
+    )
     # Backdate the discovered_at to 20 days ago
     db.conn.execute(
         "UPDATE content_cache SET discovered_at = datetime('now', '-20 days') WHERE bvid = 'BV_OLD'"
     )
     db.conn.commit()
-    db.cache_content("BV_NEW", title="New", up_name="UP", source="search")
+    db.cache_content(
+        "BV_NEW",
+        title="New",
+        up_name="UP",
+        source="search",
+        pool_expression="x",
+        pool_topic_label="y",
+    )
     evicted = db.evict_stale_pool_items(max_age_days=14)
     assert evicted == 1
     # Old item is stale, new item still fresh

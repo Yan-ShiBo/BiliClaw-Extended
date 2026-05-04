@@ -4,8 +4,22 @@ import sqlite3
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from openbiliclaw.storage.database import Database
+
+
+def _seed_visible(db: Database, bvid: str, **kwargs: Any) -> None:
+    """v0.3.57+ shorthand: cache a row visible to the pool gate.
+
+    ``cache_content`` + auto-fill of ``pool_expression`` / ``pool_topic_label``
+    so the row passes ``get_pool_candidates``'s precompute gate. Tests
+    asserting gate behavior on empty-copy rows must use ``cache_content``
+    directly instead.
+    """
+    kwargs.setdefault("pool_expression", "测试推荐文案")
+    kwargs.setdefault("pool_topic_label", "测试主题")
+    db.cache_content(bvid, **kwargs)
 
 
 class TestDatabase:
@@ -600,7 +614,8 @@ class TestDatabase:
             db.initialize()
 
             for i in range(6):
-                db.cache_content(
+                _seed_visible(
+                    db,
                     f"BVSRC{i}",
                     title=f"S{i}",
                     up_name="UP",
@@ -609,7 +624,8 @@ class TestDatabase:
                 )
             for i in range(3):
                 note_id = f"xhs-reactivate-{i}"
-                db.cache_content(
+                _seed_visible(
+                    db,
                     note_id,
                     title=f"X{i}",
                     up_name="XHS",
@@ -996,7 +1012,8 @@ class TestDatabase:
             db = Database(Path(tmpdir) / "test.db")
             db.initialize()
 
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1FRESH",
                 title="新鲜候选",
                 up_name="UPA",
@@ -1004,7 +1021,8 @@ class TestDatabase:
                 relevance_score=0.91,
                 relevance_reason="你会想点开这种把事情讲透的内容。",
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1SHOWN",
                 title="已经展示",
                 up_name="UPB",
@@ -1012,7 +1030,8 @@ class TestDatabase:
                 relevance_score=0.95,
                 relevance_reason="这条已经展示过。",
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1FB",
                 title="已经反馈",
                 up_name="UPC",
@@ -1020,7 +1039,8 @@ class TestDatabase:
                 relevance_score=0.93,
                 relevance_reason="这条已经被反馈过。",
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1REC",
                 title="已经进过推荐表",
                 up_name="UPD",
@@ -1053,7 +1073,8 @@ class TestDatabase:
             db = Database(Path(tmpdir) / "test.db")
             db.initialize()
 
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1POOL",
                 title="AI 模型能力边界",
                 up_name="技术拆机局",
@@ -1073,7 +1094,8 @@ class TestDatabase:
             db = Database(Path(tmpdir) / "test.db")
             db.initialize()
 
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1STYLEPOOL",
                 title="智慧城市空镜素材",
                 up_name="视觉资料库",
@@ -1110,19 +1132,99 @@ class TestDatabase:
 
             db.close()
 
+    def test_get_pool_candidates_skips_rows_without_precomputed_copy(self) -> None:
+        """v0.3.57+: pool gate — rows without pool_expression / pool_topic_label
+        must not be returned by get_pool_candidates, even if pool_status='fresh'.
+
+        This eliminates the race window between discovery (which writes
+        pool_status='fresh' with empty copy) and precompute_pool_copy (which
+        fills the LLM-generated expression/topic_label 60-90s later). Without
+        this gate, serve() would pick the empty row and fall back to the
+        _fallback_expression template ("这条切口挺顺的，先丢给你看看…").
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            # Three rows: empty copy / only expression / fully filled.
+            db.cache_content(
+                "BVNOCOPY",
+                title="未 precompute",
+                source="search",
+                relevance_score=0.9,
+            )
+            db.cache_content(
+                "BVHALF",
+                title="半 precompute",
+                source="search",
+                relevance_score=0.85,
+                pool_expression="LLM 文案",
+                # pool_topic_label intentionally empty
+            )
+            db.cache_content(
+                "BVDONE",
+                title="已 precompute",
+                source="search",
+                relevance_score=0.8,
+                pool_expression="LLM 文案",
+                pool_topic_label="LLM topic",
+            )
+
+            rows = db.get_pool_candidates(limit=10)
+            assert [r["bvid"] for r in rows] == ["BVDONE"]
+
+            db.close()
+
+    def test_count_pool_candidates_respects_precompute_gate(self) -> None:
+        """v0.3.57+: count_pool_candidates must align with get_pool_candidates,
+        otherwise popup '还有 N 条' would be misleading."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            db.cache_content("a", title="a", source="search", relevance_score=0.5)
+            db.cache_content("b", title="b", source="search", relevance_score=0.5)
+            db.update_pool_copy("b", expression="x", topic_label="y")
+
+            assert db.count_pool_candidates() == 1
+
+            db.close()
+
+    def test_update_pool_copy_makes_row_visible_in_pool(self) -> None:
+        """v0.3.57+: round-trip — empty-copy row stays hidden until
+        update_pool_copy fills both fields, then becomes visible."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            db.cache_content("BVPENDING", title="待生成", source="search",
+                             relevance_score=0.7)
+            assert db.count_pool_candidates() == 0
+            assert db.get_pool_candidates(limit=10) == []
+
+            db.update_pool_copy("BVPENDING", expression="生成好了", topic_label="主题")
+
+            assert db.count_pool_candidates() == 1
+            rows = db.get_pool_candidates(limit=10)
+            assert [r["bvid"] for r in rows] == ["BVPENDING"]
+
+            db.close()
+
     def test_get_pool_candidates_skips_recently_viewed_bvids(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db = Database(Path(tmpdir) / "test.db")
             db.initialize()
 
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1FRESH",
                 title="新鲜候选",
                 up_name="UPA",
                 source="search",
                 relevance_score=0.91,
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BV1SEEN",
                 title="已经看过",
                 up_name="UPB",
@@ -1156,7 +1258,8 @@ class TestDatabase:
             db.initialize()
 
             for index in range(5):
-                db.cache_content(
+                _seed_visible(
+                    db,
                     f"BVAI{index}",
                     title=f"AI 候选 {index}",
                     up_name="科技频道",
@@ -1164,7 +1267,8 @@ class TestDatabase:
                     topic_group="人工智能",
                     relevance_score=0.99 - index * 0.01,
                 )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BVGAME",
                 title="游戏候选",
                 up_name="游戏频道",
@@ -1172,7 +1276,8 @@ class TestDatabase:
                 topic_group="自走棋",
                 relevance_score=0.8,
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BVDOC",
                 title="纪录片候选",
                 up_name="纪录片频道",
@@ -1180,7 +1285,8 @@ class TestDatabase:
                 topic_group="纪录片",
                 relevance_score=0.79,
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 "BVHIST",
                 title="历史候选",
                 up_name="历史频道",
@@ -1343,7 +1449,8 @@ class TestDatabase:
             bare_id = "69ccda220000000021005a9b"
             tokenized_id = "69d26d2e0000000023006c95"
 
-            db.cache_content(
+            _seed_visible(
+                db,
                 bvid=bare_id,
                 title="bare",
                 up_name="",
@@ -1354,7 +1461,8 @@ class TestDatabase:
                 source_platform="xiaohongshu",
                 author_name="",
             )
-            db.cache_content(
+            _seed_visible(
+                db,
                 bvid=tokenized_id,
                 title="tokenized",
                 up_name="",
