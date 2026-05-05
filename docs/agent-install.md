@@ -77,6 +77,49 @@ but init has deliberately not run. Ask the listed init choices, then
 re-run the printed `agent_bootstrap.py` command with explicit
 `--embedding-*` and `--yes-xhs` / `--no-xhs`.
 
+## HARD RULES (read first, follow every time)
+
+These are non-negotiable agent-side rules. Violating any of them
+breaks the user experience in ways our backend cannot recover from.
+**If you summarise the doc and skip these, the install fails.**
+
+### Rule 1 — Never prompt for B 站 Cookie without leading with the extension
+
+This rule exists because real users got the prompt
+> 「请把 B 站 Cookie 发给我。从浏览器登录后的 B 站页面复制 Cookie，至少要包含 SESSDATA=...」
+
+with **no mention** of the extension. Their AI agent had paraphrased
+Step 4 into the F12 path because "give me a cookie" is the obvious-
+seeming question. It is **wrong**. Since v0.3.12 the extension auto-
+syncs the cookie via `chrome.cookies.onChanged` →
+`POST /api/bilibili/cookie`; F12-extraction is the legacy fallback,
+and 95% of users who pick F12 are doing it because the agent didn't
+tell them the extension exists.
+
+**Concrete contract**:
+- The first sentence of the cookie step must reference the browser
+  extension and the Releases page URL.
+- F12-extraction must appear *after* the extension option, marked as
+  「不想装扩展时的兜底」, not before.
+- See Step 4 below for the exact prescribed prompt — render it
+  approximately verbatim, do not "summarise" it down to one option.
+
+### Rule 2 — Run `agent_bootstrap.py` exactly as the status block prints
+
+The status block at the end of `install.sh` / `install.ps1` prints a
+literal `python3 scripts/agent_bootstrap.py ...` command with the
+right flags. Do not re-derive that command from memory; the flag set
+evolves and stale flags silently no-op.
+
+### Rule 3 — One question at a time, with a clear default
+
+Don't dump all four credential questions at once. Each question must
+have a default that reads as "ok if you don't care, just pick this
+one"; most users will accept it. The previous "tell me what an
+embedding is" framing was the failure mode.
+
+---
+
 ## Handling missing credentials
 
 When `Missing` is non-empty, or the final status is
@@ -84,18 +127,12 @@ When `Missing` is non-empty, or the final status is
 questions, in order**: pick an LLM, pick an embedding service, get a
 B 站 cookie, then ask whether Xiaohongshu likes/favorites may be used.
 Each question must have a clear default — most users will accept it.
-The previous "tell me what an embedding is" framing was the failure
-mode; the new framing is "pick a default I prepared for you, or
-override it if you have an opinion."
 
 `agent_bootstrap.py` is intentionally non-interactive. If credentials
 are already present but you did not pass an explicit embedding choice
 and an explicit `--yes-xhs` / `--no-xhs`, it returns
 `status=needs_decisions` and **does not run init**. Ask the missing
 questions, then re-run bootstrap with those flags.
-
-Don't dump all questions at once — ask one at a time, **explain what
-each thing does in plain language**, and offer the easy path first.
 
 ### Step 1 — Pick an LLM service
 
@@ -336,31 +373,43 @@ last line of defence, not the primary UX.
 
 ### Step 4 — B 站 Cookie
 
-Most users haven't done this before. **Don't just say "give me your
-Bilibili cookie."** Walk them through it:
+> 🚨 **Hard Rule 1 applies here.** Read it again before writing your
+> reply. The single most common install regression is an agent that
+> paraphrases this step down to "请把 B 站 Cookie 发给我" with no
+> mention of the extension. Don't be that agent.
 
-**Lead with the extension.** Since v0.3.12 the extension auto-syncs the
+**Render the prompt below approximately verbatim.** It is fine to
+translate to the conversation's language, but **all five lettered
+points (A.1 + B.1–B.4) must appear**, and **A. must come first**.
+
+```
+==== render this to the user (exact text, do not summarise) ============
+「OpenBiliClaw 需要你的 B 站登录态（Cookie）来拉你的观看历史 + 调 B 站 API。
+ Cookie 只存在你本机，不会上传任何地方。
+
+ 两种方式（任选其一，强烈推荐 A）：
+
+ A. 装浏览器扩展（推荐，零配置）
+    下载: https://github.com/whiteguo233/OpenBiliClaw/releases
+    装好后，确保你已登录 B 站（如果没登就去登）。扩展会在几秒内
+    自动把 Cookie 推到本地后端，之后 Cookie 过期/续签也会自动同步。
+    选这个就什么都不用贴给我，等我从 /api/runtime-status 看到
+    bilibili_cookie_synced 即可。
+
+ B. 手动贴 Cookie（不想装扩展时的兜底）
+    1. 用 Chrome / Edge / Firefox 登录 https://www.bilibili.com
+    2. 按 F12 → Network 标签 → 刷新 → 点任意 bilibili.com 请求
+    3. Headers 区域找到 cookie: 这一行，右键复制整行 value
+    4. 把那一长串（含 SESSDATA / bili_jct / DedeUserID）粘给我」
+==== end of prescribed text =============================================
+```
+
+**Background (don't render this part to the user, this is just for
+your understanding):** since v0.3.12 the extension auto-syncs the
 B 站 cookie to the backend on install — `chrome.cookies.onChanged` →
 `POST /api/bilibili/cookie` → backend validates against B 站 nav and
-persists. F12 dance is now the **fallback**, not the primary path.
-
-Tell the user, in this order:
-
-> 「OpenBiliClaw 需要你的 B 站登录态（Cookie）来拉你的观看历史 + 调 B 站 API。
-> **Cookie 只存在你本机，不会上传任何地方。**
->
-> 两种方式（**任选其一**）：
->
-> **A. 装浏览器扩展（推荐，零配置）**
->   下载: https://github.com/whiteguo233/OpenBiliClaw/releases
->   装好后，确保你已登录 B 站（如果没登就去登）。扩展会在几秒内把
->   Cookie 自动推到本地后端，之后 Cookie 过期/续签都会自动同步。
->
-> **B. 手动贴 Cookie（不想装扩展时的兜底）**
->   1. 用 Chrome / Edge / Firefox 登录 https://www.bilibili.com
->   2. 按 F12 → Network 标签 → 刷新 → 点任意 bilibili.com 请求
->   3. Headers 区域找到 cookie: 这一行，右键复制整行 value
->   4. 把那一长串（含 SESSDATA / bili_jct / DedeUserID）粘给我」
+persists. The F12 dance is genuinely a fallback path now: most users
+hit it only because their AI agent forgot to mention option A.
 
 **If user picks A**: don't pass `--bilibili-cookie` to bootstrap. The
 v0.3.20+ install.sh status block will explicitly print
