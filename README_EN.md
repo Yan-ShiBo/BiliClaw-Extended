@@ -61,54 +61,33 @@ All data lives in a single SQLite file on your disk. LLM calls use your own API 
 
 ## 🚀 Quick Start
 
-### 🧩 Step 1: Install the Chrome Extension
+For most users, setup is three steps: install the extension, ask an AI coding agent to deploy the backend, then log in to the content platforms in the same browser.
 
-The extension is your main interface — it shows recommendations in a side panel on supported sites, collects behavior, and lets you chat with the agent.
+### 1. Install the Chrome extension
 
-1. Open [OpenBiliClaw Releases](https://github.com/whiteguo233/OpenBiliClaw/releases) and find the latest `extension-v*` release
-2. Download `openbiliclaw-extension-v*.zip` from that release
+The extension is the main interface. It shows the sidebar on Bilibili, Xiaohongshu, and Douyin, records your feedback, and lets the local backend reuse your browser session safely.
+
+1. Open [OpenBiliClaw Releases](https://github.com/whiteguo233/OpenBiliClaw/releases) and find the latest `extension-v*`
+2. Download `openbiliclaw-extension-v*.zip`
 3. Open `chrome://extensions/`, enable "Developer mode" in the top right
 4. Drag the downloaded `.zip` file into the page to install
 
-> Developers can also `cd extension && npm install && npm run package` to build from source.
+### 2. Ask an AI coding agent to deploy the backend
 
-#### Important: log in to **every source you want to use**, in the same browser the extension is installed in
-
-OpenBiliClaw doesn't farm credentials — it reuses **your** current browser sessions to discover content cross-platform. So after installing the extension, log in to every source you care about **in the same browser**:
-
-| Source | How to log in | What you lose if you don't |
-|---|---|---|
-| **Bilibili** | Just log in normally at https://www.bilibili.com (the v0.3.12+ extension auto-syncs the cookie to the backend) | The backend can't fetch your watch history / favorites / following → your soul profile won't reflect your real interests; recommendations degrade to public trending |
-| **Xiaohongshu** | Log in normally at https://www.xiaohongshu.com | The backend never crawls Xiaohongshu directly — **all discovery + detail fetches happen through your extension in hidden tabs**. No login = no Xiaohongshu content at all |
-| **Douyin** | Log in normally at https://www.douyin.com (search / hot / feed discovery need the logged-in extension path) | `init --yes-douyin` and `fetch-douyin` cannot pull post / favorite / like / follow signals; `discover --source douyin` search / hot / feed may return 0 items |
-| Generic web sources | Log in normally on that site | Same as above |
-
-> 💡 **Strongly recommended for Xiaohongshu: use a CDP-mode Chrome to reuse the login session** (avoids anti-scraping). Launch a separate-profile Chrome with `--remote-debugging-port=9222`, manually log in once, then set `[sources.browser] cdp_url = "http://localhost:9222"` in `config.toml`. See [config reference](docs/modules/config.md#sourcesbrowser).
-
-### ⚡ Step 2: Deploy the Backend
-
-**Recommended: paste to an AI coding agent for one-click deploy** (works with Claude Code / Codex CLI / Cursor etc.):
-
-> 📌 **Prerequisite — you need an AI coding agent first.** If you don't have one, pick any:
-> - [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) — Anthropic's official CLI
-> - [Codex CLI](https://github.com/openai/codex) — OpenAI's official CLI
-> - [Cursor](https://cursor.com) / [Windsurf](https://codeium.com/windsurf) — AI-native IDEs
->
-> If installing one of these is more friction than it's worth, jump to "Or: run the one-liner install script" below — it does the same thing without an AI in the loop.
+Paste this whole prompt into Claude Code, Codex CLI, Cursor, Windsurf, or another AI coding agent. The parenthetical note is for the agent; you do not need to understand it.
 
 ```text
 Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
 ```
 
-The AI clones the repo locally, installs dependencies, starts the backend, runs a health check, then **asks five questions, each with a sensible default**: which LLM to use, which embedding service to use, how to provide the B站 cookie, whether Xiaohongshu likes/favorites may be used in the initial profile, and whether Douyin post/favorite/like/follow signals may be used. Embedding defaults to local Ollama bge-m3 (free + offline + no quota cost), while Xiaohongshu and Douyin data are opt-in only. Finally it auto-runs `init` (fetch history → build soul profile → first discovery pass) and relays `BOOTSTRAP_STATUS init_progress` milestones in real time. Fully transparent. **This is the recommended path for most users — zero friction.**
+The agent will clone the repo, install dependencies, start the backend, run a health check, and ask a few questions with defaults. If unsure, pick the default. Xiaohongshu and Douyin signals are used in the initial profile only when you explicitly opt in.
 
-**Or: have the AI agent deploy with Docker** (good if you have Docker Desktop; v0.3.11+ ships an Ollama embedding sidecar by default):
+### 3. Log in to content platforms in the same browser
 
-```text
-Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md to deploy the OpenBiliClaw backend via Docker Compose (use Bash `curl` to fetch the document, NOT WebFetch).
-```
+At minimum, log in to [Bilibili](https://www.bilibili.com). OpenBiliClaw uses it to build the first profile and recommendations. If you want Xiaohongshu or Douyin, also log in to [Xiaohongshu](https://www.xiaohongshu.com) / [Douyin](https://www.douyin.com) in the same browser where the extension is installed.
 
-**Or: run the one-liner installer yourself** (the same script the AI uses, no agent required):
+<details>
+<summary>No AI agent: run the one-line installer yourself</summary>
 
 macOS / Linux / WSL2 (Bash):
 
@@ -116,24 +95,69 @@ macOS / Linux / WSL2 (Bash):
 curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
 ```
 
-Native Windows (PowerShell — no Docker, no WSL2 required):
+Native Windows (PowerShell, no Docker or WSL2 required):
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.ps1 -UseBasicParsing | iex
 ```
 
-> The leading `[Net.ServicePointManager]...Tls12` lets PowerShell 5.1 (the default on Windows 10/11) successfully negotiate with GitHub. GitHub no longer accepts TLS 1.0/1.1 and PS 5.1 picks those by default. Users on PowerShell 7 can drop the prefix.
+The script needs `git` and Python 3.11+. It clones the repo, installs dependencies, starts the backend, runs a health check, then asks for LLM, embedding, Bilibili cookie, Xiaohongshu opt-in, and Douyin opt-in choices. If unsure, press Enter or choose the default.
 
-Prerequisites: `git` and `python3` (3.11+; on Windows the `py` launcher works). The scripts auto-clone the repo, install dependencies, start the backend, run a health check, and print the exact follow-up questions for LLM, embedding, Bilibili cookie, Xiaohongshu opt-in, and Douyin opt-in. First-time init runs automatically only after those choices and credentials are explicit; during init the script streams stdout and emits `BOOTSTRAP_STATUS init_progress` so AI agents can relay the 1/4, 2/4, 3/4, 4/4, and refill stages.
-
-> 💡 **On Windows?** Since v0.3.4 the PowerShell installer fully supports native Windows — no Docker / WSL2 needed. You can still use the Docker path above if you already have Docker Desktop installed.
-
-> 🧠 **Optional: local embedding fallback (no API key required)** — install Ollama once:
-> Mac `brew install ollama && ollama serve &`, Windows from [ollama.com/download](https://ollama.com/download), Linux `curl -fsSL https://ollama.com/install.sh \| sh && ollama serve &`.
-> Then run `uv run openbiliclaw setup-embedding` — the wizard pulls `bge-m3` (~568MB, CPU only) and writes the config. Useful when your remote embedding quota is exhausted, you're offline, or you just don't want to add another API key.
+</details>
 
 <details>
-<summary>Manual installation / configuration / browser extension</summary>
+<summary>Advanced: Docker deployment</summary>
+
+Good if you already have Docker Desktop installed. v0.3.11+ includes an Ollama embedding sidecar.
+
+```text
+Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md to deploy the OpenBiliClaw backend via Docker Compose (use Bash `curl` to fetch the document, NOT WebFetch).
+```
+
+See the [Docker Deployment Guide](docs/docker-deployment.md).
+
+</details>
+
+<details>
+<summary>Advanced: multi-source login, Xiaohongshu CDP, and Douyin plugin path</summary>
+
+OpenBiliClaw does not store your platform passwords or bypass login. It reuses the browser sessions you already control and only fetches content you can see.
+
+| Source | How to log in | What happens if you do not |
+|---|---|---|
+| **Bilibili** | Log in normally at https://www.bilibili.com in the extension browser | Watch history / favorites / following are unavailable, so the profile is much weaker |
+| **Xiaohongshu** | Log in normally at https://www.xiaohongshu.com in the same browser | Xiaohongshu discovery and detail fetches are unavailable |
+| **Douyin** | Log in normally at https://www.douyin.com in the same browser | `init --yes-douyin`, `fetch-douyin`, and `discover --source douyin` search / hot / feed may return 0 items |
+
+For Xiaohongshu, CDP-mode Chrome is strongly recommended because it reduces anti-scraping friction. Launch Chrome with a separate profile and `--remote-debugging-port=9222`, log in once, then set `[sources.browser] cdp_url = "http://localhost:9222"`. See the [config reference](docs/modules/config.md#sourcesbrowser).
+
+</details>
+
+<details>
+<summary>Advanced: local embedding / Ollama</summary>
+
+If you do not want a separate embedding API key, or remote embedding quota is an issue, install Ollama once and use local `bge-m3`:
+
+```bash
+# macOS
+brew install ollama && ollama serve &
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh && ollama serve &
+```
+
+Windows users can install it from [ollama.com/download](https://ollama.com/download). Then run:
+
+```bash
+uv run openbiliclaw setup-embedding
+```
+
+The wizard pulls `bge-m3` (~568MB, CPU-only is fine) and writes the config.
+
+</details>
+
+<details>
+<summary>Advanced: manual installation and discovery debugging</summary>
 
 > Human reference: [docs/agent-install.md](docs/agent-install.md) (short agent-facing contract) and [docs/agent-deployment.md](docs/agent-deployment.md) (long-form troubleshooting).
 
@@ -188,9 +212,13 @@ openbiliclaw recommend
 openbiliclaw profile
 ```
 
-#### Docker Deployment
+Developers can also build the extension from source:
 
-> 📦 Docker deployment is also supported. See the [Docker Deployment Guide](docs/docker-deployment.md) for details.
+```bash
+cd extension
+npm install
+npm run package
+```
 
 </details>
 

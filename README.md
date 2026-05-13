@@ -117,54 +117,33 @@
 
 ## 🚀 快速开始
 
-### 🧩 第一步：安装 Chrome 浏览器插件
+普通用户只需要做三件事：装插件、让 AI 助手部署后端、在同一个浏览器登录内容平台。
 
-插件是你和 OpenBiliClaw 交互的主要界面——在 B 站、小红书和抖音页面侧边栏展示推荐、采集行为、对话调教。
+### 1. 安装 Chrome 浏览器插件
 
-1. 打开 [OpenBiliClaw Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，找到最新的 `extension-v*` 发布
-2. 下载其中的 `openbiliclaw-extension-v*.zip`
+插件是主要入口：它会在 B 站、小红书和抖音页面显示侧边栏、采集你的反馈，并把浏览器登录态安全地交给本地后端使用。
+
+1. 打开 [OpenBiliClaw Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，找到最新的 `extension-v*`
+2. 下载 `openbiliclaw-extension-v*.zip`
 3. 打开 `chrome://extensions/`，开启右上角「开发者模式」
 4. 将下载的 `.zip` 文件拖入页面安装
 
-> 开发者也可以 `cd extension && npm install && npm run package` 从源码构建。
+### 2. 让 AI 助手部署后端
 
-#### 重要：在装了插件的浏览器里**登录每一个想要使用的源**
-
-OpenBiliClaw 不爬登录态——它复用**你**当前浏览器的登录会话来跨平台抓你能看到的内容。所以装好扩展后，请在**同一个浏览器**里登录你想用的每个源：
-
-| 源 | 登录方式 | 不登录的后果 |
-|---|---|---|
-| **B 站** | https://www.bilibili.com 正常登录（Cookie 会被 v0.3.12+ 扩展自动同步给后端） | 拉不到你的观看历史/收藏/关注 → 画像不完整；推荐降级为公共热门 |
-| **小红书** | https://www.xiaohongshu.com 正常登录 | 后端不会爬小红书，**所有发现/详情都靠扩展在隐藏 tab 里以你登录态执行**；不登录 = 完全没有小红书内容 |
-| **抖音** | https://www.douyin.com 正常登录（search / hot / feed discovery 需要插件登录态） | `init --yes-douyin` 和 `fetch-douyin` 拉不到发布 / 收藏 / 点赞 / 关注信号；`discover --source douyin` 的 search / hot / feed 可能返回 0 条 |
-| 通用 Web 源 | 该站点正常登录 | 同上 |
-
-> 💡 **小红书强烈推荐用 CDP 模式 Chrome 复用登录态**（避免反爬）：用一个独立 profile 启 Chrome 打开 `--remote-debugging-port=9222`，里面手动登录小红书一次；后端 `[sources.browser] cdp_url = "http://localhost:9222"` 即可永久复用。详见 [配置参考](docs/modules/config.md#sourcesbrowser)。
-
-### ⚡ 第二步：部署后端
-
-**首选方式：复制粘贴给 AI 智能体一键部署**（Claude Code / Codex CLI / Cursor 等都支持）：
-
-> 📌 **前置：你需要先有一个 AI 编程助手**。如果还没装，三选一：
-> - [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) — Anthropic 官方 CLI
-> - [Codex CLI](https://github.com/openai/codex) — OpenAI 官方 CLI
-> - [Cursor](https://cursor.com) / [Windsurf](https://codeium.com/windsurf) — 带 AI 的 IDE
->
-> 没装过的话，跳到下面"自己跑一句话装机脚本"那段，效果一样。
+把下面整句粘给 Claude Code、Codex CLI、Cursor、Windsurf 或其他 AI 编程助手即可。括号里的限制是给 AI 助手看的，你不用理解。
 
 ```text
 请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md 的说明帮我部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch — 会丢关键指令)
 ```
 
-AI 会按文档把仓库 clone 到本机、装依赖、起后端、做健康检查，**问你五个有默认值的问题**：选哪个 LLM、选哪个向量化(embedding)服务、怎么提供 B 站 Cookie、是否把小红书收藏 / 点赞混进初始画像、是否把抖音发布 / 收藏 / 点赞 / 关注混进初始画像。每一项都有"不确定就回 1 / 默认否"的推荐——embedding 默认推荐本地 Ollama bge-m3（免费 + 离线 + 不消耗主 LLM 配额），小红书和抖音数据只有你明确同意才启用。最后自动跑 `init`（拉历史 + 生成画像 + 首轮发现），并把 `BOOTSTRAP_STATUS init_progress` 结构化进度实时转述给你。**这是最推荐的路径**，对绝大多数用户来说零摩擦。
+AI 助手会克隆仓库、安装依赖、启动后端、做健康检查，并问几个有默认值的问题。看不懂就选默认；小红书和抖音数据只有你明确同意才会进入初始画像。
 
-**或者：让 AI 智能体用 Docker 部署**（适合有 Docker Desktop 的用户，v0.3.11+ 自带 Ollama embedding sidecar）：
+### 3. 在同一个浏览器登录内容平台
 
-```text
-请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md 的说明帮我用 Docker Compose 部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch)
-```
+至少登录 [B 站](https://www.bilibili.com)，OpenBiliClaw 会用它生成第一版画像和推荐。想接入小红书或抖音时，再在装了插件的同一个浏览器里登录 [小红书](https://www.xiaohongshu.com) / [抖音](https://www.douyin.com)。
 
-**或者：自己跑一句话装机脚本**（不依赖 AI 智能体，本质上是 AI 装机的同一份脚本）：
+<details>
+<summary>不用 AI 助手：直接跑一句话安装脚本</summary>
 
 macOS / Linux / WSL2（Bash）：
 
@@ -178,18 +157,63 @@ Windows 原生（PowerShell，不需要 Docker / WSL2）：
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.ps1 -UseBasicParsing | iex
 ```
 
-> 前缀的 `[Net.ServicePointManager]...Tls12` 是为了 PowerShell 5.1（Win10/Win11 默认）能和 GitHub 握手成功。GitHub 已不接受 TLS 1.0/1.1，PS 5.1 默认协议太老。装上 PowerShell 7 的用户可以省掉这段前缀。
+脚本依赖 `git` 和 Python 3.11+。它会自动克隆仓库、安装依赖、启动后端、健康检查，再提示你补充 LLM、embedding、B 站 Cookie、小红书 opt-in、抖音 opt-in 等决策。不确定的选项直接回车或选默认。
 
-脚本依赖只有 `git` 和 `python3`（3.11+，Windows 上推荐 `py launcher`）。会自动克隆仓库、装依赖、起后端、健康检查，然后在最后的状态块里列出需要补问的 LLM、embedding、B 站 Cookie、小红书 opt-in 和抖音 opt-in 决策。凭据和决策都明确后才会自动跑首次 init；init 期间会输出普通日志，也会发 `BOOTSTRAP_STATUS init_progress` 给 AI agent 实时提示 1/4、2/4、3/4、4/4 和补货阶段进度。
-
-> 💡 **Windows 用户**：v0.3.4 起 `install.ps1` 完全适配原生 Windows，无需安装 Docker 或 WSL2。已有 Docker Desktop 也可以用上面的 Docker 一键部署。
-
-> 🧠 **可选：本地 embedding 兜底（无需 API Key）** —— 装一次 Ollama 就能跑：
-> Mac `brew install ollama && ollama serve &`，Windows 从 [ollama.com/download](https://ollama.com/download) 下载，Linux `curl -fsSL https://ollama.com/install.sh \| sh && ollama serve &`。
-> 然后 `uv run openbiliclaw setup-embedding`，向导自动拉取 `bge-m3`（~568MB，CPU 即可）并写入配置。适合 embedding 配额不够、断网，或不想再多一份 API Key 的用户。
+</details>
 
 <details>
-<summary>手动安装 / 手动配置 / 浏览器插件</summary>
+<summary>高级：Docker 部署</summary>
+
+适合已经安装 Docker Desktop 的用户。v0.3.11+ 自带 Ollama embedding sidecar。
+
+```text
+请按照 https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/docker-deployment.md 的说明帮我用 Docker Compose 部署 OpenBiliClaw 后端(务必用 Bash 的 curl 下载这个文档,不要用 WebFetch)
+```
+
+详见 [Docker 部署指南](docs/docker-deployment.md)。
+
+</details>
+
+<details>
+<summary>高级：多源登录、小红书 CDP 与抖音插件链路</summary>
+
+OpenBiliClaw 不保存你的平台密码，也不替你绕过登录。它复用当前浏览器里的登录会话，只抓你自己能看到的内容。
+
+| 源 | 登录方式 | 不登录的影响 |
+|---|---|---|
+| **B 站** | 在装了插件的浏览器打开 https://www.bilibili.com 正常登录 | 拉不到观看历史 / 收藏 / 关注，画像会明显变弱 |
+| **小红书** | 在同一浏览器打开 https://www.xiaohongshu.com 正常登录 | 小红书 discovery 和详情抓取不可用 |
+| **抖音** | 在同一浏览器打开 https://www.douyin.com 正常登录 | `init --yes-douyin`、`fetch-douyin` 和 `discover --source douyin` 的 search / hot / feed 可能返回 0 条 |
+
+小红书强烈推荐使用 CDP 模式 Chrome 复用登录态，能减少反爬干扰：用独立 profile 启动 Chrome 并打开 `--remote-debugging-port=9222`，手动登录小红书一次，然后在 `[sources.browser]` 配置 `cdp_url = "http://localhost:9222"`。详见 [配置参考](docs/modules/config.md#sourcesbrowser)。
+
+</details>
+
+<details>
+<summary>高级：本地 embedding / Ollama</summary>
+
+如果你不想给 embedding 单独配置 API Key，或担心远程 embedding 配额，可以装一次 Ollama 后使用本地 `bge-m3`：
+
+```bash
+# macOS
+brew install ollama && ollama serve &
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh && ollama serve &
+```
+
+Windows 用户可以从 [ollama.com/download](https://ollama.com/download) 安装。安装后运行：
+
+```bash
+uv run openbiliclaw setup-embedding
+```
+
+向导会自动拉取 `bge-m3`（约 568MB，CPU 可跑）并写入配置。
+
+</details>
+
+<details>
+<summary>高级：手动安装与 discovery 调试</summary>
 
 > 人类维护者可以参考 [docs/agent-install.md](docs/agent-install.md)(给智能体看的精简契约)和 [docs/agent-deployment.md](docs/agent-deployment.md)(详细排查说明)。
 
@@ -244,9 +268,13 @@ openbiliclaw recommend
 openbiliclaw profile
 ```
 
-#### Docker 部署
+开发者也可以从源码构建插件：
 
-> 📦 也支持 Docker 一键部署，详见 [Docker 部署指南](docs/docker-deployment.md)
+```bash
+cd extension
+npm install
+npm run package
+```
 
 </details>
 
