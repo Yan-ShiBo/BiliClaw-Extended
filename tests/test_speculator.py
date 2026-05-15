@@ -177,6 +177,56 @@ def test_choose_next_probe_prefers_axis_without_negative_feedback():
     assert chosen.domain == "手作模型制作"
 
 
+def test_select_diverse_candidates_avoids_negative_feedback_axis():
+    candidates = [
+        SpeculativeInterest(
+            domain="建筑旅行 vlog",
+            confidence=0.9,
+            weight=0.9,
+            experience_mode="wander_observe",
+            entry_load="light",
+        ),
+        SpeculativeInterest(
+            domain="咖啡馆空间设计",
+            confidence=0.4,
+            weight=0.4,
+            experience_mode="aesthetic",
+            entry_load="light",
+        ),
+        SpeculativeInterest(
+            domain="本地 Stable Diffusion 工作台",
+            confidence=0.35,
+            weight=0.35,
+            experience_mode="hands_on",
+            entry_load="heavy",
+        ),
+    ]
+
+    selected = speculator_module._select_diverse_candidates(
+        candidates,
+        limit=2,
+        existing=[
+            SpeculativeInterest(
+                domain="结构化知识讲解",
+                experience_mode="knowledge",
+                entry_load="heavy",
+            )
+        ],
+        feedback_history=[
+            {
+                "domain": "城市漫游路线",
+                "response": "reject",
+                "axis": "wander_observe|light",
+            }
+        ],
+    )
+
+    assert [item.domain for item in selected] == [
+        "咖啡馆空间设计",
+        "本地 Stable Diffusion 工作台",
+    ]
+
+
 def _profile_with_ai_specifics():
     from openbiliclaw.soul.profile import (
         InterestDomain,

@@ -147,7 +147,7 @@
 - runtime push 和 OpenClaw `get_next_probe()` 共用同一套 probe selection 规则
 - `confirmation_count` 仍然是第一优先级；当验证压力相同，会优先选择最近没推过的 `experience_mode + entry_load` 组合
 - probe 去重状态写入并持久化到 `discovery_runtime_state["probed_domains"]` 和 `discovery_runtime_state["probed_axes"]`
-- `/api/interest-probes/respond` 会把 confirm / reject / chat sentiment 写入 `discovery_runtime_state["probe_feedback_history"]`；后续选择会跳过与 reject / chat_negative 明显重复的 domain，并在同等压力下避开负向反馈过的体验轴
+- `/api/interest-probes/respond` 会把 confirm / reject / chat sentiment 写入 `discovery_runtime_state["probe_feedback_history"]`；后续生成会降低 reject / chat_negative 体验轴的入池优先级，选择会跳过明显重复的 domain，并在同等压力下避开负向反馈过的体验轴
 - runtime push 与 OpenClaw `get_next_probe()` 成功选择后都会记录本次 domain / axis，连续调用不会重复返回同一条 active probe
 
 ### 关键文件

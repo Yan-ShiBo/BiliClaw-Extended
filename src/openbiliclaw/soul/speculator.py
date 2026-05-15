@@ -1145,6 +1145,7 @@ class InterestSpeculator:
             candidates,
             limit=slots,
             existing=existing_active,
+            feedback_history=feedback_history,
         ):
             if len(state.active) >= self._max_active:
                 break
@@ -1192,8 +1193,14 @@ def _normalize_entry_load(value: Any) -> str:
 def _candidate_priority(
     candidate: SpeculativeInterest,
     selected: list[SpeculativeInterest],
+    *,
+    avoid_axes: set[str] | None = None,
 ) -> tuple[float, float]:
     score = float(candidate.confidence)
+    axis = build_probe_axis(
+        experience_mode=candidate.experience_mode,
+        entry_load=candidate.entry_load,
+    )
     selected_modes = {item.experience_mode for item in selected if item.experience_mode}
     selected_loads = {item.entry_load for item in selected if item.entry_load}
     if candidate.experience_mode and candidate.experience_mode not in selected_modes:
@@ -1204,6 +1211,8 @@ def _candidate_priority(
         score += 0.05
     if candidate.experience_mode and candidate.experience_mode != "knowledge":
         score += 0.05
+    if axis and axis in (avoid_axes or set()):
+        score -= 0.6
     return (score, float(candidate.weight))
 
 
@@ -1211,13 +1220,22 @@ def _pick_best_candidate(
     candidates: list[SpeculativeInterest],
     selected: list[SpeculativeInterest],
     predicate: Any,
+    *,
+    avoid_axes: set[str] | None = None,
 ) -> SpeculativeInterest | None:
     matching = [
         candidate for candidate in candidates if candidate not in selected and predicate(candidate)
     ]
     if not matching:
         return None
-    return max(matching, key=lambda candidate: _candidate_priority(candidate, selected))
+    return max(
+        matching,
+        key=lambda candidate: _candidate_priority(
+            candidate,
+            selected,
+            avoid_axes=avoid_axes,
+        ),
+    )
 
 
 def _select_diverse_candidates(
@@ -1225,6 +1243,7 @@ def _select_diverse_candidates(
     *,
     limit: int,
     existing: list[SpeculativeInterest] | None = None,
+    feedback_history: object | None = None,
 ) -> list[SpeculativeInterest]:
     if limit <= 0 or not candidates:
         return []
@@ -1237,6 +1256,7 @@ def _select_diverse_candidates(
         reverse=True,
     )
     context = list(existing or [])
+    avoid_axes = _negative_probe_feedback_axes(feedback_history)
     selected: list[SpeculativeInterest] = []
 
     if not any(item.entry_load == "light" for item in context):
@@ -1244,6 +1264,7 @@ def _select_diverse_candidates(
             ordered,
             context + selected,
             lambda item: item.entry_load == "light",
+            avoid_axes=avoid_axes,
         )
         if light_pick is not None:
             selected.append(light_pick)
@@ -1256,6 +1277,7 @@ def _select_diverse_candidates(
             ordered,
             context + selected,
             lambda item: item.experience_mode and item.experience_mode != "knowledge",
+            avoid_axes=avoid_axes,
         )
         if non_knowledge_pick is not None:
             selected.append(non_knowledge_pick)
@@ -1267,7 +1289,11 @@ def _select_diverse_candidates(
         selected.append(
             max(
                 remaining,
-                key=lambda candidate: _candidate_priority(candidate, context + selected),
+                key=lambda candidate: _candidate_priority(
+                    candidate,
+                    context + selected,
+                    avoid_axes=avoid_axes,
+                ),
             )
         )
     return selected[:limit]
