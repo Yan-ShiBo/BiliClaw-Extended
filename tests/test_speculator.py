@@ -16,6 +16,7 @@ from openbiliclaw.soul.speculator import (
     SpeculativeState,
     _event_matches_speculation,
     _tokenize,
+    choose_next_probe_candidate,
     expire_stale,
     load_speculative_state,
     observe_events,
@@ -83,6 +84,97 @@ def test_probe_novelty_guard_matches_recent_probe_history():
     )
 
     assert guard.is_duplicate_domain("城市漫游路线") is True
+
+
+def test_probe_novelty_guard_matches_negative_feedback_history():
+    guard = speculator_module.ProbeNoveltyGuard.from_profile_and_state(
+        None,
+        SpeculativeState(),
+        feedback_history=[
+            {
+                "domain": "城市漫游路线",
+                "response": "reject",
+                "specifics": ["老街路线"],
+            },
+            {
+                "domain": "手作模型",
+                "response": "chat_neutral",
+                "specifics": ["拼装过程"],
+            },
+        ],
+    )
+
+    assert guard.is_duplicate_domain("城市漫游隐藏路线") is True
+    assert guard.filter_specifics(["老街路线", "城市声音采样"]) == [
+        "城市声音采样"
+    ]
+    assert guard.is_duplicate_domain("手作模型制作") is False
+
+
+def test_choose_next_probe_skips_negative_feedback_domain():
+    chosen = choose_next_probe_candidate(
+        [
+            SimpleNamespace(
+                domain="城市漫游隐藏路线",
+                confirmation_count=0,
+                weight=0.9,
+                confidence=0.9,
+                experience_mode="wander_observe",
+                entry_load="light",
+            ),
+            SimpleNamespace(
+                domain="手工模型制作",
+                confirmation_count=0,
+                weight=0.2,
+                confidence=0.2,
+                experience_mode="hands_on",
+                entry_load="light",
+            ),
+        ],
+        feedback_history=[
+            {
+                "domain": "城市漫游路线",
+                "response": "reject",
+                "axis": "wander_observe|light",
+            }
+        ],
+    )
+
+    assert chosen is not None
+    assert chosen.domain == "手工模型制作"
+
+
+def test_choose_next_probe_prefers_axis_without_negative_feedback():
+    chosen = choose_next_probe_candidate(
+        [
+            SimpleNamespace(
+                domain="城市夜景摄影",
+                confirmation_count=0,
+                weight=0.9,
+                confidence=0.9,
+                experience_mode="aesthetic",
+                entry_load="light",
+            ),
+            SimpleNamespace(
+                domain="手作模型制作",
+                confirmation_count=0,
+                weight=0.2,
+                confidence=0.2,
+                experience_mode="hands_on",
+                entry_load="light",
+            ),
+        ],
+        feedback_history=[
+            {
+                "domain": "完全不同的旧方向",
+                "response": "chat_negative",
+                "axis": "aesthetic|light",
+            }
+        ],
+    )
+
+    assert chosen is not None
+    assert chosen.domain == "手作模型制作"
 
 
 def _profile_with_ai_specifics():

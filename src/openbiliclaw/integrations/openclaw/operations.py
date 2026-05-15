@@ -327,6 +327,7 @@ class OpenClawAdapter:
                 specs,
                 probed_domains=probed_domains,
                 probed_axes=probed_axes,
+                feedback_history=runtime_state.get("probe_feedback_history", []),
             )
             if top is None:
                 return InterestProbeResponse(probe=None)

@@ -53,8 +53,15 @@ runtime push 和 OpenClaw `next-probe()` 继续共用 `choose_next_probe_candida
 
 - `probed_domains`: `{normalized_domain: iso_timestamp}`
 - `probed_axes`: `{experience_mode|entry_load: iso_timestamp}`
+- `probe_feedback_history`: 最近 100 条显式 probe 反馈记录，用于把用户已经拒绝或负向聊过的方向纳入后续去重
 
 runtime push 和 OpenClaw `get_next_probe()` 都在成功返回/推送 probe 后写入这两类历史。历史窗口先沿用 `_PROBE_COOLDOWN_HOURS = 4`，不新增长期疲劳表；用户明确 reject 的长期抑制仍由 cooldown 负责。
+
+## Feedback History Addendum
+
+探针反馈需要补一个轻量长期记忆。`confirm` / `chat_positive` 主要依赖画像晋升来避免重复；`reject` / `chat_negative` 则写入 `probe_feedback_history`，后续生成、seed 注入、runtime push 和 OpenClaw next-probe 都把这些负向 domain / specifics 当作 novelty coverage。`chat_neutral` 只留审计记录，不参与硬过滤，避免把一次普通追问误判成不感兴趣。
+
+首版不把“已推送但没回复”建模为负反馈，因为没有可靠的忽略语义；短期重复仍由 `probed_domains` / `probed_axes` 控制。
 
 ## Data Flow
 
@@ -75,7 +82,8 @@ Probe selection:
 
 1. runtime push 和 OpenClaw 都读取 persisted runtime state。
 2. `choose_next_probe_candidate()` 同时接收 `probed_domains` 和 `probed_axes`。
-3. 成功选择后记录本次 domain / axis。
+3. 同时读取 `probe_feedback_history`，跳过与负向反馈明显重复的 domain，并在同等验证压力下优先避开负向反馈过的体验轴。
+4. 成功选择后记录本次 domain / axis。
 
 ## Testing
 
@@ -84,12 +92,15 @@ Probe selection:
 - 画像已有 specific 时，近似 domain / specific 候选会被过滤。
 - seed 注入不会把已有画像方向加入 active。
 - `probed_axes` 在 `MemoryManager` 中能 round-trip 到 JSON。
+- `probe_feedback_history` 在 `MemoryManager` 中能 round-trip 到 JSON。
+- 负向 probe 反馈会让后续相似候选被 `ProbeNoveltyGuard` 过滤。
+- `/api/interest-probes/respond` 会把 confirm / reject / chat sentiment 记录到 probe feedback history。
 - OpenClaw 连续 `get_next_probe()` 不重复返回同一个 domain，且记录 axis。
 - active pool 已经偏向 `knowledge|heavy` 时，新入池优先补不同体验轴。
 
 ## Non-Goals
 
 - 不引入 embedding semantic dedupe。
-- 不做长期探测疲劳模型。
+- 不做复杂长期探测疲劳模型；只记录显式反馈并用于保守避让。
 - 不修改 speculation state 文件格式，除非现有字段无法表达必要历史。
 - 不把已有主轴整体排除；主轴仍然是最重要的 lateral 探索来源。

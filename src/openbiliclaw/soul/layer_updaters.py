@@ -264,9 +264,21 @@ async def _update_interest(
                 speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
                 seed_coverage_profile = deepcopy(pre_update_profile)
                 seed_coverage_profile.interest.likes.extend(profile.interest.likes)
+                runtime_state: dict[str, object] = {}
+                load_runtime_state = getattr(memory, "load_discovery_runtime_state", None)
+                if callable(load_runtime_state):
+                    runtime_state = load_runtime_state()
+                probed_domains_raw = runtime_state.get("probed_domains", {})
+                probed_domains = (
+                    set(probed_domains_raw)
+                    if isinstance(probed_domains_raw, dict)
+                    else set()
+                )
                 added = speculator.ingest_seeds(
                     speculative_seeds,
                     profile=seed_coverage_profile,
+                    probed_domains=probed_domains,
+                    feedback_history=runtime_state.get("probe_feedback_history", []),
                 )
                 if added:
                     changes.append(f"注入 {added} 条猜测兴趣种子")

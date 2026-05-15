@@ -299,6 +299,84 @@ def _normalize_probe_term(value: Any) -> str:
     return "".join(str(value or "").strip().lower().split())
 
 
+PROBE_FEEDBACK_HISTORY_LIMIT = 100
+NEGATIVE_PROBE_FEEDBACK_RESPONSES = {"reject", "chat_negative"}
+
+
+def _string_field(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _specific_names(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    names: list[str] = []
+    for item in value:
+        text = _string_field(item)
+        if text:
+            names.append(text)
+    return names
+
+
+def normalize_probe_feedback_history(history: object) -> list[dict[str, object]]:
+    """Return sanitized probe feedback records, capped to the recent window."""
+    if not isinstance(history, list):
+        return []
+
+    records: list[dict[str, object]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        domain = _string_field(item.get("domain"))
+        response = _string_field(item.get("response")).lower()
+        if not domain or not response:
+            continue
+        record: dict[str, object] = {
+            "domain": domain,
+            "response": response,
+        }
+        for key in ("axis", "category", "reason", "message", "created_at"):
+            text = _string_field(item.get(key))
+            if text:
+                record[key] = text
+        specifics = _specific_names(item.get("specifics"))
+        if specifics:
+            record["specifics"] = specifics
+        records.append(record)
+    return records[-PROBE_FEEDBACK_HISTORY_LIMIT:]
+
+
+def append_probe_feedback_history(
+    history: object,
+    entry: dict[str, object],
+) -> list[dict[str, object]]:
+    """Append a sanitized probe feedback record to runtime history."""
+    payload = dict(entry)
+    if not _string_field(payload.get("created_at")):
+        payload["created_at"] = datetime.now().isoformat()
+    records = normalize_probe_feedback_history(history)
+    records.append(payload)
+    return normalize_probe_feedback_history(records)
+
+
+def _negative_probe_feedback_domains(feedback_history: object) -> list[str]:
+    return [
+        str(item.get("domain", ""))
+        for item in normalize_probe_feedback_history(feedback_history)
+        if str(item.get("response", "")) in NEGATIVE_PROBE_FEEDBACK_RESPONSES
+        and str(item.get("domain", "")).strip()
+    ]
+
+
+def _negative_probe_feedback_axes(feedback_history: object) -> set[str]:
+    return {
+        str(item.get("axis", "")).strip()
+        for item in normalize_probe_feedback_history(feedback_history)
+        if str(item.get("response", "")) in NEGATIVE_PROBE_FEEDBACK_RESPONSES
+        and str(item.get("axis", "")).strip()
+    }
+
+
 def _has_probe_term_overlap(candidate: str, existing: str) -> bool:
     """Return True when two probe terms are clearly the same coverage.
 
@@ -336,6 +414,7 @@ class ProbeNoveltyGuard:
         state: SpeculativeState,
         *,
         probed_domains: set[str] | None = None,
+        feedback_history: object | None = None,
     ) -> ProbeNoveltyGuard:
         exact_terms: set[str] = set()
         fuzzy_terms: set[str] = set()
@@ -364,6 +443,13 @@ class ProbeNoveltyGuard:
             add_term(cooldown.domain)
         for domain in probed_domains or set():
             add_term(domain)
+        for item in normalize_probe_feedback_history(feedback_history):
+            response = str(item.get("response", ""))
+            if response not in NEGATIVE_PROBE_FEEDBACK_RESPONSES:
+                continue
+            add_term(item.get("domain", ""))
+            for specific in _specific_names(item.get("specifics")):
+                add_term(specific)
 
         return cls(exact_terms=exact_terms, fuzzy_terms=fuzzy_terms)
 
@@ -601,7 +687,12 @@ class InterestSpeculator:
 
     # -- Public API -----------------------------------------------------------
 
-    async def tick(self, profile: OnionProfile) -> SpeculatorTickResult:
+    async def tick(
+        self,
+        profile: OnionProfile,
+        *,
+        feedback_history: object | None = None,
+    ) -> SpeculatorTickResult:
         """Main periodic entry point: expire → promote → generate → save."""
         now = datetime.now()
         state = self._load_state()
@@ -618,7 +709,12 @@ class InterestSpeculator:
         # 3. Generate new speculations if interval elapsed and caps not reached
         if self._should_generate(state, now, profile):
             pre_active_domains = {s.domain for s in state.active if s.status == "active"}
-            state = await self._generate(profile, state, now)
+            state = await self._generate(
+                profile,
+                state,
+                now,
+                feedback_history=feedback_history,
+            )
             # Only include domains that didn't exist before this _generate call
             # — otherwise the "generated N" log re-prints the carried-over
             # active set every tick, falsely suggesting work happened when
@@ -652,7 +748,12 @@ class InterestSpeculator:
 
         return result
 
-    async def force_tick(self, profile: OnionProfile) -> SpeculatorTickResult:
+    async def force_tick(
+        self,
+        profile: OnionProfile,
+        *,
+        feedback_history: object | None = None,
+    ) -> SpeculatorTickResult:
         """Force a speculator tick ignoring the interval timer.
 
         Used on init and process startup to ensure speculations exist immediately.
@@ -686,7 +787,12 @@ class InterestSpeculator:
         )
         if can_generate:
             pre_active_domains = {s.domain for s in state.active if s.status == "active"}
-            state = await self._generate(profile, state, now)
+            state = await self._generate(
+                profile,
+                state,
+                now,
+                feedback_history=feedback_history,
+            )
             result.generated = [
                 s
                 for s in state.active
@@ -738,6 +844,7 @@ class InterestSpeculator:
         *,
         profile: OnionProfile | None = None,
         probed_domains: set[str] | None = None,
+        feedback_history: object | None = None,
     ) -> int:
         """Ingest speculative interests from PreferenceAnalyzer as seed candidates."""
         if not seeds:
@@ -753,6 +860,7 @@ class InterestSpeculator:
             profile,
             state,
             probed_domains=probed_domains,
+            feedback_history=feedback_history,
         )
 
         for seed in seeds:
@@ -912,6 +1020,8 @@ class InterestSpeculator:
         profile: OnionProfile,
         state: SpeculativeState,
         now: datetime,
+        *,
+        feedback_history: object | None = None,
     ) -> SpeculativeState:
         """Use LLM to generate new speculative interest directions."""
         from openbiliclaw.llm.prompts import build_speculation_generation_prompt
@@ -959,7 +1069,11 @@ class InterestSpeculator:
             for d in getattr(profile.interest, "likes", [])
             if str(getattr(d, "domain", "")).strip()
         }
-        novelty_guard = ProbeNoveltyGuard.from_profile_and_state(profile, state)
+        novelty_guard = ProbeNoveltyGuard.from_profile_and_state(
+            profile,
+            state,
+            feedback_history=feedback_history,
+        )
 
         candidates: list[SpeculativeInterest] = []
         rejected_reasons: list[str] = []
@@ -1172,13 +1286,18 @@ def choose_next_probe_candidate(
     *,
     probed_domains: set[str] | None = None,
     probed_axes: set[str] | None = None,
+    feedback_history: object | None = None,
 ) -> Any | None:
     recent_domains = probed_domains or set()
     recent_axes = probed_axes or set()
+    negative_domains = _negative_probe_feedback_domains(feedback_history)
+    negative_axes = _negative_probe_feedback_axes(feedback_history)
     candidates = []
     for candidate in specs:
         domain = str(getattr(candidate, "domain", "")).strip().lower()
         if not domain or domain in recent_domains:
+            continue
+        if any(_has_probe_term_overlap(domain, term) for term in negative_domains):
             continue
         candidates.append(candidate)
     if not candidates:
@@ -1207,6 +1326,11 @@ def choose_next_probe_candidate(
     return max(
         pool,
         key=lambda candidate: (
+            build_probe_axis(
+                experience_mode=getattr(candidate, "experience_mode", ""),
+                entry_load=getattr(candidate, "entry_load", ""),
+            )
+            not in negative_axes,
             float(getattr(candidate, "weight", 0.0) or 0.0),
             float(getattr(candidate, "confidence", 0.0) or 0.0),
         ),

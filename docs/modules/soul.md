@@ -89,9 +89,9 @@
 ### Probe Novelty Guard
 
 - LLM 生成候选和 `PreferenceAnalyzer` seed 注入都会经过 `ProbeNoveltyGuard`
-- guard 会收集画像 `interest.likes[*].domain`、画像 `specifics[*].name`、active speculation、cooldown speculation 和近期 probe history
+- guard 会收集画像 `interest.likes[*].domain`、画像 `specifics[*].name`、active speculation、cooldown speculation、近期 probe history 和显式负向 probe feedback
 - 第一版使用规范化字符串和中文 bigram overlap 做本地判重，不引入 embedding 成本
-- 与已有画像 domain / specific、active / cooldown、近期 `probed_domains` 明显重复的候选会被丢弃；候选 specifics 若部分重复，会先移除重复细项，剩余不足 2 条时丢弃候选
+- 与已有画像 domain / specific、active / cooldown、近期 `probed_domains`、`probe_feedback_history` 中 reject / chat_negative 记录明显重复的候选会被丢弃；候选 specifics 若部分重复，会先移除重复细项，剩余不足 2 条时丢弃候选
 
 ### 配置项
 
@@ -147,13 +147,14 @@
 - runtime push 和 OpenClaw `get_next_probe()` 共用同一套 probe selection 规则
 - `confirmation_count` 仍然是第一优先级；当验证压力相同，会优先选择最近没推过的 `experience_mode + entry_load` 组合
 - probe 去重状态写入并持久化到 `discovery_runtime_state["probed_domains"]` 和 `discovery_runtime_state["probed_axes"]`
+- `/api/interest-probes/respond` 会把 confirm / reject / chat sentiment 写入 `discovery_runtime_state["probe_feedback_history"]`；后续选择会跳过与 reject / chat_negative 明显重复的 domain，并在同等压力下避开负向反馈过的体验轴
 - runtime push 与 OpenClaw `get_next_probe()` 成功选择后都会记录本次 domain / axis，连续调用不会重复返回同一条 active probe
 
 ### 关键文件
 
 - `src/openbiliclaw/soul/speculator.py` — 核心引擎（生成/观测/转正/过期/force_tick）
 - `src/openbiliclaw/llm/prompts.py` — `build_speculation_generation_prompt()`
-- `tests/test_speculator.py` — 27 个单元测试
+- `tests/test_speculator.py` — speculative lifecycle / novelty / probe selection 单元测试
 
 ## 画像更新逻辑详解
 
