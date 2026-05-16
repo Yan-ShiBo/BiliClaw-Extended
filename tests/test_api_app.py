@@ -184,6 +184,7 @@ class TestBackendAPI:
                 llm: object,
                 memory: object,
                 usage_recorder: object = None,
+                **_extras: object,
             ) -> None:
                 self.llm = llm
                 self.memory = memory

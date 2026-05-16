@@ -1066,25 +1066,29 @@ class ContentDiscoveryEngine:
         fresh negatives as soon as the user records one. Storage failures
         return None so the eval-batch always runs.
         """
-        if self._database is None:
+        # Defensive getattr: some test fixtures construct the engine via
+        # ``__new__`` and skip ``__init__`` entirely, so `_database` and
+        # `_negative_exemplars_cache` may not exist as attributes.
+        database = getattr(self, "_database", None)
+        if database is None:
             return None
 
         from openbiliclaw.soul.negative_exemplars import recent_negative_exemplars
 
         try:
-            latest_id: int | None = self._database.get_latest_event_id()
+            latest_id: int | None = database.get_latest_event_id()
         except Exception:
             logger.debug("negative_exemplars: get_latest_event_id failed", exc_info=True)
             latest_id = None
 
-        cached = self._negative_exemplars_cache
+        cached = getattr(self, "_negative_exemplars_cache", None)
         if cached is not None:
             cached_ts, cached_latest_id, cached_exemplars = cached
             if cached_latest_id == latest_id and (time.monotonic() - cached_ts) < 300:
                 return cached_exemplars
 
         try:
-            exemplars = recent_negative_exemplars(self._database)
+            exemplars = recent_negative_exemplars(database)
         except Exception:
             logger.debug("negative_exemplars: refresh failed", exc_info=True)
             return None

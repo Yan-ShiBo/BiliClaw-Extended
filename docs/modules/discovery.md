@@ -298,6 +298,14 @@ discovery 不是“把整个找片过程都交给 LLM”。当前实现里，LLM
 - 把 `reason` 写回 `DiscoveredContent.relevance_reason`
 - 如果 JSON 非法或字段坏掉，这条评估直接按 `0.0` 处理
 
+#### v0.3.x 负样本锚定（batch evaluator）
+
+`ContentDiscoveryEngine._evaluate_batch` 在每次 batch 调用前会通过 `_get_negative_exemplars()` 从事件层拉一份「最近真正不喜欢」的标题列表（来自 `soul/negative_exemplars.py` 的 recency-weighted、去重、80 字截断、最多 8 条），并作为 `negative_examples=` 透传给 `build_batch_content_evaluation_prompt()`：
+
+- 引擎实例内部有一份 5 分钟 TTL 缓存，key 是 `(latest_event_id, time bucket)`。同一秒内的多次 batch 共用一次 `query_events` I/O；用户新打了一条负反馈，下一次 batch 会立即看到新样本。
+- 上游 `_get_negative_exemplars()` 与 `recent_negative_exemplars()` 都把异常吞成 `None`/`[]`，event 表为空或存储抖动都不会中断 batch；user prompt 自动退回到无 `<negative_examples>` 形态，cache prefix 不被打断。
+- 拿到 exemplars 后 prompt builder 把它放在 `<source_context>` 与 `<content_batch>` 之间（系统规则 10/11 让 LLM 按话术 / 商业意图 / 标题结构层面去对照打分，而不是关键词重叠）。前置 `[soul.preference] satisfaction_filter_enabled` 未打开时，事件分类仍在跑，所以负样本池可以提前积累。
+
 所以这里的 LLM 不是“决定推荐”，而是在给候选池补一个统一、可比较的相关性分数。
 
 ### 4. 跨领域探索 prompt

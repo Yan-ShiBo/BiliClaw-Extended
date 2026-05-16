@@ -31,6 +31,7 @@
 | v0.3.69 Gemini reasoning-first 模型适配 | ✅ | `GeminiProvider._is_reasoning_first_model` 用 prefix 识别 `gemini-3.x` / `gemini-2.5-pro*`，json_mode 下不再附加 `thinking_budget=0`（这些模型会以 `400 INVALID_ARGUMENT` 拒绝）；`gemini-2.5-flash` 等非 reasoning-first 模型继续走省钱通路。pricing 补全 `gemini-3.1-pro-preview` / `gemini-3-pro-preview` 别名，配套 CLI / config / 文档统一改用真实模型 ID |
 | v0.3.71 Prompt-cache 与 400 诊断 | ✅ | `build_awareness_prompt` / `build_batch_content_evaluation_prompt` 的 user prompt 按稳定画像在前、本次批次在后排序，并使用 `sort_keys=True` 的确定性 JSON；`OpenAIProvider._map_error()` 会把 OpenAI-compatible HTTP 400 响应体摘要写入 WARNING 和错误文本，便于定位 MiMo 等兼容服务的请求 schema 问题 |
 | v0.3.71 Awareness 缓存形态回归锁 | ✅ | `build_awareness_prompt` 的 system 内容固定为模块级常量 `_AWARENESS_SYSTEM_PROMPT`，user 块顺序锁定为 `<soul_profile>` → `<preference_summary>` → `<recent_events>`，并通过 `tests/test_llm_prompts.py` 的 byte-equal / 末尾块 / 不同字典 key 序仍产相同字节三组回归测试保证未来改动不会再把变量数据放进 system、不把 recent_events 之后塞入稳定块、或丢掉 `sort_keys=True` |
+| v0.3.x Eval-batch 负样本锚定 | ✅ | `build_batch_content_evaluation_prompt` 新增可选 `negative_examples` kwarg；非空时在 user prompt `<source_context>` 与 `<content_batch>` 之间插入 `<negative_examples>` 块（`sort_keys=True` 决定性 JSON）。`None` / `[]` 退回原 user 字节形态以保留 cold-start 缓存前缀。`_BATCH_CONTENT_EVALUATION_SYSTEM_PROMPT` 加入两条永久规则 (10 / 11)：按话术 / 商业意图 / 标题结构层面 pattern-match 候选与示例，不要看关键词重叠；规则改动一次后系统消息保持 call-invariant |
 
 ## 公开 API
 

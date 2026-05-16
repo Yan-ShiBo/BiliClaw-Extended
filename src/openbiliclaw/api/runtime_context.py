@@ -151,13 +151,19 @@ class RuntimeContext:
         # this was wired, ``soul.*`` callers were entirely missing from
         # ``openbiliclaw cost --by caller`` and speculator failures
         # surfaced as silent "0 new" instead of explicit WARNs.
+        # Defensive getattr chain: legacy test fixtures and partial
+        # config stubs may not expose the new `soul.preference` block.
+        # Default to False (the rollout posture) when the field is absent.
+        soul_cfg = getattr(new_config, "soul", None)
+        preference_cfg = getattr(soul_cfg, "preference", None) if soul_cfg else None
+        satisfaction_filter_enabled = bool(
+            getattr(preference_cfg, "satisfaction_filter_enabled", False)
+        )
         new_soul_engine = SoulEngine(
             llm=new_registry,  # type: ignore[arg-type]
             memory=self.memory_manager,
             usage_recorder=new_usage_recorder,
-            satisfaction_filter_enabled=(
-                new_config.soul.preference.satisfaction_filter_enabled
-            ),
+            satisfaction_filter_enabled=satisfaction_filter_enabled,
         )
 
         # 4. Embedding service

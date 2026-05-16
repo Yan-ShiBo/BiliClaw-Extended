@@ -29,6 +29,7 @@
 | SoulEngine.analyze_events() | ✅ | 事件 → PreferenceAnalyzer → 偏好层更新 |
 | PreferenceAnalyzer | ✅ | LLM structured extraction + 合并 + 衰减；v0.3.x `satisfaction_filter_enabled=True` 时会在构 prompt 前丢掉存储层分类为 quick_exit / explicit_negative 的事件（保留 positive + unknown / NULL），断开点击诱饵自喂回路；默认 `False` 行为不变 |
 | filter_events_by_satisfaction | ✅ | `soul/event_filters.py` 中的纯函数，按 `inferred_satisfaction` 过滤事件，`"unknown"` 同时匹配缺失 / `None`，使 pre-migration 老行可被显式 opt-in 保留 |
+| recent_negative_exemplars | ✅ | `soul/negative_exemplars.py` 中的纯函数，从事件层拉最近 negative 标题做 recency 加权（半衰期默认 14d）+ 前缀去重 + 80 字截断，最多返回 8 条 `{title, reason, age_days}`。下游消费者是 `discovery/engine.ContentDiscoveryEngine._evaluate_batch`，把列表作为 `negative_examples` 透传给 batch evaluator prompt——这是 [inferred_satisfaction 信号](#) 的第二个消费方（第一个是上面的 `filter_events_by_satisfaction`） |
 | SocraticDialogue.respond() | ✅ | 通过 LLMService 调用 LLM，自动注入画像 |
 | ProfileBuilder | ✅ | 结构化 prompt + JSON 校验 + `OnionProfile` 构建 |
 | SoulEngine.build_initial_profile() | ✅ | 从 history + preference 生成并持久化 `soul.json` |
