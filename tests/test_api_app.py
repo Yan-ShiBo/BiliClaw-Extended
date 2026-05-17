@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
 
 from openbiliclaw.api.app import create_app
+
+
+def _wait_for_presence_count(ctx: object, expected: int) -> None:
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        snapshot = ctx.presence.snapshot()
+        if snapshot["active_count"] == expected:
+            return
+        time.sleep(0.01)
+    assert ctx.presence.snapshot()["active_count"] == expected
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +43,77 @@ def _isolate_runtime_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
 class TestBackendAPI:
     """Route-level tests for the plugin backend API."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_context_presence_survives_rebuild(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from openbiliclaw.api.runtime_context import RuntimeContext
+        from openbiliclaw.config import Config
+
+        ctx = RuntimeContext()
+        original_presence = ctx.presence
+
+        def _fake_rebuild_components(self: RuntimeContext, new_config: Config) -> None:
+            self.config = new_config
+
+        monkeypatch.setattr(RuntimeContext, "_rebuild_components", _fake_rebuild_components)
+
+        await ctx.rebuild_from_config(Config())
+
+        assert ctx.presence is original_presence
+
+    @pytest.mark.asyncio
+    async def test_runtime_context_skips_startup_one_shots_when_llm_work_blocked(self) -> None:
+        from types import SimpleNamespace
+
+        from openbiliclaw.api.runtime_context import RuntimeContext
+        from openbiliclaw.config import Config
+
+        class FakeSpeculator:
+            def __init__(self) -> None:
+                self.force_tick_calls = 0
+
+            async def force_tick(self, *_args: object, **_kwargs: object) -> None:
+                self.force_tick_calls += 1
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self._speculator = FakeSpeculator()
+                self.profile_calls = 0
+
+            async def get_profile(self) -> dict[str, object]:
+                self.profile_calls += 1
+                return {"profile": "ok"}
+
+        class FakeRecommendationEngine:
+            def __init__(self) -> None:
+                self.prewarm_calls = 0
+
+            async def prewarm_pool_mmr_embeddings(self) -> int:
+                self.prewarm_calls += 1
+                return 1
+
+        cfg = Config()
+        cfg.scheduler.enabled = False
+        soul = FakeSoulEngine()
+        rec = FakeRecommendationEngine()
+        ctx = RuntimeContext(
+            config=cfg,
+            memory_manager=SimpleNamespace(load_discovery_runtime_state=lambda: {}),
+            runtime_controller=object(),
+            account_sync_service=object(),
+            auto_update_service=object(),
+            soul_engine=soul,
+            recommendation_engine=rec,
+        )
+        app = SimpleNamespace(state=SimpleNamespace())
+
+        await ctx.restart_background_tasks(app)
+
+        assert soul._speculator.force_tick_calls == 0
+        assert rec.prewarm_calls == 0
 
     def test_create_app_bootstrap_shares_database_with_memory_manager(
         self,
@@ -229,6 +311,7 @@ class TestBackendAPI:
         class FakeAccountSyncService:
             def __init__(self, **kwargs) -> None:
                 self.kwargs = kwargs
+                captured["account_sync_kwargs"] = kwargs
 
         class FakeRuntimeEventHub:
             pass
@@ -261,7 +344,12 @@ class TestBackendAPI:
                     task_interval_seconds=45,
                 ),
             ),
-            scheduler=SimpleNamespace(pool_target_count=300, account_sync_interval_hours=24),
+            scheduler=SimpleNamespace(
+                enabled=True,
+                pause_on_extension_disconnect=False,
+                pool_target_count=300,
+                account_sync_interval_hours=24,
+            ),
         )
 
         monkeypatch.setattr("openbiliclaw.config.load_config", lambda: fake_config)
@@ -292,12 +380,18 @@ class TestBackendAPI:
         monkeypatch.setattr(runtime_events_module, "RuntimeEventHub", FakeRuntimeEventHub)
         monkeypatch.setattr(dialogue_module, "SocraticDialogue", FakeDialogue)
 
-        app_module.create_app()
+        app = app_module.create_app()
 
         assert captured["bilibili_request_concurrency"] == 2
         assert captured["llm_evaluation_concurrency"] == 2
         assert captured["engine_concurrency"] is captured["controller"]
         assert all(item is captured["controller"] for item in captured["strategy_concurrency"])
+        assert captured["runtime_controller_kwargs"]["scheduler_config"] is fake_config.scheduler
+        assert (
+            captured["runtime_controller_kwargs"]["presence"]
+            is app.state.runtime_context.presence
+        )
+        assert callable(captured["account_sync_kwargs"]["llm_work_allowed"])
 
     def test_cap_by_franchise_keeps_at_most_n_per_franchise(self) -> None:
         """Regression for the 'one popup full of 原神' bug. The API
@@ -983,6 +1077,70 @@ class TestBackendAPI:
                 "type": "refresh.started",
                 "message": "开始给你补候选了",
             }
+
+    def test_runtime_stream_websocket_updates_shared_presence(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.runtime.events import RuntimeEventHub
+
+        hub = RuntimeEventHub()
+        app = create_app(
+            memory_manager=object(),
+            database=object(),
+            soul_engine=object(),
+            runtime_event_hub=hub,
+        )
+        client = TestClient(app)
+        ctx = app.state.runtime_context
+
+        with client.websocket_connect("/api/runtime-stream"):
+            _wait_for_presence_count(ctx, 1)
+
+        _wait_for_presence_count(ctx, 0)
+
+    def test_runtime_stream_websocket_keeps_presence_for_second_client(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.runtime.events import RuntimeEventHub
+
+        hub = RuntimeEventHub()
+        app = create_app(
+            memory_manager=object(),
+            database=object(),
+            soul_engine=object(),
+            runtime_event_hub=hub,
+        )
+        client = TestClient(app)
+        ctx = app.state.runtime_context
+
+        with client.websocket_connect("/api/runtime-stream"):
+            _wait_for_presence_count(ctx, 1)
+            with client.websocket_connect("/api/runtime-stream"):
+                _wait_for_presence_count(ctx, 2)
+            _wait_for_presence_count(ctx, 1)
+            assert ctx.presence.is_present(grace_seconds=1) is True
+
+        _wait_for_presence_count(ctx, 0)
+
+    def test_runtime_stream_idle_disconnect_decrements_presence_promptly(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.runtime.events import RuntimeEventHub
+
+        hub = RuntimeEventHub()
+        app = create_app(
+            memory_manager=object(),
+            database=object(),
+            soul_engine=object(),
+            runtime_event_hub=hub,
+        )
+        client = TestClient(app)
+        ctx = app.state.runtime_context
+
+        with client.websocket_connect("/api/runtime-stream") as websocket:
+            _wait_for_presence_count(ctx, 1)
+            websocket.close()
+            _wait_for_presence_count(ctx, 0)
 
     def test_runtime_stream_requests_cookie_sync_for_background_client(
         self, monkeypatch, tmp_path: Path
@@ -3324,6 +3482,87 @@ class TestEmbeddingAndCompatProviderE2E:
         assert data["logging"]["aggregate_budget_mb"] == 456
         assert data["logging"]["unmanaged_truncate_mb"] == 78
         assert data["logging"]["unmanaged_max_age_days"] == 9
+
+    def test_get_config_exposes_scheduler_pause_on_extension_disconnect(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from openbiliclaw.config import Config
+
+        cfg = Config()
+        cfg.scheduler.pause_on_extension_disconnect = True
+        cfg.scheduler.extension_disconnect_grace_seconds = 45
+        client = self._make_client(monkeypatch, tmp_path, cfg)
+
+        response = client.get("/api/config")
+
+        assert response.status_code == 200
+        scheduler = response.json()["scheduler"]
+        assert scheduler["pause_on_extension_disconnect"] is True
+        assert scheduler["extension_disconnect_grace_seconds"] == 45
+
+    @pytest.mark.parametrize(("raw_bool", "bad_grace"), [("true", -1), ("on", 0), ("true", "abc")])
+    def test_put_config_updates_scheduler_pause_on_extension_disconnect(
+        self,
+        monkeypatch,
+        tmp_path,
+        raw_bool: str,
+        bad_grace: object,
+    ) -> None:
+        from openbiliclaw.config import Config
+
+        cfg = Config()
+        client = self._make_client(monkeypatch, tmp_path, cfg)
+
+        response = client.put(
+            "/api/config",
+            json={
+                "scheduler": {
+                    "pause_on_extension_disconnect": raw_bool,
+                    "extension_disconnect_grace_seconds": bad_grace,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert cfg.scheduler.pause_on_extension_disconnect is True
+        assert cfg.scheduler.extension_disconnect_grace_seconds == 90
+        scheduler = response.json()["config"]["scheduler"]
+        assert scheduler["pause_on_extension_disconnect"] is True
+        assert scheduler["extension_disconnect_grace_seconds"] == 90
+
+    def test_put_config_rebuilds_runtime_with_pause_on_disconnect(
+        self,
+        monkeypatch,
+        tmp_path,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from openbiliclaw.api.runtime_context import RuntimeContext
+        from openbiliclaw.config import Config
+
+        cfg = Config()
+
+        async def _fake_rebuild(self: RuntimeContext, config: Config) -> None:
+            self.config = config
+            self.runtime_controller = SimpleNamespace(scheduler_config=config.scheduler)
+
+        monkeypatch.setattr(RuntimeContext, "rebuild_from_config", _fake_rebuild)
+        client = self._make_client(monkeypatch, tmp_path, cfg)
+
+        response = client.put(
+            "/api/config",
+            json={
+                "scheduler": {
+                    "pause_on_extension_disconnect": True,
+                    "extension_disconnect_grace_seconds": 12,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        runtime_scheduler = client.app.state.runtime_context.runtime_controller.scheduler_config
+        assert runtime_scheduler.pause_on_extension_disconnect is True
+        assert runtime_scheduler.extension_disconnect_grace_seconds == 12
 
     def test_put_config_updates_sources_and_advanced_settings(self, monkeypatch, tmp_path) -> None:
         """PUT /api/config should update the same advanced fields that the

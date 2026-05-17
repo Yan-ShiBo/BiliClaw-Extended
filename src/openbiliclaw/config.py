@@ -1,6 +1,7 @@
 """Configuration management for OpenBiliClaw.
 
 Loads configuration from TOML files with environment variable overrides.
+SchedulerConfig.enabled is the authoritative gate for background LLM loops.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ _PROJECT_ROOT_ENV = "OPENBILICLAW_PROJECT_ROOT"
 _SUPPORTED_AUTH_METHODS = {"cookie", "qrcode", "none"}
 _MIN_POOL_TARGET_COUNT = 1
 _MAX_POOL_TARGET_COUNT = 600
+_DEFAULT_EXTENSION_DISCONNECT_GRACE_SECONDS = 90
 _DEFAULT_POOL_SOURCE_SHARES = {
     "bilibili": 8,
     "xiaohongshu": 1,
@@ -151,6 +153,8 @@ class SchedulerConfig:
     """Scheduler configuration."""
 
     enabled: bool = True
+    pause_on_extension_disconnect: bool = False
+    extension_disconnect_grace_seconds: int = _DEFAULT_EXTENSION_DISCONNECT_GRACE_SECONDS
     discovery_cron: str = "0 */8 * * *"
     pool_target_count: int = 600
     pool_source_shares: dict[str, int] = field(
@@ -529,6 +533,9 @@ def _build_config(raw: dict[str, Any]) -> Config:
         scheduler=SchedulerConfig(
             **{
                 **sched_raw,
+                "extension_disconnect_grace_seconds": _normalize_extension_disconnect_grace(
+                    sched_raw.get("extension_disconnect_grace_seconds")
+                ),
                 "pool_source_shares": _normalize_pool_source_shares(
                     sched_raw.get("pool_source_shares")
                 ),
@@ -558,6 +565,23 @@ def _normalize_pool_source_shares(value: object) -> dict[str, int]:
             continue
         shares[source] = share
     return shares or dict(_DEFAULT_POOL_SOURCE_SHARES)
+
+
+def _normalize_extension_disconnect_grace(value: object) -> int:
+    """Normalize extension disconnect grace seconds into a positive int."""
+    if isinstance(value, int | float):
+        grace = int(value)
+    elif isinstance(value, str):
+        try:
+            grace = int(value.strip())
+        except ValueError:
+            return _DEFAULT_EXTENSION_DISCONNECT_GRACE_SECONDS
+    else:
+        return _DEFAULT_EXTENSION_DISCONNECT_GRACE_SECONDS
+
+    if grace <= 0:
+        return _DEFAULT_EXTENSION_DISCONNECT_GRACE_SECONDS
+    return grace
 
 
 def _collect_config_issues(config: Config) -> list[ConfigIssue]:
@@ -777,6 +801,10 @@ def _render_config_toml(config: Config) -> str:
             "",
             "[scheduler]",
             f"enabled = {_toml_bool(config.scheduler.enabled)}",
+            "pause_on_extension_disconnect = "
+            f"{_toml_bool(config.scheduler.pause_on_extension_disconnect)}",
+            "extension_disconnect_grace_seconds = "
+            f"{config.scheduler.extension_disconnect_grace_seconds}",
             f"discovery_cron = {_toml_string(config.scheduler.discovery_cron)}",
             f"pool_target_count = {config.scheduler.pool_target_count}",
             f"account_sync_interval_hours = {config.scheduler.account_sync_interval_hours}",

@@ -10,6 +10,7 @@ required.
   - ``database`` — owns the SQLite connection
   - ``memory_manager`` — owns file-backed memory layers
   - ``event_hub`` — holds live WebSocket subscriber queues
+  - ``presence`` — tracks shared extension runtime-stream presence
 
 **Swappable components** (rebuilt on hot-reload):
   - ``llm_registry``, ``llm_service``, ``bilibili_client``
@@ -27,6 +28,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from openbiliclaw.runtime.presence import PresenceTracker
+from openbiliclaw.runtime.presence import background_llm_work_allowed as _gate
 from openbiliclaw.runtime.source_policy import effective_pool_source_shares
 from openbiliclaw.runtime.task_registry import BackgroundTaskRegistry
 
@@ -48,6 +51,7 @@ class RuntimeContext:
     database: Any = None
     memory_manager: Any = None
     event_hub: Any = None
+    presence: PresenceTracker = field(default_factory=PresenceTracker)
     # v0.3.63+: tracks every detached ``asyncio.create_task`` spawned by
     # the runtime (refresh manual / per-strategy precompute, recommendation
     # engine classify+delight, prewarm helpers, per-event triggers). On
@@ -68,6 +72,11 @@ class RuntimeContext:
     runtime_controller: Any = None
     account_sync_service: Any = None
     auto_update_service: Any = None
+
+    def background_llm_work_allowed(self) -> bool:
+        """Return whether daemon-owned background LLM / embedding work may run."""
+        scheduler = getattr(getattr(self, "config", None), "scheduler", None)
+        return _gate(scheduler, self.presence)
 
     async def rebuild_from_config(self, new_config: Config) -> None:
         """Rebuild all swappable components from *new_config*.
@@ -327,6 +336,8 @@ class RuntimeContext:
             event_hub=self.event_hub,
             xhs_producer=new_xhs_producer,
             douyin_producer=new_douyin_producer,
+            scheduler_config=new_config.scheduler,
+            presence=self.presence,
             task_registry=self.task_registry,
         )
 
@@ -336,6 +347,7 @@ class RuntimeContext:
             bilibili_client=new_bilibili_client,
             soul_engine=new_soul_engine,
             sync_interval_hours=new_config.scheduler.account_sync_interval_hours,
+            llm_work_allowed=self.background_llm_work_allowed,
         )
 
         # 10. Dialogue (with source management tools)
@@ -413,8 +425,10 @@ class RuntimeContext:
             else None
         )
 
+        llm_work_allowed = self.background_llm_work_allowed()
+
         # Kick speculator to seed speculative interests
-        if self.soul_engine is not None:
+        if self.soul_engine is not None and llm_work_allowed:
             try:
                 profile = await self.soul_engine.get_profile()
                 speculator = getattr(self.soul_engine, "_speculator", None)
@@ -448,7 +462,7 @@ class RuntimeContext:
         # first popup "换一批" pays a cold-fetch ~10-60s on day-1 of a
         # deploy. Detached so we don't block API readiness.
         prewarm_pool = getattr(self.recommendation_engine, "prewarm_pool_mmr_embeddings", None)
-        if callable(prewarm_pool):
+        if callable(prewarm_pool) and llm_work_allowed:
             self.task_registry.track(
                 "prewarm_pool_mmr_embeddings",
                 self._safe_prewarm_pool_mmr_embeddings(prewarm_pool),
