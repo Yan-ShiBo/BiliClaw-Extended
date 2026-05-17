@@ -98,6 +98,12 @@ class TestConfigDefaults:
             "youtube": 1,
         }
 
+    def test_scheduler_pause_on_extension_disconnect_defaults(self) -> None:
+        config = Config()
+
+        assert config.scheduler.pause_on_extension_disconnect is False
+        assert config.scheduler.extension_disconnect_grace_seconds == 90
+
     def test_build_from_empty_dict(self) -> None:
         config = _build_config({})
         assert config.language == "zh"
@@ -462,6 +468,76 @@ def test_build_config_supports_account_sync_interval() -> None:
     )
 
     assert config.scheduler.account_sync_interval_hours == 12
+
+
+def test_load_config_reads_scheduler_pause_on_extension_disconnect(tmp_path: Path) -> None:
+    toml_path = tmp_path / "c.toml"
+    toml_path.write_text(
+        """
+[scheduler]
+pause_on_extension_disconnect = true
+extension_disconnect_grace_seconds = 123
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(toml_path)
+
+    assert config.scheduler.pause_on_extension_disconnect is True
+    assert config.scheduler.extension_disconnect_grace_seconds == 123
+
+
+def test_load_config_defaults_scheduler_pause_on_extension_disconnect_when_absent(
+    tmp_path: Path,
+) -> None:
+    toml_path = tmp_path / "c.toml"
+    toml_path.write_text(
+        """
+[scheduler]
+enabled = true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(toml_path)
+
+    assert config.scheduler.pause_on_extension_disconnect is False
+    assert config.scheduler.extension_disconnect_grace_seconds == 90
+
+
+@pytest.mark.parametrize("raw_grace", [-1, 0, "abc"])
+def test_load_config_defaults_invalid_scheduler_disconnect_grace(
+    tmp_path: Path,
+    raw_grace: object,
+) -> None:
+    toml_path = tmp_path / "c.toml"
+    grace_literal = f'"{raw_grace}"' if isinstance(raw_grace, str) else str(raw_grace)
+    toml_path.write_text(
+        f"""
+[scheduler]
+extension_disconnect_grace_seconds = {grace_literal}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(toml_path)
+
+    assert config.scheduler.extension_disconnect_grace_seconds == 90
+
+
+def test_save_config_round_trips_scheduler_pause_on_extension_disconnect(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config = Config()
+    config.scheduler.pause_on_extension_disconnect = True
+    config.scheduler.extension_disconnect_grace_seconds = 45
+
+    save_config(config, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.scheduler.pause_on_extension_disconnect is True
+    assert loaded.scheduler.extension_disconnect_grace_seconds == 45
 
 
 def test_scheduler_pool_source_shares_override(tmp_path: Path) -> None:
