@@ -112,6 +112,23 @@ def test_init_decisions_accept_existing_embedding_but_still_require_sources(tmp_
     assert decisions["embedding"]["source"] == "config"
 
 
+def test_init_decisions_required_for_all_optional_sources(tmp_path: Path) -> None:
+    _write_minimal_config(tmp_path, embedding_provider="ollama", embedding_model="bge-m3")
+    args = bootstrap.build_arg_parser().parse_args(["--project-dir", str(tmp_path)])
+
+    decisions = bootstrap.detect_init_decisions(tmp_path, args, embedding_touched=False)
+
+    assert decisions["missing"] == ["xhs", "douyin", "youtube"]
+
+
+def test_build_init_command_appends_all_source_flags_for_local(tmp_path: Path) -> None:
+    command = bootstrap.build_init_command(
+        "local", tmp_path, "--no-xhs", "--no-douyin", "--yes-youtube"
+    )
+
+    assert command[-4:] == ["init", "--no-xhs", "--no-douyin", "--yes-youtube"]
+
+
 def test_build_init_command_appends_explicit_source_flags_for_docker(tmp_path: Path) -> None:
     command = bootstrap.build_init_command(
         "docker", tmp_path, "--yes-xhs", "--yes-douyin", "--no-youtube"
