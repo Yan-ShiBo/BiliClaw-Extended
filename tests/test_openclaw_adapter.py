@@ -708,6 +708,12 @@ def test_build_openclaw_adapter_services_reuses_shared_database(monkeypatch) -> 
                 "youtube": 1,
             },
             account_sync_interval_hours=6,
+            refresh_check_interval_seconds=77,
+            signal_event_threshold=9,
+            trending_refresh_hours=5,
+            explore_refresh_hours=18,
+            discovery_limit=17,
+            proactive_push_interval_seconds=155,
         ),
     )
 
@@ -752,6 +758,12 @@ def test_build_openclaw_adapter_services_reuses_shared_database(monkeypatch) -> 
     }
     assert services.runtime_controller.kwargs["scheduler_config"] is fake_config.scheduler
     assert "presence" in services.runtime_controller.kwargs
+    assert services.runtime_controller.kwargs["check_interval_seconds"] == 77
+    assert services.runtime_controller.kwargs["signal_event_threshold"] == 9
+    assert services.runtime_controller.kwargs["trending_refresh_hours"] == 5
+    assert services.runtime_controller.kwargs["explore_refresh_hours"] == 18
+    assert services.runtime_controller.kwargs["discovery_limit"] == 17
+    assert services.runtime_controller.kwargs["proactive_push_interval_seconds"] == 155
 
 
 def test_build_openclaw_adapter_returns_ready_adapter(monkeypatch) -> None:

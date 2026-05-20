@@ -366,6 +366,20 @@ class RuntimeContext:
             recommendation_engine=new_recommendation_engine,
             pool_target_count=new_config.scheduler.pool_target_count,
             pool_source_shares=_pool_source_shares_from_config(new_config),
+            signal_event_threshold=int(
+                getattr(new_config.scheduler, "signal_event_threshold", 6)
+            ),
+            trending_refresh_hours=int(
+                getattr(new_config.scheduler, "trending_refresh_hours", 3)
+            ),
+            explore_refresh_hours=int(getattr(new_config.scheduler, "explore_refresh_hours", 12)),
+            check_interval_seconds=int(
+                getattr(new_config.scheduler, "refresh_check_interval_seconds", 60)
+            ),
+            proactive_push_interval_seconds=int(
+                getattr(new_config.scheduler, "proactive_push_interval_seconds", 120)
+            ),
+            discovery_limit=int(getattr(new_config.scheduler, "discovery_limit", 30)),
             event_hub=self.event_hub,
             xhs_producer=new_xhs_producer,
             douyin_producer=new_douyin_producer,

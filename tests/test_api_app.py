@@ -503,6 +503,12 @@ class TestBackendAPI:
                 pause_on_extension_disconnect=False,
                 pool_target_count=300,
                 account_sync_interval_hours=24,
+                refresh_check_interval_seconds=77,
+                signal_event_threshold=9,
+                trending_refresh_hours=5,
+                explore_refresh_hours=18,
+                discovery_limit=17,
+                proactive_push_interval_seconds=155,
             ),
         )
 
@@ -544,6 +550,12 @@ class TestBackendAPI:
         assert (
             captured["runtime_controller_kwargs"]["presence"] is app.state.runtime_context.presence
         )
+        assert captured["runtime_controller_kwargs"]["check_interval_seconds"] == 77
+        assert captured["runtime_controller_kwargs"]["signal_event_threshold"] == 9
+        assert captured["runtime_controller_kwargs"]["trending_refresh_hours"] == 5
+        assert captured["runtime_controller_kwargs"]["explore_refresh_hours"] == 18
+        assert captured["runtime_controller_kwargs"]["discovery_limit"] == 17
+        assert captured["runtime_controller_kwargs"]["proactive_push_interval_seconds"] == 155
         assert callable(captured["account_sync_kwargs"]["llm_work_allowed"])
 
     def test_cap_by_franchise_keeps_at_most_n_per_franchise(self) -> None:
