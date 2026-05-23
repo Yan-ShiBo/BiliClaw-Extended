@@ -642,10 +642,18 @@ def test_build_openclaw_adapter_services_reuses_shared_database(monkeypatch) -> 
             self.kwargs = kwargs
 
     class FakeLLMService:
-        def __init__(self, *, registry: object, memory: object, module_overrides=None) -> None:
+        def __init__(
+            self,
+            *,
+            registry: object,
+            memory: object,
+            module_overrides=None,
+            concurrency: int = 3,
+        ) -> None:
             self.registry = registry
             self.memory = memory
             self.module_overrides = module_overrides
+            self.concurrency = concurrency
 
     class FakeRecommendationEngine:
         def __init__(

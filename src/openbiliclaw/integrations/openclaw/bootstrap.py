@@ -58,11 +58,14 @@ def build_openclaw_adapter_services() -> OpenClawAdapterServices:
     memory_manager = MemoryManager(config.data_path, database=database)
     memory_manager.initialize()
 
+    llm_cfg = getattr(config, "llm", None)
+    llm_concurrency = int(getattr(llm_cfg, "concurrency", 3))
+
     soul_engine = SoulEngine(
         llm=llm_registry,
         memory=memory_manager,
         module_overrides=module_overrides,
-        llm_concurrency=config.llm.concurrency,
+        llm_concurrency=llm_concurrency,
         speculation_interval_minutes=config.scheduler.speculation_interval_minutes,
         speculation_ttl_days=config.scheduler.speculation_ttl_days,
         speculation_cooldown_days=config.scheduler.speculation_cooldown_days,
@@ -76,7 +79,7 @@ def build_openclaw_adapter_services() -> OpenClawAdapterServices:
         registry=llm_registry,
         memory=memory_manager,
         module_overrides=module_overrides,
-        concurrency=config.llm.concurrency,
+        concurrency=llm_concurrency,
     )
     from openbiliclaw.llm.registry import build_embedding_service
     from openbiliclaw.recommendation.curator import PoolCurator
