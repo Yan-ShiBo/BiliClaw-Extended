@@ -1590,6 +1590,7 @@ def create_app(
             exploration_openness=exploration_openness,
             # Cross-cutting
             speculative_interests=spec_items,
+            speculative_avoidances=[],
             recent_cognition_updates=cognition_updates,
             has_more_cognition_updates=has_more_cognition_updates,
             next_cognition_cursor=next_cognition_cursor,

@@ -2154,6 +2154,7 @@ class TestBackendAPI:
         assert data["favorite_up_users"] == ["经济观察", "构图实验室"]
         assert data["exploration_openness"] == 0.72
         assert data["speculative_interests"] == []
+        assert data["speculative_avoidances"] == []
         # mbti, likes, dislikes, style, context come from OnionProfile layers
         # FakeProfile has no OnionProfile.interest or .core.mbti so these are defaults
         assert data["mbti"]["type"] == ""
