@@ -9,6 +9,9 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
+      <button class="icon-btn side-drawer-btn" id="sideDrawerBtn" type="button" aria-label="打开侧边菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
+      </button>
       <a class="brand" href="#home" aria-label="OpenBiliClaw 首页">
         <span class="brand-mark">B</span>
         <span class="brand-copy"><span class="brand-title">OpenBiliClaw</span><span class="brand-sub">你的本地全网推荐入口</span></span>
@@ -17,25 +20,6 @@
         <input id="searchInput" type="search" placeholder="搜索推荐、UP 主、兴趣方向或解释文本">
         <button type="submit">搜索</button>
       </form>
-      <nav class="nav-actions" aria-label="全局操作" data-od-id="path-0-0-2">
-        <button class="pill-btn nav-action" id="profileBtn" type="button" aria-label="我的画像">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/></svg>
-          <span class="nav-action-text">我的画像</span>
-        </button>
-        <button class="pill-btn nav-action" id="chatBtn" type="button" aria-label="聊聊口味">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-8.5 8.5 9.4 9.4 0 0 1-3.7-.76L3 21l1.28-4.64A8.5 8.5 0 1 1 21 12Z"/><path d="M8 11.8h.01M12 11.8h.01M16 11.8h.01" stroke-linecap="round"/></svg>
-          <span class="nav-action-text">聊聊口味</span>
-        </button>
-        <button class="pill-btn nav-action" id="messagesBtn" type="button" aria-label="消息">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v8A2.5 2.5 0 0 1 17.5 18H9l-5 3v-13.5Z"/><path d="M8 10h8M8 14h5" stroke-linecap="round"/></svg>
-          <span class="message-dot" id="messagesDot" hidden></span>
-          <span class="nav-action-text">消息</span>
-        </button>
-        <button class="pill-btn nav-action" id="settingsBtn" type="button" aria-label="设置">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.04.06a2 2 0 0 1-3.42 0L10.5 20a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1l-.06-.04a2 2 0 0 1 0-3.42L4 10.5a1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6l.04-.06a2 2 0 0 1 3.42 0L13.5 4a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.37.35.71.6 1l.06.04a2 2 0 0 1 0 3.42L20 13.5a1.65 1.65 0 0 0-.6 1.5Z"/></svg>
-          <span class="nav-action-text">设置</span>
-        </button>
-      </nav>
       <button class="icon-btn mobile-menu-btn" id="mobileMenuBtn" type="button" aria-label="打开手机菜单">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
       </button>
@@ -43,57 +27,67 @@
 
     <div class="fatal-banner" id="fatalBanner" role="alert"></div>
 
+    <aside class="side-drawer" id="sideDrawer" aria-label="侧边菜单" aria-hidden="true">
+      <div class="side-drawer-scrim" id="sideDrawerScrim"></div>
+      <div class="side-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="sideDrawerTitle">
+        <div class="side-drawer-head">
+          <div>
+            <p class="eyebrow">OpenBiliClaw</p>
+            <h2 id="sideDrawerTitle">推荐控制台</h2>
+          </div>
+          <button class="icon-btn" id="sideDrawerClose" type="button" aria-label="关闭侧边菜单">×</button>
+        </div>
+        <nav class="side-drawer-nav nav-actions" aria-label="全局功能">
+          <button class="pill-btn nav-action" id="profileBtn" type="button">我的画像</button>
+          <button class="pill-btn nav-action" id="chatBtn" type="button">聊聊口味</button>
+          <button class="pill-btn nav-action" id="messagesBtn" type="button">消息</button>
+          <button class="pill-btn nav-action" id="settingsBtn" type="button">设置</button>
+        </nav>
+        <aside class="hero-panel side-runtime-panel" aria-label="实时运行摘要">
+          <p class="eyebrow">Runtime</p>
+          <h3>推荐池实时看板</h3>
+          <p id="runtimeSummary">连接 FastAPI 后，这里会显示候选池、补货和待处理行为信号。</p>
+          <div class="hero-status-grid" aria-label="推荐池实时状态">
+            <div><span>可换库存</span><strong id="poolAvailable">—</strong></div>
+            <div><span>最近补货</span><strong id="poolReplenished">—</strong></div>
+            <div><span>补货状态</span><strong id="poolRefreshState">—</strong></div>
+          </div>
+          <div class="metric-row">
+            <div class="metric"><strong id="metricPool">—</strong><span>候选池</span></div>
+            <div class="metric"><strong id="metricUnread">—</strong><span>待处理消息</span></div>
+            <div class="metric"><strong id="metricSources">—</strong><span>内容源</span></div>
+          </div>
+          <p class="hero-topics">最近主题：<span id="poolTopics">等待后端同步</span></p>
+          <div class="side-drawer-actions">
+            <button class="pill-btn primary" id="refreshBtn" type="button">开始补货</button>
+            <button class="pill-btn dark" id="loadMoreTopBtn" type="button">加载更多推荐</button>
+            <button class="pill-btn" id="openSettingsHero" type="button"><span class="badge-dot"></span><span id="statusLabel">已连接本地后端</span></button>
+          </div>
+        </aside>
+        <aside class="rail side-summary" aria-label="侧栏摘要">
+          <section class="panel" data-od-id="profile-rail">
+            <p class="eyebrow">Profile</p>
+            <h3>阿B 眼里的你</h3>
+            <div class="profile-chip-row" id="profileChips" style="font-size: 16px;"></div>
+            <p class="video-meta" id="profilePortrait">偏好结构化解释、长视频和跨学科桥接，对“为什么”比“是什么”更敏感。</p>
+            <div class="kv">
+              <div class="kv-row"><span>MBTI 推断</span><strong id="railMbti">INTJ</strong></div>
+              <div class="kv-row"><span>探索开放度</span><strong id="railOpenness">78%</strong></div>
+              <div class="kv-row"><span>深度偏好</span><strong id="railDepth">92%</strong></div>
+            </div>
+          </section>
+          <section class="panel" data-od-id="activity-rail">
+            <p class="eyebrow">Activity</p>
+            <h3>后台刚记住的事</h3>
+            <div class="activity-list" id="activityList"></div>
+            <div class="drawer-actions"><button class="small-btn" id="activityBtn" type="button">查看全部动态</button></div>
+          </section>
+        </aside>
+      </div>
+    </aside>
+
     <main class="layout" id="home">
-      <aside class="rail" aria-label="侧栏摘要">
-        <section class="panel" data-od-id="profile-rail">
-          <p class="eyebrow">Profile</p>
-          <h3>阿B 眼里的你</h3>
-          <div class="profile-chip-row" id="profileChips" style="font-size: 16px;"></div>
-          <p class="video-meta" id="profilePortrait">偏好结构化解释、长视频和跨学科桥接，对“为什么”比“是什么”更敏感。</p>
-          <div class="kv">
-            <div class="kv-row"><span>MBTI 推断</span><strong id="railMbti">INTJ</strong></div>
-            <div class="kv-row"><span>探索开放度</span><strong id="railOpenness">78%</strong></div>
-            <div class="kv-row"><span>深度偏好</span><strong id="railDepth">92%</strong></div>
-          </div>
-        </section>
-        <section class="panel" data-od-id="activity-rail">
-          <p class="eyebrow">Activity</p>
-          <h3>后台刚记住的事</h3>
-          <div class="activity-list" id="activityList"></div>
-          <div class="drawer-actions"><button class="small-btn" id="activityBtn" type="button">查看全部动态</button></div>
-        </section>
-      </aside>
-
       <section class="main-col" aria-label="推荐首页" data-od-id="recommendation-home">
-        <section class="hero" data-od-id="hero">
-          <div class="hero-copy">
-            <p class="eyebrow">Personal discovery agent</p>
-            <h1>跨平台推荐首页</h1>
-            <p class="lead">左侧阅读 AI 推荐的视频流，右侧关注画像和后台动态；顶部看板直接同步候选池、补货状态和待处理信号。</p>
-            <div class="hero-actions">
-              <button class="pill-btn primary" id="refreshBtn" type="button">开始补货</button>
-              <button class="pill-btn dark" id="loadMoreTopBtn" type="button">加载更多推荐</button>
-              <button class="pill-btn" id="openSettingsHero" type="button"><span class="badge-dot"></span><span id="statusLabel">已连接本地后端</span></button>
-            </div>
-          </div>
-          <aside class="hero-panel" aria-label="实时运行摘要">
-            <p class="eyebrow">Runtime</p>
-            <h3>推荐池实时看板</h3>
-            <p id="runtimeSummary">连接 FastAPI 后，这里会显示候选池、补货和待处理行为信号。</p>
-            <div class="hero-status-grid" aria-label="推荐池实时状态">
-              <div><span>可换库存</span><strong id="poolAvailable">—</strong></div>
-              <div><span>最近补货</span><strong id="poolReplenished">—</strong></div>
-              <div><span>补货状态</span><strong id="poolRefreshState">—</strong></div>
-            </div>
-            <div class="metric-row">
-              <div class="metric"><strong id="metricPool">—</strong><span>候选池</span></div>
-              <div class="metric"><strong id="metricUnread">—</strong><span>待处理消息</span></div>
-              <div class="metric"><strong id="metricSources">—</strong><span>内容源</span></div>
-            </div>
-            <p class="hero-topics">最近主题：<span id="poolTopics">等待后端同步</span></p>
-          </aside>
-        </section>
-
         <section class="delight" id="delightBanner" data-od-id="delight-banner">
           <div class="thumb" id="delightThumb" role="button" tabindex="0" aria-label="打开当前惊喜推荐"></div>
           <div class="delight-body">
