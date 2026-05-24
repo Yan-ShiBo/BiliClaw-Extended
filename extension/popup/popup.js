@@ -12,6 +12,7 @@ import {
   getDelightUiState,
   getDisplayedPoolStatusSummary,
   getNextExpandedCognitionIndex,
+  getManualRefreshResultHint,
   getReadyRecommendationHint,
   getHintBannerState,
   getRuntimeRefreshSubmissionState,
@@ -21,6 +22,7 @@ import {
   mergeRuntimeStatusEvent,
   mergeDelightCandidate,
   normalizeActivityFeed,
+  normalizeRuntimeStatus,
   normalizeProfileSummary,
   shouldAutoLoadRecommendations,
   shouldFetchProfileSummary,
@@ -108,6 +110,7 @@ const RUNTIME_REFRESH_DEBOUNCE_MS = 1000;
 let recommendationsRefreshTimer = null;
 let recommendationsRefreshInFlight = false;
 let recommendationsRefreshPending = false;
+let manualRefreshInFlight = false;
 let activityFeedRefreshTimer = null;
 let activityFeedRefreshInFlight = false;
 let activityFeedRefreshPending = false;
@@ -3981,6 +3984,12 @@ async function initializeRecommendations() {
 }
 
 async function handleManualRefresh() {
+  if (manualRefreshInFlight) {
+    return;
+  }
+  manualRefreshInFlight = true;
+  const hadAdvertisedInventory =
+    normalizeRuntimeStatus(state.runtimeStatus).pool_available_count > 0;
   setRefreshButtonState(true, "正在给你换一批…");
   try {
     const result = await reshuffleRecommendations();
@@ -4001,15 +4010,17 @@ async function handleManualRefresh() {
         runtimeStatus: state.runtimeStatus,
       }),
     );
-    setHint(
-      result.items.length > 0 ? "先给你换了一批新的，后台还在继续补货。" : "池子里这会儿还没刷出新的，稍后再试。",
-      result.items.length > 0 ? "success" : "error",
-    );
+    const hint = getManualRefreshResultHint({
+      itemCount: result.items.length,
+      hadAdvertisedInventory,
+    });
+    setHint(hint.message, hint.tone);
     await loadActivityFeed();
     void refreshRecommendations().catch(() => undefined);
   } catch {
     setHint("这次没换出来新的，稍后再试。", "error");
   } finally {
+    manualRefreshInFlight = false;
     setRefreshButtonState(false);
   }
 }

@@ -538,6 +538,8 @@ export function normalizeRuntimeStatus(status) {
     last_notification_at: normalizeText(status?.last_notification_at),
     unread_count: Number(status?.unread_count ?? 0),
     pool_available_count: Number(status?.pool_available_count ?? 0),
+    pool_raw_count: Number(status?.pool_raw_count ?? 0),
+    pool_pending_count: Number(status?.pool_pending_count ?? 0),
     pool_target_count: Number(status?.pool_target_count ?? 0),
     last_discovered_count: Number(status?.last_discovered_count ?? 0),
     last_replenished_count: Number(status?.last_replenished_count ?? 0),
@@ -556,6 +558,12 @@ export function mergeRuntimeStatusEvent(status, event) {
   };
   if (typeof event?.pool_available_count === "number") {
     next.pool_available_count = Number(event.pool_available_count);
+  }
+  if (typeof event?.pool_raw_count === "number") {
+    next.pool_raw_count = Number(event.pool_raw_count);
+  }
+  if (typeof event?.pool_pending_count === "number") {
+    next.pool_pending_count = Number(event.pool_pending_count);
   }
   if (typeof event?.last_replenished_count === "number") {
     next.last_replenished_count = Number(event.last_replenished_count);
@@ -589,10 +597,24 @@ export function getPoolStatusSummary(status) {
         topics: "可以先换一批,新的随时进",
       };
     }
+    if (runtime.pool_pending_count > 0) {
+      return {
+        available: `找到 ${runtime.pool_pending_count} 条素材，正在整理成可换内容`,
+        replenished: "正在整理",
+        topics: "整理好就能换，不会把素材数当可换数",
+      };
+    }
     return {
-      available: `还有 ${runtime.pool_available_count} 条可换`,
+      available: "暂无可换库存",
       replenished: "正在补货",
       topics: "后台还在继续给你找新的",
+    };
+  }
+  if (runtime.pool_available_count === 0 && runtime.pool_pending_count > 0) {
+    return {
+      available: `找到 ${runtime.pool_pending_count} 条素材，正在整理成可换内容`,
+      replenished: "正在整理",
+      topics: "整理好就能换，不会把素材数当可换数",
     };
   }
   return {
@@ -663,6 +685,26 @@ export function getReadyRecommendationHint(status) {
   return {
     message: "这池先翻到头了，等后台再补点新的。",
     tone: "info",
+  };
+}
+
+export function getManualRefreshResultHint({ itemCount = 0, hadAdvertisedInventory = false } = {}) {
+  const count = Number(itemCount || 0);
+  if (count > 0) {
+    return {
+      message: "先给你换了一批新的，后台还在继续补货。",
+      tone: "success",
+    };
+  }
+  if (hadAdvertisedInventory) {
+    return {
+      message: "池子状态刚刚同步，正在整理内容。",
+      tone: "info",
+    };
+  }
+  return {
+    message: "池子里这会儿还没刷出新的，稍后再试。",
+    tone: "error",
   };
 }
 
@@ -863,6 +905,7 @@ export function getPopupState({ online, items = [], error = null, runtimeStatus 
   const hasPostInitRuntimeSignals =
     runtime.recommendation_count > 0 ||
     runtime.pool_available_count > 0 ||
+    runtime.pool_pending_count > 0 ||
     runtime.last_replenished_count > 0 ||
     runtime.last_discovered_count > 0;
 

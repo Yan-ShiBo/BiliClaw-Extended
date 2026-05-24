@@ -1387,6 +1387,8 @@
         last_notification_at: String(merged.last_notification_at ?? ""),
         unread_count: Number(merged.unread_count ?? state.messages.length ?? 0),
         pool_available_count: Number(merged.pool_available_count ?? merged.pool_available ?? merged.available_count ?? 0),
+        pool_raw_count: Number(merged.pool_raw_count ?? 0),
+        pool_pending_count: Number(merged.pool_pending_count ?? 0),
         pool_target_count: Number(merged.pool_target_count ?? state.config?.scheduler?.pool_target_count ?? 0),
         last_discovered_count: Number(merged.last_discovered_count ?? 0),
         last_replenished_count: Number(merged.last_replenished_count ?? 0),
@@ -1403,9 +1405,15 @@
       if (!runtime || !runtime.initialized) return null;
       const sufficient = runtime.pool_target_count > 0 && runtime.pool_available_count >= runtime.pool_target_count;
       if (runtime.manual_refresh_state === "running") {
+        if (runtime.pool_available_count === 0 && runtime.pool_pending_count > 0) {
+          return { available: `找到 ${runtime.pool_pending_count} 条素材，正在整理成可换内容`, replenished: "正在整理", topics: "整理好就能换，不会把素材数当可换数" };
+        }
         return runtime.pool_available_count > 0
           ? { available: `还有 ${runtime.pool_available_count} 条可换`, replenished: "后台继续在找更多", topics: "可以先换一批，新的随时进" }
           : { available: "暂无可换库存", replenished: "正在补货", topics: "后台还在继续给你找新的" };
+      }
+      if (runtime.pool_available_count === 0 && runtime.pool_pending_count > 0) {
+        return { available: `找到 ${runtime.pool_pending_count} 条素材，正在整理成可换内容`, replenished: "正在整理", topics: "整理好就能换，不会把素材数当可换数" };
       }
       return {
         available: `还有 ${runtime.pool_available_count} 条可换`,
@@ -1444,6 +1452,7 @@
     function getPoolRefreshLabel(runtime) {
       if (!runtime) return "—";
       if (runtime.manual_refresh_message) return runtime.manual_refresh_message;
+      if (runtime.pool_available_count === 0 && runtime.pool_pending_count > 0) return "正在整理素材";
       if (runtime.manual_refresh_state === "running") return runtime.pool_available_count > 0 ? "后台继续补货中" : "正在补货";
       if (runtime.manual_refresh_state === "success") return "刚同步完成";
       if (runtime.manual_refresh_state === "failed") return "刷新失败";
