@@ -262,6 +262,24 @@
       }
     }
 
+    function openSideDrawer() {
+      const drawer = document.getElementById("sideDrawer");
+      drawer?.classList.add("is-open");
+      drawer?.setAttribute("aria-hidden", "false");
+      document.body.classList.add("side-drawer-open");
+      const button = document.getElementById("sideDrawerBtn");
+      if (button) button.setAttribute("aria-expanded", "true");
+    }
+
+    function closeSideDrawer() {
+      const drawer = document.getElementById("sideDrawer");
+      drawer?.classList.remove("is-open");
+      drawer?.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("side-drawer-open");
+      const button = document.getElementById("sideDrawerBtn");
+      if (button) button.setAttribute("aria-expanded", "false");
+    }
+
     function isMobileViewport() {
       return window.matchMedia?.("(max-width: 820px)").matches;
     }
@@ -2199,6 +2217,10 @@
       if (closeId) closePanel(closeId);
     });
 
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSideDrawer();
+    });
+
     function setActiveSettingsPanel(panelName = "models") {
       document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
         const isActive = tab.dataset.settingsTab === panelName;
@@ -2239,6 +2261,9 @@
       }, 5000);
     }
 
+    safeBind("#sideDrawerBtn", "click", openSideDrawer);
+    safeBind("#sideDrawerClose", "click", closeSideDrawer);
+    safeBind("#sideDrawerScrim", "click", closeSideDrawer);
     safeBind("#mobileMenuBtn", "click", openMobileMenu);
     safeBind("#mobileMenuClose", "click", closeMobileMenu);
     safeBind("#mobileSearchInput", "input", (event) => { state.query = event.target.value || ""; const desktopInput = $("#searchInput"); if (desktopInput) desktopInput.value = state.query; renderAll(); });
@@ -2250,10 +2275,11 @@
       button.addEventListener("click", returnToMobileMenu);
     });
 
-    safeBind("#profileBtn", "click", () => openPanel("profileDrawer"));
+    safeBind("#profileBtn", "click", () => { closeSideDrawer(); openPanel("profileDrawer"); });
     safeBind("#profileMemoryMoreBtn", "click", loadMoreProfileMemory);
-    safeBind("#chatBtn", "click", () => openPanel("chatDrawer"));
+    safeBind("#chatBtn", "click", () => { closeSideDrawer(); openPanel("chatDrawer"); });
     safeBind("#messagesBtn", "click", () => {
+      closeSideDrawer();
       hydrateInboxFromSpeculations(state.profile?.speculative_interests);
       state.messageListSnapshot = getRenderableMessages();
       openPanel("messagesDrawer");
@@ -2261,10 +2287,10 @@
       renderMessages();
       void refreshProfile().catch(() => {});
     });
-    safeBind("#activityBtn", "click", () => { renderActivityHistory(); openPanel("activityDrawer"); });
+    safeBind("#activityBtn", "click", () => { closeSideDrawer(); renderActivityHistory(); openPanel("activityDrawer"); });
     safeBind("#activityMoreBtn", "click", () => loadActivityPage());
-    safeBind("#settingsBtn", "click", () => { setActiveSettingsPanel("models"); openPanel("settingsModal"); });
-    safeBind("#openSettingsHero", "click", () => { setActiveSettingsPanel("models"); openPanel("settingsModal"); });
+    safeBind("#settingsBtn", "click", () => { closeSideDrawer(); setActiveSettingsPanel("models"); openPanel("settingsModal"); });
+    safeBind("#openSettingsHero", "click", () => { closeSideDrawer(); setActiveSettingsPanel("models"); openPanel("settingsModal"); });
     safeBind("#refreshBtn", "click", refreshRecommendations);
     safeBind("#dismissOnReshuffleToggle", "change", (event) => {
       state.dismissOnReshuffle = Boolean(event.target.checked);
