@@ -2304,6 +2304,7 @@
     });
 
     safeBind("#profileBtn", "click", openProfilePage);
+    safeBind("#homeBtn", "click", openHomePage);
     safeBind("#profileMemoryMoreBtn", "click", loadMoreProfileMemory);
     safeBind("#chatBtn", "click", () => { closeSideDrawer(); openPanel("chatDrawer"); });
     safeBind("#messagesBtn", "click", () => {
