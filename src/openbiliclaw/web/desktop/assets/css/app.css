@@ -274,7 +274,7 @@
     .delight-main-actions.is-composing .comment-field { max-width: 100%; opacity: 1; transform: translateX(0); pointer-events: auto; }
     .delight-main-actions .chat-action.is-send { width: 38px; min-width: 38px; padding: 0; }
     .delight-main-actions .chat-action.is-send svg { width: 17px; height: 17px; stroke-width: 2.2; }
-    .delight-feedback-actions.card-feedback-icons { order: 1; flex: 0 0 128px; justify-self: auto; justify-content: center; max-width: none; width: 128px; padding: 3px 6px; gap: 5px; }
+    .delight-feedback-actions.card-feedback-icons { order: 1; flex: 0 0 128px; justify-self: auto; justify-content: center; max-width: none; width: 128px; height: 40px; min-height: 40px; padding: 3px 6px; gap: 5px; }
     .delight-actions .small-btn { min-width: 0; }
     .delight-feedback-actions .feedback-icon-btn { flex: 0 0 26px; width: 26px; height: 26px; min-height: 26px; }
     .delight-feedback-actions .feedback-icon-btn svg { width: 14px; height: 14px; }
@@ -554,7 +554,7 @@
       .delight-actions { flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
       .delight-actions.is-composing { gap: 0; }
       .delight-main-actions { order: 2; flex: 1 1 auto; grid-template-columns: minmax(72px, .82fr) minmax(76px, .88fr); gap: 6px; transition: none; }
-      .delight-feedback-actions.card-feedback-icons { order: 1; flex: 0 1 116px; width: 116px; max-width: 116px; min-height: 34px; margin-left: 0; align-self: center; justify-content: center; padding: 3px 5px; transition: none; }
+      .delight-feedback-actions.card-feedback-icons { order: 1; flex: 0 1 116px; width: 116px; max-width: 116px; height: 40px; min-height: 40px; margin-left: 0; align-self: center; justify-content: center; padding: 3px 5px; transition: none; }
       .delight-actions .delight-main-actions .small-btn,
       .delight-actions .delight-main-actions [data-delight="view"],
       .delight-actions .delight-main-actions .comment-field,
