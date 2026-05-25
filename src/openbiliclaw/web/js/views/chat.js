@@ -449,13 +449,13 @@ async function refreshAfterChatTurn() {
   } catch { /* best-effort */ }
 }
 
-export async function loadNotifications() {
+export async function loadNotifications({ includeDelights = false } = {}) {
   try {
     const [notifData, probeData, avoidanceProbeData, delightData] = await Promise.all([
       fetchPendingNotifications().catch(() => ({})),
       fetchPendingProbes().catch(() => []),
       fetchPendingAvoidanceProbes().catch(() => []),
-      fetchDelightBatch(10).catch(() => []),
+      includeDelights ? fetchDelightBatch(10).catch(() => []) : Promise.resolve(delightMsgs),
     ]);
     // Start with persisted probes from backend
     const probes = [
@@ -473,7 +473,9 @@ export async function loadNotifications() {
       }
     }
     notifications = probes;
-    delightMsgs = delightData;
+    if (includeDelights) {
+      delightMsgs = delightData;
+    }
     updateBadgeCount();
   } catch { /* ignore */ }
   // Re-render if overlay is visible so first-click shows real data
@@ -494,7 +496,7 @@ export async function toggleMessages() {
   overlayOpen = !overlayOpen;
   if (overlayOpen) {
     renderOverlay();          // show panel immediately (loading state)
-    await loadNotifications();
+    await loadNotifications({ includeDelights: true });
     renderOverlay();          // re-render with actual data
   } else {
     renderOverlay();

@@ -14,6 +14,7 @@
 - 探针反馈改成 4-way 语义：`positive`、`weak_positive`、`negative`、`neutral`；聊天、卡片、OpenClaw adapter 和 avoidance probe 的反向语义都走同一套写回分支。
 - 弱正向兴趣探针先进入短期 exploration buffer，只有积累到足够显式信号后才晋升为正式兴趣，避免单次“有点意思”造成推荐短期刷屏。
 - 推荐侧对新确认方向增加放大保护和 per-refresh 上限，新兴趣可以参与探索，但不会立刻挤占整批推荐。
+- 移动 Web 推荐页加载优化：`recommendations.created_at/id` 与 `content_cache.content_id` 增加读取索引，修复 `/api/recommendations` 的双表扫描；推荐页首屏先渲染 `/api/recommendations` 结果，再异步补 runtime status / activity / delight，消息 badge 首次加载不再额外拉取未使用的 delight batch。
 
 ## v0.3.91 / extension v0.3.47: 真实可换库存口径修正 + 不喜欢领域探针（2026-05-24）
 
