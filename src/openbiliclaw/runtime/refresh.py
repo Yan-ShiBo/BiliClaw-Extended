@@ -15,7 +15,11 @@ from openbiliclaw.discovery.pool_snapshot import build_pool_distribution_snapsho
 from openbiliclaw.recommendation.delight import DEFAULT_DELIGHT_THRESHOLD
 from openbiliclaw.runtime.presence import PresenceTracker, background_llm_work_allowed
 from openbiliclaw.soul.avoidance_speculator import choose_next_avoidance_candidate
-from openbiliclaw.soul.speculator import build_probe_axis, choose_next_probe_candidate
+from openbiliclaw.soul.speculator import (
+    _normalize_probe_mode,
+    build_probe_axis,
+    choose_next_probe_candidate,
+)
 
 if TYPE_CHECKING:
     from openbiliclaw.runtime.task_registry import BackgroundTaskRegistry
@@ -28,6 +32,7 @@ _DEFAULT_PLATFORM_SOURCE_SHARES: dict[str, int] = {
 }
 _PLATFORM_SOURCE_ORDER = ("bilibili", "xiaohongshu", "douyin", "youtube")
 _BILIBILI_DISCOVERY_SOURCES = ("search", "related_chain", "trending", "explore")
+_PROBE_CHALLENGE_MODES = {"lateral", "bridge", "wildcard"}
 
 
 def _call_accepts_limit(fn: Any) -> bool:
@@ -640,6 +645,8 @@ class ContinuousRefreshController:
             "delight_score": float(candidate.get("delight_score", 0.0) or 0.0),
             "delight_hook": str(candidate.get("delight_hook", "")),
             "cover_url": str(candidate.get("cover_url", "")),
+            "content_url": str(candidate.get("content_url", "")),
+            "source_platform": str(candidate.get("source_platform", "") or "bilibili"),
         }
 
     def _load_disliked_topic_phrases(self) -> list[str]:
@@ -1487,16 +1494,21 @@ class ContinuousRefreshController:
         state = self.memory_manager.load_discovery_runtime_state()
         probed: dict[str, str] = state.get("probed_domains", {})  # type: ignore[assignment]
         probed_axes: dict[str, str] = state.get("probed_axes", {})  # type: ignore[assignment]
+        probed_distance_bands: dict[str, str] = state.get("probed_distance_bands", {})  # type: ignore[assignment]
         # Purge expired entries
         now = self._now()
         cutoff = (now - timedelta(hours=self._PROBE_COOLDOWN_HOURS)).isoformat()
         probed = {d: t for d, t in probed.items() if t > cutoff}
         probed_axes = {axis: t for axis, t in probed_axes.items() if t > cutoff}
+        probed_distance_bands = {
+            mode: t for mode, t in probed_distance_bands.items() if t > cutoff
+        }
 
         top = choose_next_probe_candidate(
             specs,
             probed_domains=set(probed),
             probed_axes=set(probed_axes),
+            probed_probe_modes=set(probed_distance_bands),
             feedback_history=state.get("probe_feedback_history", []),
         )
         if top is None:
@@ -1506,6 +1518,10 @@ class ContinuousRefreshController:
         if not domain:
             return False
 
+        probe_mode = _normalize_probe_mode(getattr(top, "probe_mode", ""))
+        challenge = probe_mode in _PROBE_CHALLENGE_MODES
+        with suppress(Exception):
+            challenge = challenge or bool(getattr(top, "challenge", False))
         axis = build_probe_axis(
             experience_mode=getattr(top, "experience_mode", ""),
             entry_load=getattr(top, "entry_load", ""),
@@ -1537,6 +1553,8 @@ class ContinuousRefreshController:
                 "weight": float(getattr(top, "weight", 0.0) or 0.0),
                 "experience_mode": str(getattr(top, "experience_mode", "")),
                 "entry_load": str(getattr(top, "entry_load", "")),
+                "probe_mode": probe_mode,
+                "challenge": challenge,
                 "specifics": specifics,
                 "question": question,
             }
@@ -1551,6 +1569,8 @@ class ContinuousRefreshController:
         if axis:
             probed_axes[axis] = now.isoformat()
         state["probed_axes"] = probed_axes
+        probed_distance_bands[probe_mode] = now.isoformat()
+        state["probed_distance_bands"] = probed_distance_bands
         self.memory_manager.save_discovery_runtime_state(state)
         return True
 

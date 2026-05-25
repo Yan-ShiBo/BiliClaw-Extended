@@ -177,6 +177,18 @@ def test_choose_next_probe_prefers_axis_without_negative_feedback():
     assert chosen.domain == "手作模型制作"
 
 
+def test_choose_next_probe_candidate_prefers_fresh_probe_mode_after_filters():
+    near = SpeculativeInterest(domain="近", probe_mode="near", weight=0.9)
+    bridge = SpeculativeInterest(domain="桥", probe_mode="bridge", weight=0.6)
+
+    chosen = choose_next_probe_candidate(
+        [near, bridge],
+        probed_probe_modes={"near"},
+    )
+
+    assert chosen is bridge
+
+
 def test_select_diverse_candidates_avoids_negative_feedback_axis():
     candidates = [
         SpeculativeInterest(
@@ -225,6 +237,20 @@ def test_select_diverse_candidates_avoids_negative_feedback_axis():
         "咖啡馆空间设计",
         "本地 Stable Diffusion 工作台",
     ]
+
+
+def test_select_diverse_candidates_enforces_probe_mode_quota_when_possible():
+    candidates = [
+        SpeculativeInterest(domain="近1", probe_mode="near", confidence=0.9, weight=0.9),
+        SpeculativeInterest(domain="近2", probe_mode="near", confidence=0.8, weight=0.8),
+        SpeculativeInterest(domain="横向", probe_mode="lateral", confidence=0.6, weight=0.6),
+        SpeculativeInterest(domain="桥接", probe_mode="bridge", confidence=0.55, weight=0.55),
+    ]
+
+    selected = speculator_module._select_diverse_candidates(candidates, limit=3)
+
+    assert any(item.probe_mode != "near" for item in selected)
+    assert sum(1 for item in selected if item.probe_mode == "near") <= 2
 
 
 def _profile_with_ai_specifics():
@@ -655,6 +681,29 @@ def test_speculative_state_roundtrip():
     assert restored.total_rejected == 5
 
 
+def test_speculative_interest_round_trips_probe_mode_and_confirmation_fields():
+    spec = SpeculativeInterest(
+        domain="城市基础设施观察",
+        category="知识观察",
+        probe_mode="bridge",
+        confirmation_source="probe_confirmed",
+        confirmed_at="2026-05-24T12:00:00",
+    )
+
+    restored = SpeculativeInterest.from_dict(spec.to_dict())
+
+    assert restored.probe_mode == "bridge"
+    assert restored.challenge is True
+    assert restored.confirmation_source == "probe_confirmed"
+    assert restored.confirmed_at == "2026-05-24T12:00:00"
+
+
+def test_normalize_probe_mode_defaults_missing_or_unknown_to_near():
+    assert speculator_module._normalize_probe_mode("") == "near"
+    assert speculator_module._normalize_probe_mode(None) == "near"
+    assert speculator_module._normalize_probe_mode("surprise") == "near"
+
+
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
@@ -792,6 +841,35 @@ def test_speculator_get_active():
         active = speculator.get_active_speculations()
         assert len(active) == 2
         assert {s.domain for s in active} == {"A", "C"}
+
+
+def test_user_confirm_speculation_records_source_and_confirmed_at():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_dir = Path(tmpdir)
+        speculator = InterestSpeculator(llm_service=None, data_dir=data_dir)
+        save_speculative_state(
+            data_dir,
+            SpeculativeState(
+                active=[
+                    SpeculativeInterest(
+                        domain="建筑美学",
+                        status="active",
+                        created_at=datetime.now().isoformat(),
+                    )
+                ]
+            ),
+        )
+
+        speculator.user_confirm_speculation(
+            "建筑美学",
+            confirmation_source="profile_confirmed",
+        )
+        state = speculator._load_state()
+        spec = next(item for item in state.active if item.domain == "建筑美学")
+
+        assert spec.status == "confirmed"
+        assert spec.confirmation_source == "profile_confirmed"
+        assert spec.confirmed_at
 
 
 async def test_speculator_tick_promotes():

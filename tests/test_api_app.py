@@ -2228,6 +2228,183 @@ class TestBackendAPI:
             "无信息增量复读",
         ]
 
+    def test_profile_summary_endpoint_includes_probe_mode_challenge_metadata(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.soul.profile import OnionProfile
+        from openbiliclaw.soul.speculator import (
+            SpeculativeInterest,
+            SpeculativeSpecific,
+            SpeculativeState,
+            save_speculative_state,
+        )
+
+        save_speculative_state(
+            tmp_path,
+            SpeculativeState(
+                active=[
+                    SpeculativeInterest(
+                        domain="城市基础设施观察",
+                        reason="从城市漫游兴趣桥接到更结构化的空间理解。",
+                        confidence=0.67,
+                        probe_mode="bridge",
+                        specifics=[SpeculativeSpecific(name="地铁换乘设计")],
+                    )
+                ]
+            ),
+        )
+
+        class FakeSoulEngine:
+            async def get_profile(self) -> OnionProfile:
+                return OnionProfile()
+
+        app = create_app(
+            soul_engine=FakeSoulEngine(),
+            memory_manager=SimpleNamespace(load_cognition_updates=lambda: []),
+            database=object(),
+        )
+        app.state.runtime_context.config = SimpleNamespace(data_path=tmp_path)
+        client = TestClient(app)
+
+        response = client.get("/api/profile-summary")
+
+        assert response.status_code == 200
+        item = response.json()["speculative_interests"][0]
+        assert item["domain"] == "城市基础设施观察"
+        assert item["probe_mode"] == "bridge"
+        assert item["challenge"] is True
+        assert item["specifics"][0]["name"] == "地铁换乘设计"
+
+    def test_pending_interest_probes_include_probe_mode_challenge_metadata(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.soul.speculator import (
+            SpeculativeInterest,
+            SpeculativeState,
+            save_speculative_state,
+        )
+
+        save_speculative_state(
+            tmp_path,
+            SpeculativeState(
+                active=[
+                    SpeculativeInterest(
+                        domain="公共空间设计",
+                        reason="这是从建筑美学延伸出去的横向试探。",
+                        confidence=0.61,
+                        probe_mode="lateral",
+                    )
+                ]
+            ),
+        )
+
+        class FakeSoulEngine:
+            _speculator = object()
+
+        app = create_app(
+            soul_engine=FakeSoulEngine(),
+            memory_manager=SimpleNamespace(load_cognition_updates=lambda: []),
+            database=object(),
+        )
+        app.state.runtime_context.config = SimpleNamespace(data_path=tmp_path)
+        client = TestClient(app)
+
+        response = client.get("/api/interest-probes/pending")
+
+        assert response.status_code == 200
+        assert response.json()["items"] == [
+            {
+                "domain": "公共空间设计",
+                "reason": "这是从建筑美学延伸出去的横向试探。",
+                "confidence": 0.61,
+                "status": "active",
+                "probe_mode": "lateral",
+                "challenge": True,
+            }
+        ]
+
+    def test_interest_probe_trigger_runtime_event_includes_probe_mode_challenge_metadata(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.runtime.events import RuntimeEventHub
+        from openbiliclaw.runtime.refresh import ContinuousRefreshController
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {
+                    "probed_domains": {},
+                    "probed_axes": {},
+                    "probed_distance_bands": {},
+                }
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+        class FakeSpeculator:
+            def get_active_speculations(self) -> list[object]:
+                return [
+                    SimpleNamespace(
+                        domain="城市基础设施观察",
+                        category="城市",
+                        reason="从城市漫游兴趣桥接到空间系统理解。",
+                        confidence=0.67,
+                        weight=0.5,
+                        experience_mode="wander_observe",
+                        entry_load="light",
+                        probe_mode="bridge",
+                        specifics=[SimpleNamespace(name="地铁换乘设计")],
+                    )
+                ]
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self._speculator = FakeSpeculator()
+
+        memory = FakeMemoryManager()
+        hub = RuntimeEventHub()
+        runtime = ContinuousRefreshController(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=FakeSoulEngine(),
+            discovery_engine=object(),
+            recommendation_engine=object(),
+            event_hub=hub,
+        )
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=runtime.soul_engine,
+            runtime_controller=runtime,
+            runtime_event_hub=hub,
+        )
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/runtime-stream") as websocket:
+            response = client.post("/api/interest-probes/trigger")
+
+            assert response.status_code == 200
+            event = websocket.receive_json()
+
+        assert event["type"] == "interest.probe"
+        assert event["domain"] == "城市基础设施观察"
+        assert event["probe_mode"] == "bridge"
+        assert event["challenge"] is True
+
     def test_profile_summary_endpoint_paginates_cognition_history(self) -> None:
         from fastapi.testclient import TestClient
 
@@ -2585,6 +2762,357 @@ class TestBackendAPI:
             }
         ]
         assert soul_engine._speculator.rejected == [("城市漫游路线", 30)]
+
+    def test_interest_probe_confirm_from_profile_uses_profile_confirmed_source(self) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {"probe_feedback_history": []}
+                self.cognition_updates: list[dict[str, object]] = []
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return list(self.cognition_updates)
+
+            def save_cognition_updates(self, updates: list[dict[str, object]]) -> None:
+                self.cognition_updates = list(updates)
+
+        class FakeSpeculator:
+            def __init__(self) -> None:
+                self.confirmed: list[tuple[str, str]] = []
+                self._active = [SimpleNamespace(domain="建筑美学")]
+
+            def get_active_speculations(self) -> list[object]:
+                return list(self._active)
+
+            def user_confirm_speculation(
+                self,
+                domain: str,
+                *,
+                confirmation_source: str = "probe_confirmed",
+            ) -> bool:
+                self.confirmed.append((domain, confirmation_source))
+                return True
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self._speculator = FakeSpeculator()
+
+        memory = FakeMemoryManager()
+        soul_engine = FakeSoulEngine()
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=soul_engine,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/interest-probes/respond",
+            json={"domain": "建筑美学", "response": "confirm", "surface": "profile"},
+        )
+
+        assert response.status_code == 200
+        assert soul_engine._speculator.confirmed == [("建筑美学", "profile_confirmed")]
+
+    def test_interest_probe_chat_strong_positive_direct_confirms(self) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        class FakeDialogue:
+            async def respond(self, _message: str) -> str:
+                return "懂，这就是你想看的那类。"
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {"probe_feedback_history": []}
+                self.cognition_updates: list[dict[str, object]] = []
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return list(self.cognition_updates)
+
+            def save_cognition_updates(self, updates: list[dict[str, object]]) -> None:
+                self.cognition_updates = list(updates)
+
+        class FakeSpeculator:
+            def __init__(self) -> None:
+                self.confirmed: list[tuple[str, str]] = []
+                self.rejected: list[tuple[str, int]] = []
+
+            def get_active_speculations(self) -> list[object]:
+                return [SimpleNamespace(domain="建筑美学")]
+
+            def user_confirm_speculation(
+                self,
+                domain: str,
+                *,
+                confirmation_source: str = "probe_confirmed",
+            ) -> bool:
+                self.confirmed.append((domain, confirmation_source))
+                return True
+
+            def user_reject_speculation(
+                self,
+                domain: str,
+                cooldown_days: int = 30,
+            ) -> bool:
+                self.rejected.append((domain, cooldown_days))
+                return True
+
+        speculator = FakeSpeculator()
+        memory = FakeMemoryManager()
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=SimpleNamespace(_speculator=speculator),
+            dialogue=FakeDialogue(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/interest-probes/respond",
+            json={
+                "domain": "建筑美学",
+                "response": "chat",
+                "message": "这就是我想看的，以后多推这种",
+            },
+        )
+
+        assert response.status_code == 200
+        assert speculator.confirmed == [("建筑美学", "chat_confirmed")]
+        assert speculator.rejected == []
+        history = memory.runtime_state["probe_feedback_history"]
+        assert isinstance(history, list)
+        assert history[0]["response"] == "chat_confirmed"
+        assert history[0]["classification"] == "strong_positive"
+        assert history[0]["classifier"] == "keyword"
+        assert history[0]["resulting_action"] == "confirmed"
+        assert history[0]["raw_text_excerpt"] == "这就是我想看的，以后多推这种"
+
+    def test_interest_probe_chat_weak_positive_records_without_confirming(self) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        class FakeDialogue:
+            async def respond(self, _message: str) -> str:
+                return "可以，先把它当作一个轻量方向。"
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {"probe_feedback_history": []}
+                self.cognition_updates: list[dict[str, object]] = []
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return list(self.cognition_updates)
+
+            def save_cognition_updates(self, updates: list[dict[str, object]]) -> None:
+                self.cognition_updates = list(updates)
+
+        class FakeSpeculator:
+            def __init__(self) -> None:
+                self.confirmed: list[object] = []
+                self.observed: list[object] = []
+                self.rejected: list[object] = []
+
+            def get_active_speculations(self) -> list[object]:
+                return [SimpleNamespace(domain="城市基础设施观察")]
+
+            def user_confirm_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                self.confirmed.append((_args, _kwargs))
+                return True
+
+            def observe(self, events: object) -> None:
+                self.observed.append(events)
+
+            def user_reject_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                self.rejected.append((_args, _kwargs))
+                return True
+
+        speculator = FakeSpeculator()
+        memory = FakeMemoryManager()
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=SimpleNamespace(_speculator=speculator),
+            dialogue=FakeDialogue(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/interest-probes/respond",
+            json={
+                "domain": "城市基础设施观察",
+                "response": "chat",
+                "message": "有点意思，可以看看",
+            },
+        )
+
+        assert response.status_code == 200
+        assert speculator.confirmed == []
+        assert speculator.observed == []
+        assert speculator.rejected == []
+        history = memory.runtime_state["probe_feedback_history"]
+        assert isinstance(history, list)
+        assert history[0]["response"] == "weak_positive"
+        assert history[0]["classification"] == "weak_positive"
+        assert history[0]["resulting_action"] == "weak_positive_deferred"
+
+    def test_interest_probe_chat_weak_positive_records_buffer_event(self) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        class FakeDialogue:
+            async def respond(self, _message: str) -> str:
+                return "可以，先轻量试试。"
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {"probe_feedback_history": []}
+                self.cognition_updates: list[dict[str, object]] = []
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return list(self.cognition_updates)
+
+            def save_cognition_updates(self, updates: list[dict[str, object]]) -> None:
+                self.cognition_updates = list(updates)
+
+        class FakeSpeculator:
+            def get_active_speculations(self) -> list[object]:
+                return [SimpleNamespace(domain="城市基础设施观察")]
+
+            def user_confirm_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                return True
+
+            def user_reject_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                return True
+
+        memory = FakeMemoryManager()
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=SimpleNamespace(_speculator=FakeSpeculator()),
+            dialogue=FakeDialogue(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/interest-probes/respond",
+            json={
+                "domain": "城市基础设施观察",
+                "response": "chat",
+                "message": "有点意思，可以看看",
+            },
+        )
+
+        assert response.status_code == 200
+        buffer_state = memory.runtime_state["short_term_exploration_buffer"]
+        assert buffer_state["entries"][0]["domain"] == "城市基础设施观察"
+        assert buffer_state["entries"][0]["recent_evidence"][0]["source_event"] == (
+            "weak_positive_chat"
+        )
+
+    def test_interest_probe_chat_classifier_failure_defaults_to_neutral(self) -> None:
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        class BrokenLLM:
+            async def complete_with_core_memory(self, **_kwargs: object) -> object:
+                raise RuntimeError("classifier unavailable")
+
+        class FakeDialogue:
+            async def respond(self, _message: str) -> str:
+                return "我先理解成你还在犹豫。"
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {"probe_feedback_history": []}
+                self.cognition_updates: list[dict[str, object]] = []
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def save_discovery_runtime_state(self, state: dict[str, object]) -> None:
+                self.runtime_state = dict(state)
+
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return list(self.cognition_updates)
+
+            def save_cognition_updates(self, updates: list[dict[str, object]]) -> None:
+                self.cognition_updates = list(updates)
+
+        class FakeSpeculator:
+            def __init__(self) -> None:
+                self.confirmed: list[object] = []
+                self.rejected: list[object] = []
+
+            def get_active_speculations(self) -> list[object]:
+                return [SimpleNamespace(domain="抽象雕塑")]
+
+            def user_confirm_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                self.confirmed.append((_args, _kwargs))
+                return True
+
+            def user_reject_speculation(self, *_args: object, **_kwargs: object) -> bool:
+                self.rejected.append((_args, _kwargs))
+                return True
+
+        speculator = FakeSpeculator()
+        memory = FakeMemoryManager()
+        app = create_app(
+            memory_manager=memory,
+            database=object(),
+            soul_engine=SimpleNamespace(_speculator=speculator),
+            dialogue=FakeDialogue(),
+            recommendation_engine=SimpleNamespace(_llm=BrokenLLM()),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/interest-probes/respond",
+            json={
+                "domain": "抽象雕塑",
+                "response": "chat",
+                "message": "先放着吧",
+            },
+        )
+
+        assert response.status_code == 200
+        assert speculator.confirmed == []
+        assert speculator.rejected == []
+        history = memory.runtime_state["probe_feedback_history"]
+        assert isinstance(history, list)
+        assert history[0]["classification"] == "neutral"
+        assert history[0]["resulting_action"] == "none"
 
     def test_avoidance_probe_pending_returns_active_items(self, tmp_path: Path) -> None:
         from fastapi.testclient import TestClient
@@ -3069,7 +3597,7 @@ class TestBackendAPI:
             ).json()
             assert [item["turn_id"] for item in history["items"]] == ["turn-avoidance-1"]
             feedback_history = memory.runtime_state["avoidance_probe_feedback_history"]
-            assert feedback_history[0]["response"] == "chat_positive"
+            assert feedback_history[0]["response"] == "avoidance_chat_confirmed"
 
     def test_recommendation_click_endpoint_ingests_strong_signal(self) -> None:
         """POST /api/recommendation-click should push a strong signal through the pipeline."""
@@ -3168,6 +3696,78 @@ class TestBackendAPI:
         assert ingested_signal.payload["title"] == "深入理解Transformer"
         assert ingested_signal.payload["topic_label"] == "AI技术"
         assert ingested_signal.payload["up_name"] == "ML教程君"
+
+    def test_recommendation_click_endpoint_keeps_youtube_click_source_aware(self) -> None:
+        """YouTube recommendation clicks must not be persisted as Bilibili URLs."""
+        from fastapi.testclient import TestClient
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+
+            async def propagate_event(self, event: dict[str, object]) -> None:
+                self.events.append(event)
+
+        class FakeDatabase:
+            def get_recommendation_by_id(
+                self,
+                recommendation_id: int,
+            ) -> dict[str, object] | None:
+                if recommendation_id != 42:
+                    return None
+                return {
+                    "id": 42,
+                    "bvid": "KPoJ7p9iy4Q",
+                    "content_id": "KPoJ7p9iy4Q",
+                    "content_url": "https://www.youtube.com/watch?v=KPoJ7p9iy4Q",
+                    "source_platform": "youtube",
+                    "title": "A YouTube deep dive",
+                    "topic_label": "技术长视频",
+                    "up_name": "YT Creator",
+                }
+
+        class SpyPipeline:
+            def __init__(self) -> None:
+                self.ingested: list[object] = []
+
+            async def ingest(self, signal: object) -> object:
+                self.ingested.append(signal)
+                from openbiliclaw.soul.pipeline import IngestResult
+
+                return IngestResult(signals_accepted=1)
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self.pipeline = SpyPipeline()
+
+        memory = FakeMemoryManager()
+        soul_engine = FakeSoulEngine()
+        app = create_app(
+            memory_manager=memory,
+            database=FakeDatabase(),
+            soul_engine=soul_engine,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/recommendation-click",
+            json={"recommendation_id": 42},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["bvid"] == "KPoJ7p9iy4Q"
+        assert memory.events, "YouTube click should be persisted"
+        event = memory.events[0]
+        assert event["url"] == "https://www.youtube.com/watch?v=KPoJ7p9iy4Q"
+        assert "YouTube" in event["context"]
+        assert event["metadata"]["source_platform"] == "youtube"
+        assert event["metadata"]["content_id"] == "KPoJ7p9iy4Q"
+        assert event["metadata"]["content_url"] == "https://www.youtube.com/watch?v=KPoJ7p9iy4Q"
+
+        signal = soul_engine.pipeline.ingested[0]
+        assert signal.payload["source_platform"] == "youtube"
+        assert signal.payload["content_id"] == "KPoJ7p9iy4Q"
+        assert signal.payload["content_url"] == "https://www.youtube.com/watch?v=KPoJ7p9iy4Q"
 
     def test_recommendation_click_endpoint_persists_dwell_fields(self) -> None:
         """When the extension reports dwell on the click-through, those

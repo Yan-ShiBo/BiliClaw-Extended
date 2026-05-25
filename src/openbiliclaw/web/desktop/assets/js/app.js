@@ -1167,6 +1167,8 @@
         domain: String(domain),
         reason: item.reason || item.message || item.description || (probeType === "avoidance.probe" ? "后端希望确认这个避雷方向。" : "后端希望确认这个兴趣方向。"),
         specifics: asArray(item.specifics || item.examples || item.children).map((s) => s?.name || s?.label || valueList(s)).filter(Boolean),
+        probe_mode: item.probe_mode || "",
+        challenge: Boolean(item.challenge),
         chat_status: item.chat_status || item.status_text || "",
         chat_reply: item.chat_reply || item.reply || ""
       };
@@ -1373,12 +1375,17 @@
         const type = button.dataset.specType || "interest.probe";
         const isAvoidance = isAvoidanceProbe(type);
         const endpoint = isAvoidance ? ENDPOINTS.avoidanceProbeRespond : ENDPOINTS.interestProbeRespond;
-        await requestJson(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain, response, message: "" }) });
-        row.innerHTML = `<p class="spec-result">${isAvoidance
-          ? response === "confirm" ? `好，「${escapeHtml(domain)}」会作为避雷方向处理。` : `好，「${escapeHtml(domain)}」不记成避雷。`
-          : response === "confirm" ? `好，「${escapeHtml(domain)}」记住了。` : `好，「${escapeHtml(domain)}」先不看了。`}</p>`;
-        state.handledProbeKeys.add(probeKey(type, domain));
-        state.messages = state.messages.filter((msg) => !(messageType(msg) === messageType({ type }) && msg.domain === domain));
+        const payload = { domain, response, message: "" };
+        if (!isAvoidance) payload.surface = "profile";
+        await requestJson(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const result = isAvoidance
+          ? (response === "confirm" ? `好，「${escapeHtml(domain)}」会作为避雷方向处理。` : `好，「${escapeHtml(domain)}」不记成避雷。`)
+          : (response === "confirm" ? `好，「${escapeHtml(domain)}」记住了。` : `好，「${escapeHtml(domain)}」先不看了。`);
+        row.innerHTML = `<p class="spec-result">${result}</p>`;
+        const key = probeKey(type, domain);
+        state.handledProbeKeys.add(key);
+        state.messages = state.messages.filter((msg) => messageKey(msg) !== key);
+        if (state.messageListSnapshot) state.messageListSnapshot = state.messageListSnapshot.filter((msg) => messageKey(msg) !== key);
         renderMessages();
         showToast(isAvoidance
           ? response === "confirm" ? "已确认这个避雷方向" : "已排除这个避雷方向"
@@ -2166,8 +2173,8 @@
       }
       if (event.type === "delight.refreshed") void fetchDelightQueue();
       if (event.type === "notification.pending" && event.bvid) mergeMessages([{ ...event, type: "notification" }]);
-      if (event.type === "interest.probe" && event.domain) mergeMessages([{ type: "interest.probe", domain: event.domain, reason: event.reason || event.message || "后端希望确认这个兴趣方向。", specifics: event.specifics || event.examples || [] }]);
-      if (event.type === "avoidance.probe" && event.domain) mergeMessages([{ type: "avoidance.probe", domain: event.domain, reason: event.reason || event.message || "后端希望确认这个避雷方向。", specifics: event.specifics || event.examples || [] }]);
+      if (event.type === "interest.probe" && event.domain) mergeMessages([{ type: "interest.probe", domain: event.domain, reason: event.reason || event.message || "后端希望确认这个兴趣方向。", specifics: event.specifics || event.examples || [], probe_mode: event.probe_mode || "", challenge: Boolean(event.challenge) }]);
+      if (event.type === "avoidance.probe" && event.domain) mergeMessages([{ type: "avoidance.probe", domain: event.domain, reason: event.reason || event.message || "后端希望确认这个避雷方向。", specifics: event.specifics || event.examples || [], probe_mode: event.probe_mode || "", challenge: Boolean(event.challenge) }]);
     }
 
     function connectRuntimeStream() {
