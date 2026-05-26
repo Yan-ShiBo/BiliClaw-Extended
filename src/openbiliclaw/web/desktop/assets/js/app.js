@@ -1853,18 +1853,24 @@
       };
     }
 
-    function currentRecommendationSourceCount() {
-      const sources = new Set(
-        state.videos
-          .map((item) => platformName(item.platform || item.source_platform || item.source))
-          .map((label) => String(label || "").trim())
-          .filter(Boolean)
-      );
-      return sources.size;
+    function configuredSourceCount() {
+      const sources = state.config?.sources;
+      if (!sources || typeof sources !== "object") return 0;
+      const shares = state.config?.scheduler?.pool_source_shares || {};
+      return Object.entries(sources).reduce((count, [key, value]) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return count;
+        if (Object.prototype.hasOwnProperty.call(value, "enabled")) {
+          return count + (value.enabled !== false ? 1 : 0);
+        }
+        if (Object.prototype.hasOwnProperty.call(shares, key)) {
+          return count + (Number(shares[key] ?? 0) > 0 ? 1 : 0);
+        }
+        return count;
+      }, 0);
     }
 
     function syncSourceMetric() {
-      const count = currentRecommendationSourceCount();
+      const count = configuredSourceCount();
       $("#metricSources").textContent = count ? String(count) : "—";
     }
 
