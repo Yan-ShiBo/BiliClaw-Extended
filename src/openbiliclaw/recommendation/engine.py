@@ -20,7 +20,7 @@ from openbiliclaw.llm.service import is_llm_rate_limit_error
 from openbiliclaw.soul.tone import ToneProfile, build_tone_profile
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
 
     from openbiliclaw.discovery.engine import DiscoveredContent
     from openbiliclaw.llm.base import LLMResponse
@@ -204,11 +204,13 @@ class RecommendationEngine:
         curator: PoolCurator | None = None,
         embedding_service: SupportsEmbeddingService | None = None,
         task_registry: BackgroundTaskRegistry | None = None,
+        xhs_self_info_provider: Callable[[], dict[str, object] | None] | None = None,
     ) -> None:
         self._llm = llm
         self._database = database
         self._curator = curator
         self._embedding_service = embedding_service
+        self._xhs_self_info_provider = xhs_self_info_provider
         # v0.3.63+: optional registry for detached fire-and-forget tasks
         # (classify_pool_backlog_detached, precompute_delight_scores_detached).
         # When provided, those tasks register here so RuntimeContext's
@@ -245,11 +247,25 @@ class RecommendationEngine:
         # carryover signals stale-pool / fatigue-bypass.
         self._last_served_bvids: frozenset[str] = frozenset()
 
+    def _xhs_self_nickname(self) -> str:
+        """Return the persisted XHS self nickname for pool guards."""
+        if self._xhs_self_info_provider is None:
+            return ""
+        try:
+            info = self._xhs_self_info_provider() or {}
+        except Exception:
+            logger.exception("Failed to load xhs self_info for pool guard")
+            return ""
+        if not isinstance(info, dict):
+            return ""
+        return str(info.get("nickname", "") or "").strip()
+
     def _pool_readiness_counts(self) -> dict[str, int]:
+        nickname = self._xhs_self_nickname()
         readiness_fn = getattr(self._database, "count_pool_readiness", None)
         if callable(readiness_fn):
             try:
-                counts = readiness_fn()
+                counts = readiness_fn(xhs_self_nickname=nickname)
                 available = int(counts.get("available", 0))
                 return {
                     "available": max(0, available),
@@ -258,7 +274,7 @@ class RecommendationEngine:
                 }
             except Exception:
                 logger.exception("Failed to load pool readiness counts")
-        available = int(self._database.count_pool_candidates())
+        available = int(self._database.count_pool_candidates(xhs_self_nickname=nickname))
         return {"available": max(0, available), "raw": max(0, available), "pending": 0}
 
     async def serve(
@@ -945,7 +961,9 @@ class RecommendationEngine:
         batch_size: int,
     ) -> int:
         """Inner implementation of classify_pool_backlog, called under lock."""
-        rows = self._database.get_pool_candidates_needing_evaluation(limit=limit)
+        rows = self._database.get_pool_candidates_needing_evaluation(
+            limit=limit, xhs_self_nickname=self._xhs_self_nickname()
+        )
         if not rows:
             return 0
 
@@ -1154,6 +1172,7 @@ class RecommendationEngine:
         rows = self._database.get_pool_candidates_needing_delight_score(
             limit=limit,
             min_delight_score_for_reason=effective_threshold,
+            xhs_self_nickname=self._xhs_self_nickname(),
         )
         if not rows:
             return 0
@@ -2363,11 +2382,15 @@ class RecommendationEngine:
         ]
 
     def _load_pool_candidates(self, *, limit: int) -> list[DiscoveredContent]:
-        rows = self._database.get_pool_candidates(limit=limit)
+        rows = self._database.get_pool_candidates(
+            limit=limit, xhs_self_nickname=self._xhs_self_nickname()
+        )
         return self._rows_to_discovered(rows)
 
     def _load_pool_candidates_needing_copy(self, *, limit: int) -> list[DiscoveredContent]:
-        rows = self._database.get_pool_candidates_needing_copy(limit=limit)
+        rows = self._database.get_pool_candidates_needing_copy(
+            limit=limit, xhs_self_nickname=self._xhs_self_nickname()
+        )
         return self._rows_to_discovered(rows)
 
     def _exclude_recently_viewed(

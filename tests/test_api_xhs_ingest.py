@@ -578,6 +578,77 @@ class TestXhsObservedUrls:
         assert "search-other-001" in bvids
         assert "search-own-001" not in bvids
 
+    def test_purge_self_authored_pool_items_matches_author_name(
+        self,
+        xhs_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        """Purge must also match author_name, not only up_name."""
+        app_client, db, _ = xhs_task_client
+
+        # Seed a row with empty up_name but matching author_name.
+        db.cache_content(
+            "xhs_author_only",
+            title="author_name match",
+            up_name="",
+            author_name="TestNick",
+            source="xhs-extension-task",
+            content_id="xhs_author_only",
+            content_url="https://www.xiaohongshu.com/explore/aaa?xsec_token=X",
+            source_platform="xiaohongshu",
+        )
+        # Trigger self_info persistence via observed-urls.
+        response = app_client.post(
+            "/api/sources/xhs/observed-urls",
+            json={
+                "urls": ["https://www.xiaohongshu.com/explore/harmless?xsec_token=Y"],
+                "page_type": "explore",
+                "self_info": {"user_id": "u1", "nickname": "TestNick"},
+            },
+        )
+        assert response.status_code == 200
+
+        row = db.conn.execute(
+            "SELECT pool_status FROM content_cache WHERE bvid = 'xhs_author_only'"
+        ).fetchone()
+        assert row is not None
+        assert row["pool_status"] == "suppressed"
+
+    def test_self_info_change_triggers_immediate_purge(
+        self,
+        xhs_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        """When self_info arrives for the first time, already-pooled self rows
+        must be suppressed in the same request lifecycle."""
+        app_client, db, _ = xhs_task_client
+
+        # Pre-seed a self-authored row before any self_info exists.
+        db.cache_content(
+            "xhs_pre_existing",
+            title="pre-existing self note",
+            up_name="NewUser",
+            source="xhs-extension-task",
+            content_id="xhs_pre_existing",
+            content_url="https://www.xiaohongshu.com/explore/pre?xsec_token=T",
+            source_platform="xiaohongshu",
+        )
+
+        # First observed-urls request with self_info.
+        response = app_client.post(
+            "/api/sources/xhs/observed-urls",
+            json={
+                "urls": ["https://www.xiaohongshu.com/explore/other?xsec_token=Q"],
+                "page_type": "explore",
+                "self_info": {"user_id": "u2", "nickname": "NewUser"},
+            },
+        )
+        assert response.status_code == 200
+
+        row = db.conn.execute(
+            "SELECT pool_status FROM content_cache WHERE bvid = 'xhs_pre_existing'"
+        ).fetchone()
+        assert row is not None
+        assert row["pool_status"] == "suppressed"
+
 
 class TestXhsTaskResults:
     def test_xhs_bootstrap_partial_results_accumulate_until_final(

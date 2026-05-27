@@ -516,6 +516,7 @@ class TestBackendAPI:
                 curator: object = None,
                 embedding_service: object = None,
                 task_registry: object = None,
+                xhs_self_info_provider: object = None,
             ) -> None:
                 self.llm = llm
                 self.database = database

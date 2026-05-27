@@ -1880,6 +1880,185 @@ class TestDatabase:
 
             db.close()
 
+    def test_pool_candidates_exclude_self_authored_xhs_rows(self) -> None:
+        """get_pool_candidates excludes xhs rows matching self nickname."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            xhs_url = "https://www.xiaohongshu.com/explore/abc?xsec_token=XYZ="
+            # XHS row matched by up_name
+            _seed_visible(
+                db,
+                bvid="xhs_self_up",
+                title="self up_name",
+                up_name="TestUser",
+                source="xhs-extension-task",
+                content_id="xhs_self_up",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            # XHS row matched by author_name
+            _seed_visible(
+                db,
+                bvid="xhs_self_author",
+                title="self author_name",
+                up_name="",
+                author_name="testuser",
+                source="xhs-extension-task",
+                content_id="xhs_self_author",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            # XHS row by another author
+            _seed_visible(
+                db,
+                bvid="xhs_other",
+                title="other author",
+                up_name="OtherUser",
+                source="xhs-extension-task",
+                content_id="xhs_other",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            # Bilibili row whose up_name matches — must NOT be excluded
+            _seed_visible(
+                db,
+                bvid="BV_bili_same_name",
+                title="bili same name",
+                up_name="TestUser",
+                source="search",
+                source_platform="bilibili",
+            )
+
+            rows = db.get_pool_candidates(limit=20, xhs_self_nickname="TestUser")
+            bvids = {r["bvid"] for r in rows}
+            assert "xhs_self_up" not in bvids
+            assert "xhs_self_author" not in bvids
+            assert "xhs_other" in bvids
+            assert "BV_bili_same_name" in bvids
+
+            db.close()
+
+    def test_pool_count_and_readiness_exclude_self_authored_xhs_rows(self) -> None:
+        """count_pool_candidates and count_pool_readiness exclude self rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            xhs_url = "https://www.xiaohongshu.com/explore/abc?xsec_token=XYZ="
+            _seed_visible(
+                db,
+                bvid="xhs_self",
+                title="self",
+                up_name="Me",
+                source="xhs-extension-task",
+                content_id="xhs_self",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            _seed_visible(
+                db,
+                bvid="xhs_other",
+                title="other",
+                up_name="Friend",
+                source="xhs-extension-task",
+                content_id="xhs_other",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            _seed_visible(
+                db,
+                bvid="BV_bili",
+                title="bili",
+                up_name="Me",
+                source="search",
+                source_platform="bilibili",
+            )
+
+            count = db.count_pool_candidates(
+                max_per_topic_group=0, xhs_self_nickname="Me"
+            )
+            assert count == 2  # xhs_other + BV_bili
+
+            readiness = db.count_pool_readiness(xhs_self_nickname="Me")
+            assert readiness["available"] == 2
+
+            db.close()
+
+    def test_pool_self_author_guard_noops_when_nickname_empty(self) -> None:
+        """Empty nickname must not exclude any rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            xhs_url = "https://www.xiaohongshu.com/explore/abc?xsec_token=XYZ="
+            _seed_visible(
+                db,
+                bvid="xhs_row",
+                title="note",
+                up_name="SomeUser",
+                source="xhs-extension-task",
+                content_id="xhs_row",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+
+            rows = db.get_pool_candidates(limit=10, xhs_self_nickname="")
+            assert any(r["bvid"] == "xhs_row" for r in rows)
+
+            count = db.count_pool_candidates(
+                max_per_topic_group=0, xhs_self_nickname=""
+            )
+            assert count >= 1
+
+            db.close()
+
+    def test_pool_backlog_queries_skip_self_authored_xhs_rows(self) -> None:
+        """Needing-evaluation and needing-copy queries exclude self rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(Path(tmpdir) / "test.db")
+            db.initialize()
+
+            xhs_url = "https://www.xiaohongshu.com/explore/abc?xsec_token=XYZ="
+            # Unclassified self-authored row (needs evaluation)
+            db.cache_content(
+                "xhs_self_eval",
+                title="self unclassified",
+                up_name="",
+                author_name="Me",
+                source="xhs-extension-task",
+                content_id="xhs_self_eval",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+            # Classified but needs copy (self-authored)
+            db.cache_content(
+                "xhs_self_copy",
+                title="self needs copy",
+                up_name="Me",
+                author_name="",
+                style_key="tutorial",
+                topic_group="test",
+                relevance_score=0.8,
+                source="xhs-extension-task",
+                content_id="xhs_self_copy",
+                content_url=xhs_url,
+                source_platform="xiaohongshu",
+            )
+
+            eval_rows = db.get_pool_candidates_needing_evaluation(
+                limit=20, xhs_self_nickname="Me"
+            )
+            assert not any(r["bvid"] == "xhs_self_eval" for r in eval_rows)
+
+            copy_rows = db.get_pool_candidates_needing_copy(
+                limit=20, xhs_self_nickname="Me"
+            )
+            assert not any(r["bvid"] == "xhs_self_copy" for r in copy_rows)
+
+            db.close()
+
     def test_insert_recommendation_retries_when_database_is_locked(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db = Database(Path(tmpdir) / "test.db")

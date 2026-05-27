@@ -401,12 +401,19 @@ class RuntimeContext:
         from openbiliclaw.recommendation.curator import PoolCurator
 
         new_curator = PoolCurator(self.database)
+
+        def _xhs_self_info_provider() -> dict[str, object] | None:
+            state = self.memory_manager.load_discovery_runtime_state()
+            info = state.get("xhs_self_info")
+            return info if isinstance(info, dict) else None
+
         new_recommendation_engine = RecommendationEngine(
             llm=new_llm_service,
             database=self.database,
             curator=new_curator,
             embedding_service=new_embedding_service,
             task_registry=self.task_registry,
+            xhs_self_info_provider=_xhs_self_info_provider,
         )
 
         # 7. Discovery engine + strategies

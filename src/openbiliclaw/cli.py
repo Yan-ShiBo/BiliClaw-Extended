@@ -453,10 +453,16 @@ def _build_recommendation_engine() -> Any:
 
     _emb = build_embedding_service(cfg, registry)
     embedding_service = cast("SupportsEmbeddingService | None", _emb)
+    def _xhs_self_info_provider() -> dict[str, object] | None:
+        state = memory.load_discovery_runtime_state()
+        info = state.get("xhs_self_info")
+        return info if isinstance(info, dict) else None
+
     return RecommendationEngine(
         llm=llm_service,
         database=database,
         embedding_service=embedding_service,
+        xhs_self_info_provider=_xhs_self_info_provider,
     )
 
 

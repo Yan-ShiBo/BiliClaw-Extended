@@ -222,6 +222,31 @@ def _is_linkable_pool_source(
     return "xsec_token=" in str(content_url or "")
 
 
+def _xhs_self_author_guard_sql(table_alias: str = "content_cache") -> str:
+    """Return a SQL AND clause that excludes self-authored XHS rows.
+
+    The clause takes 3 positional ``?`` parameters (all the same nickname
+    string). When the nickname is empty the clause is a no-op.
+    """
+    prefix = f"{table_alias}." if table_alias else ""
+    return (
+        "AND ("
+        "? = '' "
+        f"OR COALESCE({prefix}source_platform, '') != 'xiaohongshu' "
+        "OR ("
+        f"LOWER(COALESCE({prefix}up_name, '')) != LOWER(?) "
+        f"AND LOWER(COALESCE({prefix}author_name, '')) != LOWER(?)"
+        ")"
+        ")"
+    )
+
+
+def _xhs_self_author_guard_params(xhs_self_nickname: str | None) -> tuple[str, str, str]:
+    """Return the 3 bind values for ``_xhs_self_author_guard_sql``."""
+    nickname = str(xhs_self_nickname or "").strip()
+    return (nickname, nickname, nickname)
+
+
 class Database:
     """Lightweight SQLite wrapper for OpenBiliClaw.
 
@@ -1021,6 +1046,7 @@ class Database:
         limit: int = 20,
         *,
         max_per_topic_group: int = 3,
+        xhs_self_nickname: str = "",
     ) -> list[dict[str, Any]]:
         """Get fresh recommendation candidates directly from the discovery pool.
 
@@ -1048,8 +1074,10 @@ class Database:
         # Over-fetch widely so the per-group filter still leaves headroom
         # for the downstream balance pass.
         fetch_limit = max(limit * 8, 80)
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         if max_per_topic_group <= 0:
-            sql = """
+            sql = f"""
                 SELECT *
                 FROM content_cache
                 WHERE COALESCE(pool_status, 'fresh') = 'fresh'
@@ -1062,6 +1090,7 @@ class Database:
                     source_platform != 'xiaohongshu'
                     OR content_url LIKE '%xsec_token=%'
                   )
+                  {guard_sql}
                   AND NOT EXISTS (
                     SELECT 1
                     FROM recommendations AS r
@@ -1075,11 +1104,11 @@ class Database:
                     bvid ASC
                 LIMIT ?
             """
-            params: tuple[Any, ...] = (fetch_limit,)
+            params: tuple[Any, ...] = (*guard_params, fetch_limit)
         else:
             # Per-group rank via window function: keep the top-N classified
             # items of each topic_group, then order the remainder by relevance.
-            sql = """
+            sql = f"""
                 WITH ranked AS (
                     SELECT *,
                            ROW_NUMBER() OVER (
@@ -1101,6 +1130,7 @@ class Database:
                         source_platform != 'xiaohongshu'
                         OR content_url LIKE '%xsec_token=%'
                       )
+                      {guard_sql}
                       AND NOT EXISTS (
                         SELECT 1
                         FROM recommendations AS r
@@ -1117,7 +1147,7 @@ class Database:
                     bvid ASC
                 LIMIT ?
             """
-            params = (max_per_topic_group, fetch_limit)
+            params = (*guard_params, max_per_topic_group, fetch_limit)
         cursor = self.conn.execute(sql, params)
         rows = [dict(row) for row in cursor.fetchall()]
         rows = self._exclude_viewed_rows(
@@ -1127,7 +1157,9 @@ class Database:
         )
         return self._balance_pool_rows(rows, limit=limit)
 
-    def count_pool_candidates(self, *, max_per_topic_group: int = 3) -> int:
+    def count_pool_candidates(
+        self, *, max_per_topic_group: int = 3, xhs_self_nickname: str = ""
+    ) -> int:
         """Return how many fresh candidates are immediately available for reshuffle.
 
         v0.3.57+: matches ``get_pool_candidates`` precompute gate — rows
@@ -1144,9 +1176,11 @@ class Database:
         the displayed count beyond what ``serve()`` can actually load.
         """
         self._ensure_fresh_read()
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         if max_per_topic_group > 0:
             cursor = self.conn.execute(
-                """
+                f"""
                 WITH ranked AS (
                     SELECT bvid, source, source_platform, content_url,
                            ROW_NUMBER() OVER (
@@ -1168,6 +1202,7 @@ class Database:
                         source_platform != 'xiaohongshu'
                         OR content_url LIKE '%xsec_token=%'
                       )
+                      {guard_sql}
                       AND NOT EXISTS (
                         SELECT 1
                         FROM recommendations AS r
@@ -1178,11 +1213,11 @@ class Database:
                 FROM ranked
                 WHERE group_rank <= ?
                 """,
-                (max_per_topic_group,),
+                (*guard_params, max_per_topic_group),
             )
         else:
             cursor = self.conn.execute(
-                """
+                f"""
                 SELECT bvid, source, source_platform, content_url
                 FROM content_cache
                 WHERE COALESCE(pool_status, 'fresh') = 'fresh'
@@ -1195,12 +1230,14 @@ class Database:
                     source_platform != 'xiaohongshu'
                     OR content_url LIKE '%xsec_token=%'
                   )
+                  {guard_sql}
                   AND NOT EXISTS (
                     SELECT 1
                     FROM recommendations AS r
                     WHERE r.bvid = content_cache.bvid
                   )
-                """
+                """,
+                guard_params,
             )
         viewed_content_keys = self.get_recent_viewed_content_keys()
         return sum(
@@ -1215,7 +1252,7 @@ class Database:
             )
         )
 
-    def count_pool_readiness(self) -> dict[str, int]:
+    def count_pool_readiness(self, *, xhs_self_nickname: str = "") -> dict[str, int]:
         """Return pool inventory split by immediately servable and pending rows.
 
         ``available`` is the public "可换" count. ``raw`` is broad fresh
@@ -1223,22 +1260,26 @@ class Database:
         recently viewed rows are unavailable, but they are not pending.
         """
         self._ensure_fresh_read()
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         raw_cursor = self.conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS count
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
               AND COALESCE(feedback_type, '') != 'dislike'
+              {guard_sql}
               AND NOT EXISTS (
                 SELECT 1
                 FROM recommendations AS r
                 WHERE r.bvid = content_cache.bvid
               )
-            """
+            """,
+            guard_params,
         )
         raw_count = int(raw_cursor.fetchone()["count"])
         pending_cursor = self.conn.execute(
-            """
+            f"""
             SELECT
                 bvid,
                 content_id,
@@ -1252,12 +1293,14 @@ class Database:
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
               AND COALESCE(feedback_type, '') != 'dislike'
+              {guard_sql}
               AND NOT EXISTS (
                 SELECT 1
                 FROM recommendations AS r
                 WHERE r.bvid = content_cache.bvid
               )
-            """
+            """,
+            guard_params,
         )
         viewed_content_keys = self.get_recent_viewed_content_keys()
         pending_count = 0
@@ -1279,7 +1322,9 @@ class Database:
                 pending_count += 1
 
         return {
-            "available": self.count_pool_candidates(),
+            "available": self.count_pool_candidates(
+                xhs_self_nickname=xhs_self_nickname
+            ),
             "raw": raw_count,
             "pending": pending_count,
         }
@@ -2223,7 +2268,9 @@ class Database:
         )
         return cursor.rowcount
 
-    def get_pool_candidates_needing_evaluation(self, limit: int = 20) -> list[dict[str, Any]]:
+    def get_pool_candidates_needing_evaluation(
+        self, limit: int = 20, *, xhs_self_nickname: str = ""
+    ) -> list[dict[str, Any]]:
         """Return fresh pool candidates that lack LLM content classification.
 
         Targets items with empty ``style_key`` AND empty ``topic_group`` —
@@ -2236,8 +2283,10 @@ class Database:
         in ``_select_diversified_batch`` can treat them equally alongside
         bilibili content.
         """
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT *
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
@@ -2245,6 +2294,7 @@ class Database:
               AND COALESCE(style_key, '') = ''
               AND COALESCE(topic_group, '') = ''
               AND COALESCE(relevance_score, 0) = 0
+              {guard_sql}
               AND NOT EXISTS (
                 SELECT 1
                 FROM recommendations AS r
@@ -2255,7 +2305,7 @@ class Database:
                 bvid ASC
             LIMIT ?
             """,
-            (limit,),
+            (*guard_params, limit),
         )
         rows = [dict(row) for row in cursor.fetchall()]
         rows = self._exclude_viewed_rows(
@@ -2265,7 +2315,9 @@ class Database:
         )
         return rows[:limit]
 
-    def get_pool_candidates_needing_copy(self, limit: int = 20) -> list[dict[str, Any]]:
+    def get_pool_candidates_needing_copy(
+        self, limit: int = 20, *, xhs_self_nickname: str = ""
+    ) -> list[dict[str, Any]]:
         """Return fresh pool candidates missing precomputed popup copy.
 
         v0.3.66+: requires ``style_key`` / ``topic_group`` — content must
@@ -2273,8 +2325,10 @@ class Database:
         unclassified items (e.g. raw XHS notes) from getting an expression
         and leaking through the serve gate without proper relevance scoring.
         """
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT *
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
@@ -2285,6 +2339,7 @@ class Database:
                 COALESCE(pool_expression, '') = ''
                 OR COALESCE(pool_topic_label, '') = ''
               )
+              {guard_sql}
               AND NOT EXISTS (
                 SELECT 1
                 FROM recommendations AS r
@@ -2298,7 +2353,7 @@ class Database:
                 bvid ASC
             LIMIT ?
             """,
-            (limit,),
+            (*guard_params, limit),
         )
         rows = [dict(row) for row in cursor.fetchall()]
         rows = self._exclude_viewed_rows(
@@ -3158,6 +3213,7 @@ class Database:
         *,
         min_delight_score_for_reason: float | None = None,
         min_relevance_score: float = 0.55,
+        xhs_self_nickname: str = "",
     ) -> list[dict[str, Any]]:
         """Return pool candidates that still need delight evaluation or copy.
 
@@ -3173,15 +3229,18 @@ class Database:
         already half-fit, and burning LLM calls on weak-fit items just
         wastes budget.
         """
+        guard_sql = _xhs_self_author_guard_sql()
+        guard_params = _xhs_self_author_guard_params(xhs_self_nickname)
         if min_delight_score_for_reason is None:
             cursor = self.conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM content_cache
                 WHERE COALESCE(pool_status, 'fresh') IN ('fresh', 'suppressed')
                   AND COALESCE(feedback_type, '') != 'dislike'
                   AND COALESCE(delight_score, 0.0) = 0.0
                   AND COALESCE(relevance_score, 0.0) >= ?
+                  {guard_sql}
                   AND NOT EXISTS (
                     SELECT 1
                     FROM recommendations AS r
@@ -3190,11 +3249,11 @@ class Database:
                 ORDER BY relevance_score DESC, discovered_at DESC
                 LIMIT ?
                 """,
-                (min_relevance_score, limit),
+                (min_relevance_score, *guard_params, limit),
             )
         else:
             cursor = self.conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM content_cache
                 WHERE COALESCE(pool_status, 'fresh') IN ('fresh', 'suppressed')
@@ -3210,6 +3269,7 @@ class Database:
                       )
                     )
                   )
+                  {guard_sql}
                   AND NOT EXISTS (
                     SELECT 1
                     FROM recommendations AS r
@@ -3222,7 +3282,7 @@ class Database:
                     discovered_at DESC
                 LIMIT ?
                 """,
-                (min_relevance_score, min_delight_score_for_reason, limit),
+                (min_relevance_score, min_delight_score_for_reason, *guard_params, limit),
             )
         return [dict(row) for row in cursor.fetchall()]
 

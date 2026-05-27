@@ -109,10 +109,10 @@ class _FakeDatabase:
     def count_unread_recommendations(self) -> int:
         return sum(1 for row in self.recommendations if not int(row["presented"]))
 
-    def count_pool_candidates(self) -> int:
+    def count_pool_candidates(self, *, xhs_self_nickname: str = "") -> int:
         return self.pool_count
 
-    def count_pool_readiness(self) -> dict[str, int]:
+    def count_pool_readiness(self, *, xhs_self_nickname: str = "") -> dict[str, int]:
         return {
             "available": self.pool_count,
             "raw": self.pool_count if self.pool_raw_count is None else self.pool_raw_count,

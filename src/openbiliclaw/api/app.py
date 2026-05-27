@@ -3900,6 +3900,16 @@ def create_app(
                 self_info.get("user_id", ""),
                 self_info.get("nickname", ""),
             )
+            # Immediately purge any self-authored rows that slipped into
+            # the pool before this self_info was known.
+            suppressed = _purge_self_authored_pool_items(ctx.database, self_info)
+            if suppressed:
+                logger.info(
+                    "xhs self_info purge: suppressed %d self-authored pool item(s) "
+                    "(nickname=%r)",
+                    suppressed,
+                    self_info.get("nickname", ""),
+                )
         except Exception:
             logger.exception("Failed to persist xhs self_info")
 
@@ -3963,8 +3973,11 @@ def create_app(
                 "SET pool_status = 'suppressed' "
                 "WHERE source_platform = 'xiaohongshu' "
                 "  AND COALESCE(pool_status, 'fresh') = 'fresh' "
-                "  AND LOWER(COALESCE(up_name, '')) = LOWER(?)",
-                (nickname,),
+                "  AND ("
+                "    LOWER(COALESCE(up_name, '')) = LOWER(?)"
+                "    OR LOWER(COALESCE(author_name, '')) = LOWER(?)"
+                "  )",
+                (nickname, nickname),
             )
             database.conn.commit()
             return int(cursor.rowcount or 0)

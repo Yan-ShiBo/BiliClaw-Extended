@@ -84,8 +84,8 @@ class SupportsEventDatabase(Protocol):
     def get_latest_event_id(self) -> int: ...
     def count_recommendations(self) -> int: ...
     def count_unread_recommendations(self) -> int: ...
-    def count_pool_candidates(self) -> int: ...
-    def count_pool_readiness(self) -> dict[str, int]: ...
+    def count_pool_candidates(self, *, xhs_self_nickname: str = "") -> int: ...
+    def count_pool_readiness(self, *, xhs_self_nickname: str = "") -> dict[str, int]: ...
     def count_pool_candidates_by_source(self) -> dict[str, int]: ...
     def get_pool_distribution_counts(self) -> dict[str, dict[str, int]]: ...
     def trim_explore_cluster_overflow(self, *, max_per_cluster: int = 3) -> int: ...
@@ -286,10 +286,22 @@ class ContinuousRefreshController:
             self._last_llm_gate_allowed = allowed
         return allowed
 
+    def _xhs_self_nickname(self) -> str:
+        """Return the persisted XHS self nickname for pool guards."""
+        try:
+            state = self.memory_manager.load_discovery_runtime_state()
+        except Exception:
+            return ""
+        info = state.get("xhs_self_info")
+        if not isinstance(info, dict):
+            return ""
+        return str(info.get("nickname", "") or "").strip()
+
     def _pool_readiness_counts(self) -> dict[str, int]:
         """Return normalized pool readiness counts for status payloads."""
+        nickname = self._xhs_self_nickname()
         try:
-            readiness = self.database.count_pool_readiness()
+            readiness = self.database.count_pool_readiness(xhs_self_nickname=nickname)
             available = int(readiness.get("available", 0))
             return {
                 "available": max(0, available),
@@ -297,7 +309,7 @@ class ContinuousRefreshController:
                 "pending": max(0, int(readiness.get("pending", 0))),
             }
         except Exception:
-            available = int(self.database.count_pool_candidates())
+            available = int(self.database.count_pool_candidates(xhs_self_nickname=nickname))
             return {"available": max(0, available), "raw": max(0, available), "pending": 0}
 
     @staticmethod
@@ -514,7 +526,9 @@ class ContinuousRefreshController:
             except Exception:
                 logger.exception("trim_pool_source_overflow failed")
 
-        pool_available = self.database.count_pool_candidates()
+        pool_available = self.database.count_pool_candidates(
+            xhs_self_nickname=self._xhs_self_nickname()
+        )
         if pool_available > self.pool_target_count:
             trimmed = 0
             try:
@@ -833,7 +847,9 @@ class ContinuousRefreshController:
         if profile is None:
             return
         try:
-            before_pool_count = int(self.database.count_pool_candidates())
+            before_pool_count = int(self.database.count_pool_candidates(
+                xhs_self_nickname=self._xhs_self_nickname()
+            ))
         except Exception:
             before_pool_count = -1
         try:
@@ -1096,7 +1112,9 @@ class ContinuousRefreshController:
         state: dict[str, object],
     ) -> list[tuple[list[str], int]]:
         pending_events = self._pending_signal_events_count(state)
-        pool_available = self.database.count_pool_candidates()
+        pool_available = self.database.count_pool_candidates(
+            xhs_self_nickname=self._xhs_self_nickname()
+        )
         pool_below_target = pool_available < self.pool_target_count
 
         if pool_below_target:
