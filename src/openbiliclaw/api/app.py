@@ -378,6 +378,38 @@ def _probe_metadata_for_payload(item: object) -> tuple[str, bool]:
     return probe_mode, challenge
 
 
+def _cap_keeping_user_added(
+    items: list[Any], added: list[str], limit: int, key: Any = None
+) -> list[Any]:
+    """Truncate a merged AI⊕override list for the summary view without ever
+    dropping a user-added entry.
+
+    The effective profile appends user edits after the AI-inferred items, so a
+    plain ``items[:limit]`` slice silently hides anything the user added past
+    the cap — it then shows in edit mode (un-truncated `edit-state`) but not in
+    the read-only view, which reads like "my edit didn't take". User edits are
+    intentional and few, so they ride past the cap; only AI-inferred items are
+    subject to it. ``key`` extracts the comparable string (identity for plain
+    string lists, ``lambda d: d.domain`` for interest domains).
+    """
+    keyfn = key if key is not None else (lambda x: str(x))
+    items = list(items)
+    if len(items) <= limit:
+        return items
+    added_keys = {str(a).strip().casefold() for a in added if str(a).strip()}
+    if not added_keys:
+        return items[:limit]
+    head = items[:limit]
+    seen = {str(keyfn(x)).strip().casefold() for x in head}
+    extra = [
+        x
+        for x in items[limit:]
+        if str(keyfn(x)).strip().casefold() in added_keys
+        and str(keyfn(x)).strip().casefold() not in seen
+    ]
+    return head + extra
+
+
 def _cap_by_franchise(
     rows: list[dict[str, Any]],
     *,
@@ -1486,6 +1518,23 @@ def create_app(
             except Exception:
                 overrides_summary = {}
 
+        # User-added entries per field, so the display caps below never hide a
+        # manual edit (it would otherwise show in edit mode but not here).
+        _list_edits = overrides_summary.get("list_edits", {})
+        _interest_edits = overrides_summary.get("interest_edits", {})
+
+        def _added_list(path: str) -> list[str]:
+            edit = _list_edits.get(path) if isinstance(_list_edits, dict) else None
+            add = edit.get("add", []) if isinstance(edit, dict) else []
+            return [str(x) for x in add] if isinstance(add, list) else []
+
+        def _added_domains(polarity: str) -> list[str]:
+            edit = _interest_edits.get(polarity) if isinstance(_interest_edits, dict) else None
+            domains = edit.get("add_domains", []) if isinstance(edit, dict) else []
+            if not isinstance(domains, list):
+                return []
+            return [str(d.get("domain", "")) for d in domains if isinstance(d, dict)]
+
         from openbiliclaw.api.models import (
             AwarenessNoteOut,
             ContextModeOut,
@@ -1541,14 +1590,28 @@ def create_app(
                 if str(getattr(d, "domain", "")).strip()
             ]
 
-        likes_out = _domain_list(getattr(interest_layer, "likes", []))[:12]
-        dislikes_out = _domain_list(getattr(interest_layer, "dislikes", []))[:8]
+        likes_out = _cap_keeping_user_added(
+            _domain_list(getattr(interest_layer, "likes", [])),
+            _added_domains("likes"),
+            12,
+            key=lambda d: d.domain,
+        )
+        dislikes_out = _cap_keeping_user_added(
+            _domain_list(getattr(interest_layer, "dislikes", [])),
+            _added_domains("dislikes"),
+            8,
+            key=lambda d: d.domain,
+        )
 
-        favorite_ups = [
-            str(item).strip()
-            for item in getattr(prefs, "favorite_up_users", [])[:8]
-            if str(item).strip()
-        ]
+        favorite_ups = _cap_keeping_user_added(
+            [
+                str(item).strip()
+                for item in getattr(prefs, "favorite_up_users", [])
+                if str(item).strip()
+            ],
+            _added_list("interest.favorite_up_users"),
+            8,
+        )
 
         # ── Surface layer ──
         style_raw = getattr(prefs, "style", None)
@@ -1689,12 +1752,22 @@ def create_app(
             initialized=True,
             personality_portrait=profile.personality_portrait,
             # Core
-            core_traits=profile.core_traits[:6],
-            deep_needs=profile.deep_needs[:5],
+            core_traits=_cap_keeping_user_added(
+                profile.core_traits, _added_list("core.core_traits"), 6
+            ),
+            deep_needs=_cap_keeping_user_added(
+                profile.deep_needs, _added_list("core.deep_needs"), 5
+            ),
             mbti=mbti_out,
             # Values
-            values=list(getattr(profile, "values", [])[:5]),
-            motivational_drivers=list(getattr(profile, "motivational_drivers", [])[:4]),
+            values=_cap_keeping_user_added(
+                list(getattr(profile, "values", [])), _added_list("values_layer.values"), 5
+            ),
+            motivational_drivers=_cap_keeping_user_added(
+                list(getattr(profile, "motivational_drivers", [])),
+                _added_list("values_layer.motivational_drivers"),
+                4,
+            ),
             # Interest
             likes=likes_out,
             dislikes=dislikes_out,
@@ -1703,7 +1776,11 @@ def create_app(
             life_stage=str(getattr(profile, "life_stage", "")),
             current_phase=str(getattr(profile, "current_phase", "")),
             # Surface
-            cognitive_style=list(getattr(profile, "cognitive_style", [])[:5]),
+            cognitive_style=_cap_keeping_user_added(
+                list(getattr(profile, "cognitive_style", [])),
+                _added_list("surface.cognitive_style"),
+                5,
+            ),
             style=style_out,
             context=ctx_out,
             exploration_openness=exploration_openness,

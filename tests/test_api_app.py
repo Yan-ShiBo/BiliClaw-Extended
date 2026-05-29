@@ -5758,6 +5758,29 @@ class TestProfileEditEndpoints:
         state2 = client.get("/api/profile/edit-state").json()  # type: ignore[attr-defined]
         assert state2["fields"]["personality_portrait"]["pinned"] is False
 
+    def test_edit_set_then_reset_scalar_field(self, tmp_path: Path) -> None:
+        # Mirrors the slider UI path: scalar fields surface in edit-state and
+        # round-trip through op=set (numeric, clamped 0..1) + op=reset.
+        client = self._client(tmp_path)
+        state = client.get("/api/profile/edit-state").json()  # type: ignore[attr-defined]
+        assert state["fields"]["surface.exploration_openness"]["type"] == "scalar"
+
+        resp = client.post(  # type: ignore[attr-defined]
+            "/api/profile/edit",
+            json={"target": "surface.exploration_openness", "op": "set", "value": 0.8},
+        )
+        assert resp.status_code == 200
+        field = resp.json()["edit_state"]["fields"]["surface.exploration_openness"]
+        assert field["pinned"] is True
+        assert abs(field["value"] - 0.8) < 1e-9
+
+        client.post(  # type: ignore[attr-defined]
+            "/api/profile/edit",
+            json={"target": "surface.exploration_openness", "op": "reset"},
+        )
+        state2 = client.get("/api/profile/edit-state").json()  # type: ignore[attr-defined]
+        assert state2["fields"]["surface.exploration_openness"]["pinned"] is False
+
     def test_profile_summary_carries_overrides_annotation(self, tmp_path: Path) -> None:
         client = self._client(tmp_path)
         client.post(  # type: ignore[attr-defined]
@@ -5768,3 +5791,58 @@ class TestProfileEditEndpoints:
         assert resp.status_code == 200
         overrides = resp.json()["overrides"]
         assert overrides["list_edits"]["core.core_traits"]["add"] == ["务实"]
+
+    def test_summary_surfaces_user_added_item_past_display_cap(self, tmp_path: Path) -> None:
+        # Seed has 10 favorite_up_users; the summary caps the list at 8. A
+        # user-added entry lands past the cap and must still surface — it used
+        # to show in edit mode (un-truncated) but get truncated out of the
+        # read-only summary, reading as if the edit was lost.
+        client = self._client(tmp_path)
+        marker = "我亲手加的UP"
+        resp = client.post(  # type: ignore[attr-defined]
+            "/api/profile/edit",
+            json={"target": "interest.favorite_up_users", "op": "add", "value": marker},
+        )
+        assert resp.status_code == 200
+        state = client.get("/api/profile/edit-state").json()  # type: ignore[attr-defined]
+        assert marker in state["fields"]["interest.favorite_up_users"]["items"]
+        summary = client.get("/api/profile-summary").json()  # type: ignore[attr-defined]
+        assert marker in summary["favorite_up_users"]
+
+
+def test_cap_keeping_user_added_keeps_manual_entries_past_limit() -> None:
+    """The summary display cap must never hide a user-added entry."""
+    from openbiliclaw.api.app import _cap_keeping_user_added
+
+    # 6 AI items + 1 user-added past the cap of 6 → user entry rides along.
+    merged = ["a", "b", "c", "d", "e", "f", "用户加的"]
+    assert _cap_keeping_user_added(merged, ["用户加的"], 6) == [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "用户加的",
+    ]
+    # No overrides → plain truncation (AI noise still capped).
+    assert _cap_keeping_user_added(["a", "b", "c", "d", "e", "f", "g"], [], 6) == [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+    ]
+    # Under the cap → unchanged.
+    assert _cap_keeping_user_added(["a", "b"], ["a"], 6) == ["a", "b"]
+
+    # Interest-domain objects via key=.
+    class _D:
+        def __init__(self, domain: str) -> None:
+            self.domain = domain
+
+    doms = [_D(x) for x in ["a", "b", "c", "d", "e", "f", "g", "h", "mine"]]
+    out = _cap_keeping_user_added(doms, ["mine"], 8, key=lambda d: d.domain)
+    assert any(d.domain == "mine" for d in out)
+    assert len(out) == 9  # 8 head + 1 user-added
