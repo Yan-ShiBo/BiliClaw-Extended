@@ -102,8 +102,11 @@ cp config.example.toml config.toml
 |----|------|--------|------|
 | `model` | string | `"qwen2.5:7b"` | 本地模型名称 |
 | `base_url` | string | `"http://localhost:11434/v1"` | Ollama OpenAI-compatible `/v1` 服务地址 |
+| `num_ctx` | int | `0` | 上下文窗口 (tokens)。`0` = 用 Ollama 服务端默认值（通常 4096），走 `/v1` 兼容层。`>0`（推荐 `8192`）时聊天改走原生 `/api/chat` 端点并传 `options.num_ctx`——`/v1` 兼容层会静默丢弃 `num_ctx`，大批量 prompt 超 4096 即被截断、本地小模型输出无法解析的 JSON。仅 Ollama 生效 |
 
 > Ollama 不需要 API Key，适合本地开发测试。
+>
+> **`num_ctx` 为何重要：** Ollama 的 OpenAI 兼容 `/v1` 端点不接受 `num_ctx`，模型按服务端默认上下文（多为 4096）加载。发现循环里 discovery 批量评估 / 推荐文案批量生成等 prompt 很容易超 4096，被静默截断后小模型（如 `qwen:7b`）就会吐出非法 JSON、或为整批视频生成同一句重复文案。设 `num_ctx = 8192` 后，OpenBiliClaw 改用原生 `/api/chat` 端点（已实测 `context_length` 真正变为 8192）即可规避。
 
 ### `[llm.openrouter]`
 
