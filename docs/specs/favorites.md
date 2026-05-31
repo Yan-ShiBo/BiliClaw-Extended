@@ -2,14 +2,14 @@
 
 ## 1. 概述
 
-独立的"收藏"功能，让用户在任意推荐 surface 上通过 ♡/♥ 按钮把视频**长期收藏**，并在专门的收藏页浏览、移除。
+独立的"收藏"功能，让用户在任意推荐 surface 上通过星星按钮把视频**长期收藏**，并在专门的收藏页浏览、移除。
 
 收藏与「[稍后再看](watch-later.md)」是两个**互相独立**的本地集合：
 
 | 概念 | 语义 | 图标 | 典型用途 |
 |------|------|------|----------|
-| 稍后再看 (watch_later) | 临时队列，看完即移除 | ☆ / ★ | "马上要看的" |
-| 收藏 (favorites) | 永久留存，长期回顾 | ♡ / ♥ | "想长期保存的好内容" |
+| 稍后再看 (watch_later) | 临时队列，看完即移除 | 时钟 SVG | "马上要看的" |
+| 收藏 (favorites) | 永久留存，长期回顾 | 星星 SVG | "想长期保存的好内容" |
 
 一个视频可以同时在两者中、只在其一、或都不在。数据存储在本地 SQLite，不影响 soul profile 也不影响推荐评分，也不与 B 站原生收藏夹同步。
 
@@ -58,24 +58,24 @@ CREATE INDEX IF NOT EXISTS idx_favorites_added
 
 ## 4. 前端 — 收藏入口 + 浏览页
 
-三端均提供 ♡/♥ 收藏入口**和**已收藏内容浏览页。
+三端均提供星星收藏入口**和**已收藏内容浏览页。
 
 ### 4.1 通用交互规范
 
-- **收藏按钮**：♡（未收藏）/ ♥（已收藏），点击 toggle
+- **收藏按钮**：星星 SVG，点击 toggle；选中态通过 `aria-pressed=true` 与金色填充表达
 - **乐观 UI**：点击后立即切换图标，请求失败时回退
 - **防抖**：同一 bvid 的并发请求用 busy flag 互斥
-- **懒加载状态**：卡片渲染后异步查询 `GET /api/favorites/{bvid}` 同步心标状态
+- **懒加载状态**：卡片渲染后异步查询 `GET /api/favorites/{bvid}` 同步星标状态
 
 ### 4.2 各 Surface 实现
 
 | Surface | 收藏入口（★ 星星图标） | 浏览页入口 | 列表 API |
 |---------|-----------|-----------|----------|
-| 插件 popup | delight banner 的 ★ 图标按钮 | tab bar 新增「收藏」tab（`viewFavorites` + `favoritesList`） | `fetchFavorites()` → `loadFavorites()` |
+| 插件 popup | 推荐卡和 delight banner 的星星 SVG toggle | tab bar「收藏」tab（`viewFavorites` + `favoritesList`） | `fetchFavorites()` → `loadFavorites()` |
 | 移动端 Web | 推荐卡**封面右上角 chip**（★ SVG）；惊喜 tray 紧凑图标 | 底部导航新增「收藏」tab（`initFavoritesView`），tab 图标 ⭐ | `fetchFavorites()` |
 | 桌面端 Web | 推荐卡 / 惊喜横幅底部反馈行**内联 SVG 图标**（与点赞/点踩并排，`data-action/data-delight="favorite"`） | 侧边栏「我的收藏」(`favoritesBtn` + `favoritesPage` + `favoritesCountBadge`) | `refreshFavorites()` + `syncFavoriteButtons()` |
 
-> 图标约定：**收藏 = 星星（★）、稍后再看 = 时钟（🕐）**，统一用与「点赞/点踩」同款的 SVG line-icon。桌面端两者内联在底部反馈行；移动端推荐卡用封面右上角玻璃态 chip（小屏省空间）。选中态由 `aria-pressed` + CSS 驱动：星星填充金色 `#e8a33d`，时钟变 accent 色。
+> 图标约定：**收藏 = 星星、稍后再看 = 时钟**，统一用与「点赞/点踩」同款的 SVG line-icon。插件端与桌面端两者内联在动作行；移动端推荐卡用封面右上角玻璃态 chip（小屏省空间）。选中态由 `aria-pressed` + CSS 驱动：星星填充金色 `#e8a33d`，时钟变 accent 色。
 
 浏览页对每条内容支持点击打开原链接、单条「移除」，空态有引导文案；桌面端导航项带数量徽章。
 

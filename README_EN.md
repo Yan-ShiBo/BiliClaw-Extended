@@ -17,11 +17,11 @@
 
 ---
 
-## 📌 LAN Password Gate + Semantic-Dedup Banner Fix (2026-05-31)
+## 📌 Extension Saved Surfaces Aligned Across Clients (2026-05-31)
 
-- **🔒 Optional password gate for LAN / remote access** — one login across web, mobile web, and the extension; loopback (localhost) stays password-free, the extension is unaffected, and a password change instantly revokes every device session.
-- **🧭 The "semantic dedup off" banner finally tells the truth** — `/api/health` now does a live probe: a missing model (404) honestly reports degraded, and once embedding is configured the banner auto-clears when the panel regains focus instead of nagging forever.
-- **🩹 Fixed the banner that could never be hidden** — `.embedding-banner` (and siblings) stayed visible because `display:flex` beat `[hidden]`; a global `[hidden]` reset fixes the whole class.
+- **The extension side panel now has a Watch Later tab** — matching mobile web and desktop web, with a browsable list and per-item removal.
+- **Recommendation cards and delight banners share the same save actions** — clock = Watch Later, star = Favorites, both as independent SVG toggles with synchronized state for the same bvid.
+- **Browser E2E now covers the saved surfaces** — real Chrome checks the 420px side panel layout, five equal tabs, no horizontal overflow, selected styles, and list removal sync.
 
 Full changelog: [docs/changelog.md](docs/changelog.md).
 
@@ -510,7 +510,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.91 / extension v0.3.49: challenge probes and source-aware recommendation clicks (2026-05-25)**. The top highlight callout keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags and do not publish backend desktop packages.
+Latest: **v0.3.91 / extension v0.3.61: extension saved surfaces aligned across clients (2026-05-31)**. The top highlight callout keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags and do not publish backend desktop packages.
 
 ## 🗺️ Roadmap
 

@@ -80,6 +80,7 @@ import {
   addToWatchLater,
   removeFromWatchLater,
   watchLaterStatus,
+  fetchWatchLater,
   addToFavorite,
   removeFromFavorite,
   favoriteStatus,
@@ -156,13 +157,17 @@ const elements = {
   poolTopics: document.getElementById("poolTopics"),
   delightSlot: document.getElementById("delightSlot"),
   tabRecommend: document.getElementById("tabRecommend"),
+  tabWatchLater: document.getElementById("tabWatchLater"),
   tabFavorites: document.getElementById("tabFavorites"),
   tabProfile: document.getElementById("tabProfile"),
   tabChat: document.getElementById("tabChat"),
   viewRecommend: document.getElementById("viewRecommend"),
+  viewWatchLater: document.getElementById("viewWatchLater"),
   viewFavorites: document.getElementById("viewFavorites"),
   viewProfile: document.getElementById("viewProfile"),
   viewChat: document.getElementById("viewChat"),
+  watchLaterList: document.getElementById("watchLaterList"),
+  watchLaterEmpty: document.getElementById("watchLaterEmpty"),
   favoritesList: document.getElementById("favoritesList"),
   favoritesEmpty: document.getElementById("favoritesEmpty"),
   profileEmpty: document.getElementById("profileEmpty"),
@@ -275,6 +280,11 @@ const favoriteToggles = createSavedToggleRegistry({
     uncheckedAriaLabel: "收藏",
   },
 });
+
+const WATCH_LATER_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.2 1.9"/></svg>';
+const FAVORITE_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.65 5.37 5.93.86-4.29 4.18 1.01 5.9L12 17.1l-5.31 2.8 1.01-5.9L3.41 9.83l5.93-.86z"/></svg>';
 
 const CHAT_PLACEHOLDERS = [
   // 想法与内容判断类
@@ -442,6 +452,7 @@ function setActiveTab(tabName) {
 
   const tabs = [
     ["recommend", elements.tabRecommend, elements.viewRecommend],
+    ["watchLater", elements.tabWatchLater, elements.viewWatchLater],
     ["favorites", elements.tabFavorites, elements.viewFavorites],
     ["profile", elements.tabProfile, elements.viewProfile],
     ["chat", elements.tabChat, elements.viewChat],
@@ -463,6 +474,9 @@ function setActiveTab(tabName) {
   }
   if (tabName === "recommend") {
     queueRecommendationLoadCheck();
+  }
+  if (tabName === "watchLater") {
+    void loadWatchLater();
   }
   if (tabName === "favorites") {
     void loadFavorites();
@@ -493,6 +507,76 @@ function bindFavoriteToggle(button, bvid, labels = {}) {
   favoriteToggles.registerButton(bvid, button, labels);
   void favoriteToggles.hydrateStatus(bvid, favoriteStatus);
   return button;
+}
+
+// ── Watch-later view (稍后再看) ──────────────────────────────────
+async function loadWatchLater() {
+  const list = elements.watchLaterList;
+  const empty = elements.watchLaterEmpty;
+  if (!(list instanceof HTMLElement)) return;
+  let data = null;
+  try {
+    data = await fetchWatchLater(100, 0);
+  } catch {
+    data = null;
+  }
+  const items = Array.isArray(data?.items) ? data.items : [];
+  list.replaceChildren();
+  if (!items.length) {
+    if (empty instanceof HTMLElement) empty.hidden = false;
+    return;
+  }
+  if (empty instanceof HTMLElement) empty.hidden = true;
+  for (const item of items) {
+    watchLaterToggles.setSaved(item.bvid, true);
+    list.appendChild(buildWatchLaterCard(item));
+  }
+}
+
+function buildWatchLaterCard(item) {
+  const card = document.createElement("article");
+  card.className = "saved-card";
+  card.dataset.bvid = item.bvid;
+
+  const body = document.createElement("button");
+  body.type = "button";
+  body.className = "saved-card-open";
+  const title = document.createElement("p");
+  title.className = "saved-card-title";
+  title.textContent = item.title || item.bvid;
+  const up = document.createElement("p");
+  up.className = "saved-card-up";
+  up.textContent = item.up_name || "";
+  body.append(title, up);
+  body.addEventListener("click", () => {
+    const url = buildContentUrl(item);
+    if (url) window.open(url, "_blank");
+  });
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "saved-card-remove";
+  remove.textContent = "移除";
+  remove.title = "移出稍后再看";
+  remove.addEventListener("click", async () => {
+    remove.disabled = true;
+    try {
+      await removeFromWatchLater(item.bvid);
+      watchLaterToggles.setSaved(item.bvid, false);
+      card.remove();
+      if (
+        !elements.watchLaterList?.children.length &&
+        elements.watchLaterEmpty instanceof HTMLElement
+      ) {
+        elements.watchLaterEmpty.hidden = false;
+      }
+    } catch {
+      remove.disabled = false;
+    }
+  });
+
+  card.append(body, remove);
+  return card;
 }
 
 // ── Favorites view (收藏夹) ─────────────────────────────────────
@@ -4255,18 +4339,29 @@ function renderRecommendations(items, { append = false } = {}) {
         }
       }),
       (() => {
-        const btn = createActionButton("\u2606", "action-button action-secondary", async () => {
+        const btn = createActionButton("", "action-button action-secondary", async () => {
           try {
             await toggleWatchLaterSaved(item.bvid);
           } catch {
             // Registry already rolled back the optimistic state.
           }
         });
+        btn.innerHTML = WATCH_LATER_ICON_SVG;
         btn.classList.add("saved-toggle", "watch-later-btn");
-        bindWatchLaterToggle(btn, item.bvid, {
-          checkedText: "\u2605",
-          uncheckedText: "\u2606",
+        bindWatchLaterToggle(btn, item.bvid);
+        return btn;
+      })(),
+      (() => {
+        const btn = createActionButton("", "action-button action-secondary", async () => {
+          try {
+            await toggleFavoriteSaved(item.bvid);
+          } catch {
+            // Registry already rolled back the optimistic state.
+          }
         });
+        btn.innerHTML = FAVORITE_ICON_SVG;
+        btn.classList.add("saved-toggle", "favorite-btn");
+        bindFavoriteToggle(btn, item.bvid);
         return btn;
       })(),
       createActionButton("少来点", "action-button action-secondary", async () => {
@@ -4764,6 +4859,7 @@ async function handleManualRefresh() {
 function bindTabs() {
   const bindings = [
     [elements.tabRecommend, "recommend"],
+    [elements.tabWatchLater, "watchLater"],
     [elements.tabFavorites, "favorites"],
     [elements.tabProfile, "profile"],
     [elements.tabChat, "chat"],

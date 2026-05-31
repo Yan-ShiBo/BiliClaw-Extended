@@ -27,11 +27,11 @@
 
 ---
 
-## 📌 局域网密码门禁 + 语义去重提示修复（2026-05-31）
+## 📌 插件收藏 / 稍后再看三端对齐（2026-05-31）
 
-- **🔒 局域网 / 远程访问可选密码门禁** —— web、移动 Web、插件三端统一登录；本机（loopback）免登录、扩展不受影响，改密即时撤销所有设备会话。
-- **🧭 「语义去重未启用」提示终于说真话** —— `/api/health` 改为实时探活：模型没拉（404）会如实报降级，配好后横幅在面板获焦时自动消失，不再一直误报。
-- **🩹 修复横幅根本关不掉的老 bug** —— `.embedding-banner` 等元素被 `display:flex` 盖过 `[hidden]` 而无法隐藏，加全局 `[hidden]` reset 一并治本。
+- **插件 side panel 新增「稍后」页** —— 与移动 Web / 桌面 Web 一样可以直接浏览稍后再看列表，并支持单条移除。
+- **推荐卡与惊喜横幅保存动作统一** —— 「时钟=稍后再看」「星星=收藏」两个独立 SVG toggle，选中态和同一 bvid 的多个按钮会实时同步。
+- **补浏览器端到端验证** —— 真实 Chrome 检查 420px side panel 下五 tab 等宽、无横向溢出、保存按钮样式和列表移除同步。
 
 完整变更详见 [docs/changelog.md](docs/changelog.md)。
 
@@ -581,7 +581,7 @@ OpenBiliClaw/
 
 ## 📜 更新日志
 
-最新版本：**v0.3.91 / extension v0.3.49: 挑战式兴趣探针与跨源推荐点击修复（2026-05-25）**。README 顶部保留最新重要更新；完整历史见 [docs/changelog.md](docs/changelog.md)。插件包见 [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，后端源码更新看 `backend-v*` tag，不发布后端桌面包。
+最新版本：**v0.3.91 / extension v0.3.61: 插件收藏 / 稍后再看三端对齐（2026-05-31）**。README 顶部保留最新重要更新；完整历史见 [docs/changelog.md](docs/changelog.md)。插件包见 [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，后端源码更新看 `backend-v*` tag，不发布后端桌面包。
 
 ## 🗺️ 后续规划
 

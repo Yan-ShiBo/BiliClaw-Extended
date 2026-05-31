@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-本地书签功能，让用户在任意推荐 surface 上通过 ☆/★ 按钮标记视频"稍后再看"，跨 surface 同步状态。
+本地书签功能，让用户在任意推荐 surface 上通过时钟按钮标记视频"稍后再看"，跨 surface 同步状态。
 
 数据存储在本地 SQLite，不影响 soul profile 也不影响推荐评分。
 
@@ -49,23 +49,23 @@ CREATE INDEX IF NOT EXISTS idx_watch_later_added
 
 > 关联功能：「[收藏夹 (favorites)](favorites.md)」是与稍后再看互相独立的永久收藏集合，复用同一套浏览列表组件。
 
-## 4. 前端 — ☆ toggle + 浏览页
+## 4. 前端 — 时钟 toggle + 浏览页
 
-各 surface 的推荐卡和 delight 卡上有 ☆/★ toggle 按钮；已保存内容的浏览页现已在三端实现（见 §6）。
+各 surface 的推荐卡和 delight 卡上有时钟 SVG toggle 按钮；已保存内容的浏览页现已在三端实现（见 §6）。
 
 ### 4.1 通用交互规范
 
-- **收藏按钮**：☆（未收藏）/ ★（已收藏），点击 toggle
+- **稍后再看按钮**：时钟 SVG，点击 toggle；选中态通过 `aria-pressed=true` 与 accent 色表达
 - **乐观 UI**：点击后立即切换图标，请求失败时回退
 - **防抖**：同一 bvid 的并发请求用 busy flag 互斥
-- **懒加载状态**：卡片渲染后异步查询 `GET /api/watch-later/{bvid}` 同步星标状态
+- **懒加载状态**：卡片渲染后异步查询 `GET /api/watch-later/{bvid}` 同步时钟状态
 
 ### 4.2 各 Surface 实现
 
-| Surface | 推荐卡 ☆ 位置 | Delight 卡 ☆ 位置 | 懒加载 |
+| Surface | 推荐卡时钟位置 | Delight 卡时钟位置 | 懒加载 |
 |---------|---------------|-------------------|--------|
-| 插件 popup | "多来点" 和 "少来点" 之间 | "喜欢" 和 "不感兴趣" 之间 | `watchLaterStatus()` 闭包 |
-| 移动端 Web | 👍 和 👎 之间 | "喜欢" 和 "不感兴趣" 之间 | `watchLaterStatus()` + `watchLaterSaved` Set |
+| 插件 popup | 推荐卡动作行，与收藏星标并列 | delight banner 动作行，与收藏星标并列 | `watchLaterStatus()` + `popup-saved-sync.js` |
+| 移动端 Web | 封面右上角 chip | delight tray 动作行，与收藏星标并列 | `watchLaterStatus()` + `watchLaterSaved` Set |
 | 桌面端 Web | dismiss 按钮之后 | dismiss 按钮之后 | `requestJson` GET 回调 |
 
 ## 5. 不做的事情（scope out）
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_later_added
 
 | Surface | 列表入口 | 列表 API |
 |---------|----------|----------|
-| 插件 popup | delight banner ☆ 入口；列表浏览见收藏 tab 同款实现 | `fetchWatchLater()` |
+| 插件 popup | tab bar「稍后」页（`viewWatchLater` + `watchLaterList`） | `fetchWatchLater()` + `loadWatchLater()` |
 | 移动端 Web | 底部导航「稍后」tab（`initWatchLaterView`） | `fetchWatchLater()` |
 | 桌面端 Web | 侧边栏「稍后再看」(`watchLaterBtn` + `watchLaterPage` + `watchLaterCountBadge`) | `refreshWatchLater()` + `syncWatchLaterButtons()` |
 

@@ -34,7 +34,7 @@ test("mobile web exposes favorites API and tab entry", async () => {
   assert.match(appJs, /label:\s*"收藏"/);
 });
 
-test("mobile recommend delight tray has a favorite (heart) action", () => {
+test("mobile recommend delight tray has a favorite star action", () => {
   const recommendJs = readFileSync(
     resolve("../src/openbiliclaw/web/js/views/recommend.js"),
     "utf8",
@@ -44,7 +44,7 @@ test("mobile recommend delight tray has a favorite (heart) action", () => {
   assert.match(recommendJs, /addToFavorite\(d\.bvid\)/);
 });
 
-test("mobile recommend cards have a favorite (heart) toggle", () => {
+test("mobile recommend cards have a favorite star toggle", () => {
   const recommendJs = readFileSync(
     resolve("../src/openbiliclaw/web/js/views/recommend.js"),
     "utf8",
@@ -54,7 +54,7 @@ test("mobile recommend cards have a favorite (heart) toggle", () => {
   assert.match(recommendJs, /favoriteStatus\(item\.bvid\)/);
 });
 
-test("desktop web exposes favorites page, badge, and delight heart", () => {
+test("desktop web exposes favorites page, badge, and delight star", () => {
   const desktopHtml = readFileSync(
     resolve("../src/openbiliclaw/web/desktop/index.html"),
     "utf8",
@@ -75,7 +75,7 @@ test("desktop web exposes favorites page, badge, and delight heart", () => {
   assert.match(desktopJs, /syncFavoriteButtons/);
 });
 
-test("extension popup has a favorites tab, list, and delight heart", () => {
+test("extension popup has a favorites tab, list, and delight star", () => {
   const popupHtml = readFileSync(resolve("popup", "popup.html"), "utf8");
   const popupJs = readFileSync(resolve("popup", "popup.js"), "utf8");
 
@@ -86,4 +86,12 @@ test("extension popup has a favorites tab, list, and delight heart", () => {
   assert.match(popupJs, /toggleFavoriteSaved\(delight\.bvid\)/);
   assert.match(popupJs, /bindFavoriteToggle\(btn,\s*delight\.bvid\)/);
   assert.match(popupJs, /function loadFavorites/);
+});
+
+test("extension popup recommendation cards have a favorite star toggle", () => {
+  const popupJs = readFileSync(resolve("popup", "popup.js"), "utf8");
+
+  assert.match(popupJs, /toggleFavoriteSaved\(item\.bvid\)/);
+  assert.match(popupJs, /bindFavoriteToggle\(btn,\s*item\.bvid/);
+  assert.match(popupJs, /classList\.add\("saved-toggle",\s*"favorite-btn"\)/);
 });

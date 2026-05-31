@@ -272,7 +272,7 @@
 
     .tab-bar {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 6px;
     }
 
@@ -280,10 +280,10 @@
       min-width: 0;
       border: 0;
       border-radius: 16px;
-      padding: 10px 8px;
+      padding: 9px 6px;
       background: transparent;
       color: var(--text-secondary);
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1.3;
       font-weight: 700;
       transition:
@@ -3830,11 +3830,27 @@
       font-style: italic;
     }
 
-    /* delight 横幅的 稍后再看=时钟 / 收藏=星星 SVG 图标按钮 */
-    .delight-save-toggle { display: inline-flex; align-items: center; justify-content: center; }
+    /* 保存动作：稍后再看=时钟 / 收藏=星星 SVG 图标按钮 */
+    .saved-toggle,
+    .delight-save-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 38px;
+    }
+    .saved-toggle svg,
     .delight-save-toggle svg { width: 16px; height: 16px; }
-    .delight-save-toggle.watch-later-btn[aria-pressed="true"] { color: var(--brand, #fb7299); border-color: var(--brand, #fb7299); }
-    .delight-save-toggle.favorite-btn[aria-pressed="true"] { color: #e8a33d; border-color: #e8a33d; }
+    .saved-toggle.watch-later-btn[aria-pressed="true"],
+    .delight-save-toggle.watch-later-btn[aria-pressed="true"] {
+      color: var(--brand, #fb7299);
+      background: var(--brand-soft, rgba(251, 114, 153, 0.12));
+    }
+    .saved-toggle.favorite-btn[aria-pressed="true"],
+    .delight-save-toggle.favorite-btn[aria-pressed="true"] {
+      color: #e8a33d;
+      background: rgba(232, 163, 61, 0.12);
+    }
+    .saved-toggle.favorite-btn[aria-pressed="true"] svg,
     .delight-save-toggle.favorite-btn[aria-pressed="true"] svg { fill: currentColor; }
 
     /* ── Favorites view (收藏夹) ───────────────────────────── */
@@ -3925,9 +3941,10 @@
     <div class="tabs-shell">
       <div class="tab-bar" role="tablist" aria-label="Popup views">
         <button id="tabRecommend" class="tab-button is-active" type="button" role="tab" aria-selected="true" aria-controls="viewRecommend">推荐</button>
+        <button id="tabWatchLater" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewWatchLater">稍后</button>
         <button id="tabFavorites" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewFavorites">收藏</button>
-        <button id="tabProfile" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewProfile">我的画像</button>
-        <button id="tabChat" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewChat">聊聊你的想法</button>
+        <button id="tabProfile" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewProfile">画像</button>
+        <button id="tabChat" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="viewChat">对话</button>
       </div>
     </div>
 
@@ -3984,11 +4001,24 @@
         <div id="recommendationList" class="recommendation-list"></div>
       </section>
 
+      <section id="viewWatchLater" class="view" role="tabpanel" aria-labelledby="tabWatchLater" hidden>
+        <div class="view-intro">
+          <p class="view-kicker">Watch later</p>
+          <h2>稍后再看</h2>
+          <p class="view-subtitle">点时钟图标加入临时队列，看完可以随手移除。</p>
+        </div>
+        <div id="watchLaterEmpty" class="empty-state" hidden>
+          <h3>还没有稍后再看的内容</h3>
+          <p>在推荐或惊喜里点时钟图标，想晚点看的内容就会出现在这里。</p>
+        </div>
+        <div id="watchLaterList" class="recommendation-list"></div>
+      </section>
+
       <section id="viewFavorites" class="view" role="tabpanel" aria-labelledby="tabFavorites" hidden>
         <div class="view-intro">
           <p class="view-kicker">Favorites</p>
           <h2>我的收藏</h2>
-          <p class="view-subtitle">点 ♥ 收藏的内容会长期留在这里，和稍后再看互相独立。</p>
+          <p class="view-subtitle">点星标收藏的内容会长期留在这里，和稍后再看互相独立。</p>
         </div>
         <div id="favoritesEmpty" class="empty-state" hidden>
           <h3>还没有收藏</h3>

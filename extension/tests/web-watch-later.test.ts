@@ -62,3 +62,18 @@ test("extension delight banner has a watch-later star action", () => {
   assert.match(popupJs, /toggleWatchLaterSaved\(delight\.bvid\)/);
   assert.match(popupJs, /bindWatchLaterToggle\(btn,\s*delight\.bvid\)/);
 });
+
+test("extension popup exposes a watch-later tab and list like web surfaces", () => {
+  const popupHtml = readFileSync(resolve("popup", "popup.html"), "utf8");
+  const popupJs = readFileSync(resolve("popup", "popup.js"), "utf8");
+
+  assert.match(popupHtml, /id="tabWatchLater"/);
+  assert.match(popupHtml, /aria-controls="viewWatchLater"/);
+  assert.match(popupHtml, /id="viewWatchLater"/);
+  assert.match(popupHtml, /id="watchLaterList"/);
+  assert.match(popupHtml, /id="watchLaterEmpty"/);
+  assert.match(popupJs, /fetchWatchLater/);
+  assert.match(popupJs, /function loadWatchLater/);
+  assert.match(popupJs, /function buildWatchLaterCard/);
+  assert.match(popupJs, /removeFromWatchLater\(item\.bvid\)/);
+});

@@ -4,6 +4,11 @@
 
 ---
 
+## extension v0.3.61: 插件收藏 / 稍后再看三端对齐（2026-05-31）
+
+- 对齐插件端收藏 / 稍后再看与 PC Web、移动 Web：side panel tab bar 新增独立「稍后」页，推荐卡和 delight banner 都提供「时钟=稍后再看」「星星=收藏」两个互相独立的 SVG toggle；列表移除、推荐卡和惊喜横幅继续共用 `popup-saved-sync.js` 同步同一 bvid 的状态。
+- 新增 `popup-saved-surfaces-e2e.test.ts`，以真实 HTTP mock 后端跑插件 `popup-api` 往返，并断言稍后再看 / 收藏互相独立、UI 布线完整；补充真实 Chrome 浏览器端到端冒烟，验证 420px side panel 下五 tab 等宽、无横向溢出、保存按钮选中态和列表移除同步。
+
 ## extension v0.3.60: 「阿B 最近新记住了什么」改为点击加载更多（2026-05-31）
 
 - 修复画像 tab「阿B 最近新记住了什么」区块过长的问题：该区块的认知卡片此前会随页面滚动到底部**自动续页**（`maybeLoadMoreCognitionHistory` 在 profile 加载后、每次续页结束、以及 `.content` 滚动事件里反复触发），实测会把所有历史认知卡片一次性拉满，使区块无限变长、底部「加载更多」按钮形同虚设。现在改为**纯点击驱动**：首屏只展示最近 3 条，仅当用户点击「加载更多」时才按 `cursor` 分页拉取下一页（每页 3 条），不再随滚动自动续页。推荐列表的滚动自动续页（独立的 `maybeLoadMoreRecommendations` + 意图门控）不受影响。
