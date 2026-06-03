@@ -1493,7 +1493,7 @@ class TestBackendAPI:
             "last_account_sync_at": "2026-03-14T18:00:00+00:00",
             "last_account_sync_error": "",
             "auto_update_enabled": False,
-            "current_version": "0.3.91",
+            "current_version": "0.3.100",
             "latest_remote_version": "",
             "last_update_check_at": "",
             "last_update_error": "",
