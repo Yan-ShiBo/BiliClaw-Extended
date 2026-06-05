@@ -725,6 +725,233 @@ def test_start_self_heals_missing_autostart_registration(
     assert register_calls == [cfg]
 
 
+def test_autostart_cli_enable_registers_after_authoritative_config_write(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart import guards
+
+    cfg = config_module.Config()
+    calls: list[tuple[str, bool | object, bool | None]] = []
+
+    class FakeManager:
+        mechanism = "launchd"
+        registered = False
+
+        def register(self, loaded_cfg: config_module.Config) -> None:
+            calls.append(("register", loaded_cfg.autostart.enabled, None))
+            self.registered = True
+
+        def unregister(self) -> None:
+            calls.append(("unregister", False, None))
+            self.registered = False
+
+        def is_registered(self) -> bool:
+            return self.registered
+
+    manager = FakeManager()
+
+    def fake_save(
+        loaded_cfg: config_module.Config,
+        config_path: Path | None = None,
+        *,
+        autostart_authoritative: bool = False,
+    ) -> None:
+        calls.append(("save", loaded_cfg.autostart.enabled, autostart_authoritative))
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(config_module, "save_config", fake_save, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+    monkeypatch.setattr(autostart, "get_manager", lambda: manager)
+    monkeypatch.setattr(guards, "active_env_managed_inputs", lambda loaded_cfg: [])
+    monkeypatch.setattr(guards, "autostart_shadowed", lambda intended: False)
+
+    result = runner.invoke(app, ["autostart", "enable"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("save", True, True),
+        ("register", True, None),
+    ]
+    assert manager.registered is True
+    assert "已开启" in result.stdout
+
+
+def test_autostart_cli_disable_unregisters_before_authoritative_config_write(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart import guards
+
+    cfg = config_module.Config()
+    cfg.autostart.enabled = True
+    calls: list[tuple[str, bool | object, bool | None]] = []
+
+    class FakeManager:
+        mechanism = "launchd"
+        registered = True
+
+        def register(self, loaded_cfg: config_module.Config) -> None:
+            calls.append(("register", loaded_cfg.autostart.enabled, None))
+            self.registered = True
+
+        def unregister(self) -> None:
+            calls.append(("unregister", True, None))
+            self.registered = False
+
+        def is_registered(self) -> bool:
+            return self.registered
+
+    manager = FakeManager()
+
+    def fake_save(
+        loaded_cfg: config_module.Config,
+        config_path: Path | None = None,
+        *,
+        autostart_authoritative: bool = False,
+    ) -> None:
+        calls.append(("save", loaded_cfg.autostart.enabled, autostart_authoritative))
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(config_module, "save_config", fake_save, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+    monkeypatch.setattr(autostart, "get_manager", lambda: manager)
+    monkeypatch.setattr(guards, "autostart_shadowed", lambda intended: False)
+
+    result = runner.invoke(app, ["autostart", "disable"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("unregister", True, None),
+        ("save", False, True),
+    ]
+    assert manager.registered is False
+    assert "已关闭" in result.stdout
+
+
+def test_autostart_cli_enable_rejects_env_managed_inputs(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart import guards
+
+    cfg = config_module.Config()
+    calls: list[str] = []
+
+    class FakeManager:
+        mechanism = "launchd"
+
+        def register(self, loaded_cfg: config_module.Config) -> None:
+            calls.append("register")
+
+        def unregister(self) -> None:
+            calls.append("unregister")
+
+        def is_registered(self) -> bool:
+            return False
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(
+        config_module,
+        "save_config",
+        lambda *args, **kwargs: calls.append("save"),
+        raising=False,
+    )
+    monkeypatch.setattr(autostart, "get_manager", lambda: FakeManager())
+    monkeypatch.setattr(guards, "active_env_managed_inputs", lambda loaded_cfg: ["GOOGLE_API_KEY"])
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["autostart", "enable"])
+
+    assert result.exit_code == 1
+    assert calls == []
+    assert "GOOGLE_API_KEY" in result.stdout
+
+
+def test_autostart_cli_enable_rejects_unsupported_platform(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+
+    cfg = config_module.Config()
+    calls: list[str] = []
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(
+        config_module,
+        "save_config",
+        lambda *args, **kwargs: calls.append("save"),
+        raising=False,
+    )
+    monkeypatch.setattr(autostart, "get_manager", lambda: None)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["autostart", "enable"])
+
+    assert result.exit_code == 1
+    assert calls == []
+    assert "不支持" in result.stdout
+
+
+def test_autostart_cli_status_reports_current_state(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart.base import AutostartStatus
+
+    cfg = config_module.Config()
+    cfg.autostart.enabled = True
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+    monkeypatch.setattr(
+        autostart,
+        "status",
+        lambda: AutostartStatus(True, True, "darwin", "launchd"),
+    )
+
+    result = runner.invoke(app, ["autostart", "status"])
+
+    assert result.exit_code == 0
+    assert "开机自启动" in result.stdout
+    assert "已注册" in result.stdout
+    assert "launchd" in result.stdout
+
+
+def test_config_show_displays_autostart_status(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart.base import AutostartStatus
+
+    cfg = config_module.Config()
+    cfg.autostart.enabled = True
+
+    class FakeRegistry:
+        default_provider = "openai"
+        available_providers = ["openai"]
+
+    monkeypatch.setattr(
+        config_module,
+        "load_config_with_diagnostics",
+        lambda: (cfg, config_module.ConfigDiagnostics()),
+        raising=False,
+    )
+    monkeypatch.setattr(cli_module, "_build_registry", lambda: FakeRegistry())
+    monkeypatch.setattr(
+        autostart,
+        "status",
+        lambda: AutostartStatus(True, True, "darwin", "launchd"),
+    )
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+
+    result = runner.invoke(app, ["config-show"])
+
+    assert result.exit_code == 0
+    assert "开机自启动" in result.stdout
+    assert "已注册" in result.stdout
+
+
 def test_run_api_server_prints_degraded_mode_panel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
