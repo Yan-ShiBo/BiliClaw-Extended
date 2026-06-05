@@ -2477,6 +2477,96 @@ class TestBackendAPI:
         assert response.status_code == 200
         assert elapsed < 0.15
 
+    def test_autostart_status_reports_intent_and_registration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.config import Config
+        from openbiliclaw.runtime import autostart
+        from openbiliclaw.runtime.autostart import guards
+        from openbiliclaw.runtime.autostart.base import AutostartStatus
+
+        cfg = Config()
+        cfg.autostart.enabled = True
+        monkeypatch.setattr("openbiliclaw.config.load_config", lambda: cfg)
+        monkeypatch.setattr(
+            autostart,
+            "status",
+            lambda: AutostartStatus(True, False, "darwin", "launchd"),
+        )
+        monkeypatch.setattr(guards, "active_env_managed_inputs", lambda loaded_cfg: [])
+        monkeypatch.setattr(guards, "autostart_shadowed", lambda intended: False)
+        monkeypatch.setattr(
+            "openbiliclaw.runtime.ollama_supervisor.ollama_required",
+            lambda loaded_cfg: False,
+        )
+        app = create_app()
+        app.state.auth_gate.is_trusted_local = lambda request: True
+        client = TestClient(app)
+
+        response = client.get("/api/autostart-status")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "supported": True,
+            "enabled": True,
+            "registered": False,
+            "can_manage": True,
+            "platform": "darwin",
+            "mechanism": "launchd",
+            "manage_ollama": True,
+            "ollama_required": False,
+            "reason": "none",
+            "detail": "开机自启动配置已开启，但系统自启动项缺失。",
+        }
+
+    def test_autostart_status_remote_is_readable_but_not_manageable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.runtime import autostart
+        from openbiliclaw.runtime.autostart import guards
+        from openbiliclaw.runtime.autostart.base import AutostartStatus
+
+        monkeypatch.setattr(
+            autostart,
+            "status",
+            lambda: AutostartStatus(True, False, "darwin", "launchd"),
+        )
+        monkeypatch.setattr(guards, "active_env_managed_inputs", lambda loaded_cfg: [])
+        monkeypatch.setattr(guards, "autostart_shadowed", lambda intended: False)
+        monkeypatch.setattr(
+            "openbiliclaw.runtime.ollama_supervisor.ollama_required",
+            lambda loaded_cfg: False,
+        )
+        app = create_app()
+        app.state.auth_gate.is_trusted_local = lambda request: False
+        client = TestClient(app)
+
+        response = client.get("/api/autostart-status", headers={"sec-fetch-site": "cross-site"})
+
+        assert response.status_code == 200
+        assert response.json()["can_manage"] is False
+
+    def test_config_response_includes_autostart(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.config import Config
+
+        cfg = Config()
+        cfg.autostart.enabled = True
+        cfg.autostart.manage_ollama = False
+        monkeypatch.setattr("openbiliclaw.config.load_config", lambda: cfg)
+        app = create_app()
+        client = TestClient(app)
+
+        response = client.get("/api/config")
+
+        assert response.status_code == 200
+        assert response.json()["autostart"] == {"enabled": True, "manage_ollama": False}
+
     def test_profile_summary_endpoint_returns_initialized_profile(self) -> None:
         from fastapi.testclient import TestClient
 

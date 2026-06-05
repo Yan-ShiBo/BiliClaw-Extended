@@ -23,6 +23,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from openbiliclaw.api.models import (
     ActivityFeedItemOut,
     ActivityFeedResponse,
+    AutostartConfigOut,
+    AutostartStatusOut,
     BackendUpdateStatusOut,
     BehaviorEventBatchIn,
     BilibiliConfigOut,
@@ -838,6 +840,7 @@ def create_app(
             method == "OPTIONS"
             or path == "/api/health"
             or path == "/api/runtime-status"
+            or path == "/api/autostart-status"
             or (path == "/api/config" and method in {"GET", "PUT"})
             or path.startswith("/api/auth")
             or path.startswith("/m")
@@ -5116,6 +5119,71 @@ def create_app(
                 await publish({"type": "extension_reload", "source": "dev"})
         return {"ok": True}
 
+    @app.get("/api/autostart-status", response_model=AutostartStatusOut)
+    def autostart_status(request: Request) -> AutostartStatusOut:
+        from openbiliclaw.config import load_config
+        from openbiliclaw.runtime import autostart
+        from openbiliclaw.runtime.autostart.guards import (
+            active_env_managed_inputs,
+            autostart_shadowed,
+        )
+        from openbiliclaw.runtime.ollama_supervisor import (
+            effective_ollama_endpoint,
+            is_loopback,
+            ollama_required,
+        )
+
+        cfg = load_config()
+        state = autostart.status()
+        managed_env = active_env_managed_inputs(cfg)
+        shadowed = autostart_shadowed(cfg.autostart.enabled)
+        trusted_local = _get_auth_gate().is_trusted_local(request)
+        requires_ollama = ollama_required(cfg)
+
+        reason = "none"
+        if not state.supported:
+            reason = state.reason
+        elif managed_env:
+            reason = "env_managed"
+        elif shadowed:
+            reason = "shadowed"
+        elif not trusted_local:
+            reason = "local_only"
+
+        detail = ""
+        if not state.supported:
+            detail = "当前运行环境不支持注册开机自启动。"
+        elif managed_env:
+            detail = "检测到环境变量配置，自启动登录会话可能缺失：" + ", ".join(managed_env)
+        elif shadowed:
+            detail = "config.local.toml 覆盖了 [autostart].enabled，config.toml 修改不会生效。"
+        elif not trusted_local:
+            detail = "仅本机可信请求可以修改开机自启动。"
+        elif cfg.autostart.enabled and not state.registered:
+            detail = "开机自启动配置已开启，但系统自启动项缺失。"
+        elif cfg.autostart.enabled:
+            detail = "开机自启动已开启。"
+        else:
+            detail = "尚未开启开机自启动。"
+
+        if requires_ollama:
+            endpoint = effective_ollama_endpoint(cfg)
+            if not is_loopback(endpoint):
+                detail = (detail + " " if detail else "") + "Ollama 端点是远端地址，需自行管理。"
+
+        return AutostartStatusOut(
+            supported=state.supported,
+            enabled=cfg.autostart.enabled,
+            registered=state.registered,
+            can_manage=trusted_local and state.supported and not managed_env and not shadowed,
+            platform=state.platform,
+            mechanism=state.mechanism,
+            manage_ollama=cfg.autostart.manage_ollama,
+            ollama_required=requires_ollama,
+            reason=reason,
+            detail=detail,
+        )
+
     # ── Configuration management endpoints ──────────────────────────
 
     def _config_to_response(
@@ -5278,6 +5346,10 @@ def create_app(
                 auto_update_check_interval_hours=cfg.scheduler.auto_update_check_interval_hours,
                 auto_update_allow_prerelease=cfg.scheduler.auto_update_allow_prerelease,
                 auto_update_allowed_remotes=list(cfg.scheduler.auto_update_allowed_remotes),
+            ),
+            autostart=AutostartConfigOut(
+                enabled=cfg.autostart.enabled,
+                manage_ollama=cfg.autostart.manage_ollama,
             ),
             storage=StorageConfigOut(db_path=cfg.storage.db_path),
             logging=LoggingConfigOut(
