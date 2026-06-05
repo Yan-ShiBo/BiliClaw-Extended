@@ -1,5 +1,6 @@
 """Tests for boot autostart runtime helpers."""
 
+import plistlib
 import sys
 from pathlib import Path
 
@@ -128,3 +129,43 @@ def test_docker_autostart_status_is_unsupported(
     assert status.supported is False
     assert status.mechanism == "none"
     assert status.reason == "unsupported_docker_runtime"
+
+
+def test_macos_launch_agent_register_writes_plist_and_creates_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openbiliclaw.runtime.autostart.macos import MacOSLaunchAgentManager
+
+    monkeypatch.setenv("OPENBILICLAW_PROJECT_ROOT", str(tmp_path))
+    cfg = Config()
+    cfg.logging.directory = str(tmp_path / "logs")
+    manager = MacOSLaunchAgentManager(home=tmp_path / "home")
+
+    manager.register(cfg)
+
+    plist_path = tmp_path / "home" / "Library" / "LaunchAgents" / "com.openbiliclaw.daemon.plist"
+    payload = plistlib.loads(plist_path.read_bytes())
+    assert manager.mechanism == "launchd"
+    assert manager.is_registered() is True
+    assert payload["RunAtLoad"] is True
+    assert payload["KeepAlive"] is False
+    assert payload["ProgramArguments"] == [sys.executable, "-m", "openbiliclaw.cli", "start"]
+    assert payload["WorkingDirectory"] == str(tmp_path)
+    assert payload["EnvironmentVariables"]["OPENBILICLAW_PROJECT_ROOT"] == str(tmp_path)
+    assert (tmp_path / "logs").is_dir()
+
+
+def test_macos_launch_agent_unregister_is_idempotent(tmp_path: Path) -> None:
+    from openbiliclaw.runtime.autostart.macos import MacOSLaunchAgentManager
+
+    manager = MacOSLaunchAgentManager(home=tmp_path)
+
+    manager.unregister()
+    assert manager.is_registered() is False
+
+    manager.register(Config())
+    assert manager.is_registered() is True
+    manager.unregister()
+    manager.unregister()
+
+    assert manager.is_registered() is False
