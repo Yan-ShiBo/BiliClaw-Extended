@@ -26,11 +26,18 @@ def _quote_windows_arg(value: Path | str) -> str:
     return f'"{value}"'
 
 
-def _script_from_run_value(value: str) -> Path | None:
+def _paths_from_run_value(value: str) -> tuple[Path, Path] | None:
     matches = re.findall(r'"([^"]+)"', value)
     if len(matches) >= 2:
-        return Path(matches[1])
+        return Path(matches[0]), Path(matches[1])
     return None
+
+
+def _script_from_run_value(value: str) -> Path | None:
+    paths = _paths_from_run_value(value)
+    if paths is None:
+        return None
+    return paths[1]
 
 
 class WindowsRunManager:
@@ -106,5 +113,8 @@ class WindowsRunManager:
         value = self._run_value()
         if not value:
             return False
-        script_path = _script_from_run_value(value)
-        return script_path is not None and script_path.exists()
+        paths = _paths_from_run_value(value)
+        if paths is None:
+            return False
+        executable_path, script_path = paths
+        return executable_path.exists() and script_path.exists()

@@ -725,6 +725,35 @@ def test_start_self_heals_missing_autostart_registration(
     assert register_calls == [cfg]
 
 
+def test_start_self_heals_orphan_autostart_registration(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    from openbiliclaw.runtime import autostart
+    from openbiliclaw.runtime.autostart.base import AutostartStatus
+
+    cfg = config_module.Config()
+    cfg.autostart.enabled = False
+    unregister_calls: list[str] = []
+
+    monkeypatch.setattr(config_module, "load_config", lambda: cfg, raising=False)
+    monkeypatch.setattr(cli_module, "_ensure_runtime_database_healthy", lambda: None)
+    monkeypatch.setattr(cli_module, "_maybe_create_runtime_database_backup", lambda: None)
+    monkeypatch.setattr(cli_module, "_run_api_server", lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(cli_module, "_initialize_logging", lambda log_level_override=None: None)
+    monkeypatch.setattr(cli_module, "ollama_required", lambda loaded_cfg: False, raising=False)
+    monkeypatch.setattr(
+        autostart,
+        "status",
+        lambda: AutostartStatus(True, True, "darwin", "launchd"),
+    )
+    monkeypatch.setattr(autostart, "unregister", lambda: unregister_calls.append("unregister"))
+
+    result = runner.invoke(app, ["start"])
+
+    assert result.exit_code == 0
+    assert unregister_calls == ["unregister"]
+
+
 def test_autostart_cli_enable_registers_after_authoritative_config_write(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:

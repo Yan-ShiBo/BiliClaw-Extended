@@ -235,6 +235,23 @@ def test_windows_run_register_writes_registry_and_pyw(
     assert manager.is_registered() is False
 
 
+def test_windows_run_is_registered_requires_pythonw_and_script(tmp_path: Path) -> None:
+    from openbiliclaw.runtime.autostart.windows import WindowsRunManager
+
+    fake_winreg = _FakeWinreg()
+    manager = WindowsRunManager(winreg_module=fake_winreg)
+    pythonw = tmp_path / "pythonw.exe"
+    script = tmp_path / "openbiliclaw-autostart.pyw"
+    script.write_text("", encoding="utf-8")
+    fake_winreg.values["OpenBiliClaw"] = f'"{pythonw}" "{script}"'
+
+    assert manager.is_registered() is False
+
+    pythonw.write_text("", encoding="utf-8")
+
+    assert manager.is_registered() is True
+
+
 def test_windows_run_unregister_cleans_registry_and_pyw(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

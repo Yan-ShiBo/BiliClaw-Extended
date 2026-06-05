@@ -264,15 +264,25 @@ def _preflight_loopback_ollama(cfg: Any) -> None:
 
 
 def _self_heal_autostart_registration(cfg: Any) -> None:
-    if not cfg.autostart.enabled:
-        return
-
     from openbiliclaw.runtime import autostart
-    from openbiliclaw.runtime.autostart.guards import active_env_managed_inputs
 
     state = autostart.status()
-    if not state.supported or state.registered:
+    if not state.supported:
         return
+
+    if not cfg.autostart.enabled:
+        if state.registered:
+            try:
+                autostart.unregister()
+            except Exception as exc:
+                console.print(f"[yellow]开机自启动残留项移除失败：{exc}[/yellow]")
+        return
+
+    if state.registered:
+        return
+
+    from openbiliclaw.runtime.autostart.guards import active_env_managed_inputs
+
     managed = active_env_managed_inputs(cfg)
     if managed:
         console.print(
