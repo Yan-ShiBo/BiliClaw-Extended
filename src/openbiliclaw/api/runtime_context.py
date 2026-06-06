@@ -297,7 +297,10 @@ class RuntimeContext:
         so no endpoint handler can interleave during the attribute-
         assignment sweep.
         """
-        cancelled = await self.task_registry.cancel_all()
+        # Keep a running guided-init task alive across rebuild — config writes
+        # are gated during init, but this is the belt-and-suspenders exemption
+        # so an init in flight is never silently cancelled (gui-init spec §5c).
+        cancelled = await self.task_registry.cancel_all(exclude=frozenset({"guided_init"}))
         if cancelled:
             logger.info(
                 "Hot-reload: cancelled %d background task(s) before rebuild",
