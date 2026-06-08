@@ -13,9 +13,39 @@ import os
 import platform
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all
+
 block_cipher = None
 project_root = Path(SPECPATH).parent
 bundle_version = os.environ.get("OPENBILICLAW_BUNDLE_VERSION", "0.2.0")
+
+# --- Optional X (Twitter) discovery extra (openbiliclaw[x]) ---
+# packaging/build.py installs the `x` extra and sets OPENBILICLAW_BUNDLE_X=1 when
+# the desktop bundle should ship X discovery (the default; spec §8 = always
+# bundle). Because XClient lazy-imports `twitter_cli` / `curl_cffi` only on the
+# enabled path, PyInstaller's static analysis never sees them — so we explicitly
+# collect_all() both packages here. collect_all() pulls submodules + data + the
+# per-OS·arch native binaries (curl_cffi's compiled `_wrapper` extension and any
+# bundled libcurl), which is exactly what's missing from a plain analysis. When
+# the flag is off (or the extra failed to install) we collect nothing and the
+# bundle is X-free, identical to before.
+_x_datas = []
+_x_binaries = []
+_x_hiddenimports = []
+if os.environ.get("OPENBILICLAW_BUNDLE_X", "") == "1":
+    for _x_pkg in ("twitter_cli", "curl_cffi"):
+        try:
+            _d, _b, _h = collect_all(_x_pkg)
+        except Exception as exc:  # noqa: BLE001 — never let an optional extra break the build
+            print(f"[spec] X extra: could not collect {_x_pkg}: {exc}")
+            continue
+        _x_datas += _d
+        _x_binaries += _b
+        _x_hiddenimports += _h
+    print(
+        f"[spec] X extra bundled: +{len(_x_binaries)} binaries, "
+        f"+{len(_x_datas)} datas, +{len(_x_hiddenimports)} hiddenimports"
+    )
 
 # System-tray desktop mode (packaging/entry.py): the app runs as a tray icon
 # (Windows system tray / macOS menu bar) with no console window. Bundle pystray
@@ -43,7 +73,7 @@ else:
 a = Analysis(
     [str(project_root / "packaging" / "entry.py")],
     pathex=[str(project_root / "src")],
-    binaries=[],
+    binaries=[] + _x_binaries,
     datas=[
         (str(project_root / "config.example.toml"), "."),
         # Web UI + first-run setup wizard. app.py serves these via StaticFiles
@@ -51,7 +81,8 @@ a = Analysis(
         # packaged app. Dest mirrors the import path so __file__-relative
         # resolution (web_dir = .../openbiliclaw/web) works when frozen.
         (str(project_root / "src" / "openbiliclaw" / "web"), "openbiliclaw/web"),
-    ],
+    ]
+    + _x_datas,
     hiddenimports=[
         # --- FastAPI / Uvicorn ---
         "uvicorn",
@@ -129,7 +160,8 @@ a = Analysis(
         "openbiliclaw.bilibili.api",
         "openbiliclaw.bilibili.auth",
     ]
-    + _tray_hiddenimports,
+    + _tray_hiddenimports
+    + _x_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

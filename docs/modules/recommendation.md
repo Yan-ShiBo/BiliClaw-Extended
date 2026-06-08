@@ -53,6 +53,7 @@
 | v0.3.102 空池热路径短路 | ✅ | `/api/recommendations/reshuffle` 与 `/api/recommendations/append` 在 `pool_available_count=0` 时立即返回空数组，不再读取画像或调用推荐引擎，并只按 30 秒 debounce 触发一次自动补货；`RecommendationEngine.serve()` 在可用池为 0、或候选被 `excluded_bvids` / 最近已看过滤到 0 后直接返回，跳过 curator、MMR embedding 和推荐历史写入。 |
 | v0.3.x available-target pool refill | ✅ | `count_pool_available_candidates_by_source()` 按 `count_pool_candidates()` 同口径统计各平台族的真实可换数量；`count_pool_raw_material_by_source()` 统计 fresh / 非 dislike / 未推荐 / 未看过的 raw material（含 `discovery_candidates` 待评估素材）用于 raw ceiling。补池不再因为 raw/linkable B 站库存达到 300 而停在前端 246 可换，raw trim 也不会在可换未达标时把库存压回 `pool_target_count`。 |
 | v0.3.x 统一 discovery 待评估池 | ✅ | 正常来源 ingest 不再直接写 `content_cache` 等推荐层分类；B 站 / XHS / 抖音 / YouTube raw candidates 先进入 `discovery_candidates`，由 discovery pipeline 统一 batch 评估并 admission 到 `content_cache`。`classify_pool_backlog()` 只作为 legacy / recovery 路径处理已在 `content_cache` 中但缺分类的旧行。 |
+| X (Twitter) 文字卡 + body_text | ✅ | X 推文 / thread 以 `content_type ∈ {tweet, thread}` + `body_text` 进入推荐池；前端在 `content_type` 为文字态或 `cover_url` 为空时渲染**无封面文字卡**（显示正文而非断图），franchise / diversity / MMR 对空 `cover_url` / `duration=0` 容错；推荐解释 / 评估 builder 的 user_prompt 带上 `body_text`，system prompt 仍保持字节静态（prompt-cache 约定），新 builder 已纳入不变量测试 |
 | v0.3.91 新兴趣放大保护 | ✅ | 新确认兴趣会生成 amplification key，`PoolCurator` 用最近 24h 推荐历史计算滚动占比，超过 25% 的方向会被降权；最终批量选择还会硬限制同一新方向最多 `max(1, floor(limit * 0.25))` 条，避免刚确认的兴趣短期刷屏 |
 | v0.3.91 推荐读取索引 | ✅ | `recommendations(created_at, id)` 与 `content_cache(content_id)` 在数据库初始化时自动创建索引，`/api/recommendations` 和 activity feed 的推荐历史读取不再因 `c.bvid = r.bvid OR c.content_id = r.bvid` 退化为双表扫描。 |
 | v0.3.74 recommendation/delight JSON 容错统一 | ✅ | `RecommendationEngine` 的内容分类、单条表达和批量表达解析，以及 `delight.precompute_delight_scores()` 的 batch scorer 都改用 `llm.json_utils`。MiMo / OpenAI-compatible provider 返回 object wrapper、fenced JSON、JSONL、schema echo 或 malformed `{ [ ... ] }` 时会优先提取满足字段 predicate 的真实结果 |
@@ -223,6 +224,12 @@ Recommendation(
 - `content_id`
 - `content_url`
 - `source_platform`
+- `body_text` — 纯文字内容主体（X 推文 / thread 全文或 `note_tweet` 长文）；视频 / 图文源留空
+- `content_type` — 内容形态：`video`（默认）/ `note`（小红书）/ `tweet` / `thread`（X）
+
+### 文字卡渲染（X / 无封面内容）
+
+X (Twitter) 是首个以文字为主的来源。推荐卡前端（移动 Web `/m`、桌面 Web `/web`、扩展 side panel）在 `content_type ∈ {tweet, thread}`（或 `cover_url` 为空）时渲染**无封面文字卡**：显示 `body_text` / `title` 主体，而不是断图缩略图。`RecommendationEngine` 的 franchise / diversity / MMR 逻辑对文字内容做了容错（`cover_url` 空、`duration` 0 不报错）。LLM 侧，推荐解释 / 评估 builder 的 **user_prompt** 会带上 `body_text`（纯文字推文标题信息量低，正文才是判断依据）；严守 prompt-cache 约定——system prompt 保持字节静态，`body_text` 等 per-call 变量只进 user message，`json.dumps(..., ensure_ascii=False, indent=2, sort_keys=True)` 确定性序列化，新 builder 已纳入 `test_prompt_builder_system_messages_are_call_invariant`。
 
 ### Recommendation Click API
 

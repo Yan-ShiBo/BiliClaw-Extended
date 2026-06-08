@@ -45,6 +45,53 @@ def clean() -> None:
             shutil.rmtree(d)
 
 
+def build_x_extra_install_command(*, pip_available: bool | None = None) -> list[str]:
+    """Return the command that installs the ``openbiliclaw[x]`` extra.
+
+    Desktop bundles ship X (Twitter) discovery by default (spec §8 = always
+    bundle), so ``twitter-cli`` + its ``curl_cffi`` native binaries must be
+    present in the build interpreter for PyInstaller to collect them. We install
+    the project's own ``x`` extra (``twitter-cli>=0.8.5``, pinned in
+    ``pyproject.toml``) rather than naming the dependency here, so there is a
+    single source of truth for the pin.
+    """
+    resolved_pip_available = (
+        pip_available if pip_available is not None else importlib.util.find_spec("pip") is not None
+    )
+    target = f"{PROJECT_ROOT}[x]"
+    if resolved_pip_available:
+        return [sys.executable, "-m", "pip", "install", target]
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "pip", "install", target]
+    return [sys.executable, "-m", "pip", "install", target]
+
+
+def ensure_x_extra() -> bool:
+    """Ensure ``twitter_cli`` (and its ``curl_cffi``) are importable for bundling.
+
+    Returns ``True`` once the X discovery dependency is available in the build
+    interpreter — either because it was already installed or because we just
+    installed the ``openbiliclaw[x]`` extra. The PyInstaller spec only collects
+    ``twitter_cli`` / ``curl_cffi`` when ``OPENBILICLAW_BUNDLE_X=1`` (set by
+    :func:`build`), so a failed install degrades to an X-free bundle instead of
+    breaking the whole build.
+    """
+    if importlib.util.find_spec("twitter_cli") is not None:
+        return True
+    install_cmd = build_x_extra_install_command()
+    print("[build] Installing openbiliclaw[x] (twitter-cli) for desktop bundle ...")
+    try:
+        subprocess.check_call(install_cmd)
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"[build] WARNING: could not install the X extra ({exc}); "
+            "the bundle will ship without X (Twitter) discovery"
+        )
+        return False
+    return importlib.util.find_spec("twitter_cli") is not None
+
+
 def read_project_version() -> str:
     """Read the project version from pyproject.toml."""
     data = tomllib.loads(PYPROJECT_FILE.read_text(encoding="utf-8"))
@@ -309,10 +356,20 @@ def build(
     archive_version: str | None = None,
     bundle_ollama: bool = True,
     ollama_bin: str | None = None,
+    bundle_x: bool = True,
 ) -> None:
     """Run PyInstaller."""
     ensure_pyinstaller()
     bundle_version = make_bundle_version(archive_version or read_project_version())
+
+    # X (Twitter) discovery is bundled by default (spec §8 = always-bundle).
+    # Install the optional extra so PyInstaller can statically see twitter_cli,
+    # then tell the spec (via OPENBILICLAW_BUNDLE_X) to collect twitter_cli +
+    # curl_cffi — including curl_cffi's per-OS·arch native binaries (libcurl /
+    # the _wrapper extension) which the lazy `import twitter_cli` path would
+    # otherwise hide from the analyzer.
+    bundle_x_resolved = bundle_x and ensure_x_extra()
+
     cmd = [
         sys.executable,
         "-m",
@@ -327,6 +384,7 @@ def build(
     print(f"[build] Running: {' '.join(cmd)}")
     env = os.environ.copy()
     env["OPENBILICLAW_BUNDLE_VERSION"] = bundle_version
+    env["OPENBILICLAW_BUNDLE_X"] = "1" if bundle_x_resolved else "0"
     subprocess.check_call(cmd, cwd=str(PROJECT_ROOT), env=env)
 
     if platform.system() == "Darwin":
@@ -416,6 +474,11 @@ def main() -> None:
         "--ollama-bin",
         help="Path to the ollama executable to bundle (default: $OPENBILICLAW_OLLAMA_BIN or PATH)",
     )
+    parser.add_argument(
+        "--no-bundle-x",
+        action="store_true",
+        help="Do not bundle the X (Twitter) discovery extra (twitter-cli + curl_cffi)",
+    )
     args = parser.parse_args()
 
     if args.clean:
@@ -424,6 +487,7 @@ def main() -> None:
         archive_version=args.archive_version,
         bundle_ollama=not args.no_bundle_ollama,
         ollama_bin=args.ollama_bin,
+        bundle_x=not args.no_bundle_x,
     )
 
 

@@ -9,11 +9,13 @@
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 后台刷新控制 | ✅ | `ContinuousRefreshController` 按 scheduler 配置补充候选池，并通过 source policy 计算各平台有效配比；注入 `DiscoveryCandidatePipeline` 后，B 站主补货先生产 raw candidates，再进入统一待评估池。 |
-| 统一候选待评估池调度 | ✅ | B 站、XHS、抖音、YouTube discovery raw candidates 先写入 `discovery_candidates`，runtime 调 `drain_discovery_candidates_once()` 混源 batch 评估并 admission 到 `content_cache`；`DiscoveryCandidatePipeline` 自带共享 drain lock，producer 直接触发也不会并发 admission；正式可换池达到 `pool_target_count` 时不会继续 discovery / drain。 |
+| 统一候选待评估池调度 | ✅ | B 站、XHS、抖音、YouTube、X discovery raw candidates 先写入 `discovery_candidates`，runtime 调 `drain_discovery_candidates_once()` 混源 batch 评估并 admission 到 `content_cache`；`DiscoveryCandidatePipeline` 自带共享 drain lock，producer 直接触发也不会并发 admission；正式可换池达到 `pool_target_count` 时不会继续 discovery / drain。 |
 | 候选池文案预计算状态同步 | ✅ | 独立 `_loop_pool_precompute()` 将 fresh 候选补齐 `pool_expression` / `pool_topic_label` 后，会同步更新 `last_replenished_count` 并推送 `refresh.pool_updated`；前端消费该事件时只刷新池子状态，不全量替换推荐列表，避免覆盖已 append 的历史内容。 |
 | 候选池真实可换计数 | ✅ | `pool_available_count` 现在只表示后端当前可立即 `serve()` 的候选，并按默认每 `topic_group` 最多 3 条的候选窗口计数；runtime status / runtime stream 另带 `pool_raw_count`、`pool_pending_count`、`pool_pending_eval_count`、`pool_evaluated_pending_count` 区分素材库存、待评估和已评估待入池内容。 |
 | embedding 后台预热 | ✅ | refresh 完成前只保证候选入池与文案可用；`prewarm_supergroup_embeddings()` / `prewarm_pool_mmr_embeddings()` 作为后台 task 运行，慢本地 embedding 后端不会占住 refresh lock 或让界面长时间停在“正在补货”。 |
 | YouTube 后台 discovery producer | ✅ | `YoutubeDiscoveryProducer` 独立运行 `yt_search` / `yt_trending` / `yt_channel`，只在 YouTube 平台族低于 quota 时由 `_loop_youtube_producer()` tick，按每日 ledger 和 `min_interval_minutes` 控制执行。 |
+| X 后台 discovery producer | ✅ | `XDiscoveryProducer.produce_if_due()` 在 X 平台族低于 quota 且源健康就绪时，由独立 loop tick 触发 `search` / `feed`（For-You）/ `creator`（账号订阅）三个策略；按 `daily_*_budget` / `min_interval_minutes` / `request_interval_seconds` 节流，For-You 压到很低的每日频次并在连续失败后自动暂停。只 enqueue raw candidates 进 `discovery_candidates`，不写 `content_cache`、不调评估器。`enabled=false` 时是 no-op，不 import `twitter_cli`。 |
+| X 源健康状态机 | ✅ | `storage/x_health.py` 的 `XSourceHealthStore` 持久化 `ok` / `missing_cookie` / `expired_cookie`(401) / `blocked`(403) / `rate_limited`(429) 五态；按 code 分别退避，429 带 `cooldown_until` 自愈，401/403/missing 须等用户重新登录 x.com 才恢复；连续 For-You 失败触发 `feed_allowed()=false` 自动暂停。状态经 `GET /api/sources/x/status` 暴露到插件设置页。 |
 | 运行时频率配置 | ✅ | `refresh_check_interval_seconds`、行为触发阈值、trending / explore 间隔、单轮发现上限、主动推送间隔和 speculator idle tick 都从 `[scheduler]` 读取，配置热重载后重建 runtime 生效。 |
 | 浏览器 presence gate | ✅ | `background_llm_work_allowed()` 结合 `scheduler.enabled` 与 `pause_on_extension_disconnect` 控制 daemon-owned 后台 LLM / embedding 工作。 |
 | Runtime event stream | ✅ | `/api/runtime-stream` 向扩展推送状态、Cookie sync 请求、配置重载和 presence 事件；`RuntimeEventHub.publish()` 会返回是否至少有一个订阅者接收，供一次性事件判断是否真正投递。 |
@@ -204,6 +206,24 @@ result = await producer.produce_if_due(limit=20)
 - `budget_exhausted`：当天 `yt_search` / `yt_trending` / `yt_channel` 的执行 ledger 已耗尽。
 - `disabled` / `no_profile` / `error`：分别表示配置关闭、画像不可用或所有策略失败。
 
+### XDiscoveryProducer
+
+```python
+from openbiliclaw.runtime.x_producer import XDiscoveryProducer
+
+result = await producer.produce_if_due(limit=20)
+```
+
+X (Twitter) 的 steady-state discovery 走服务端 cookie 重放（对标抖音 direct，但用 `twitter-cli` 取代 XBogus 签名）。`produce_if_due()` 在 `[sources.twitter].enabled=true`、X 平台族低于 quota、源健康就绪、距上次执行已过 `min_interval_minutes` 时，依次跑三个策略：
+
+- `search`：从 Soul 画像生成关键词，调 `XClient.search()`。
+- `feed`：拉推荐流 For-You（`XClient.for_you()`）。这是最高曝光、最易被注意的行为，被压到很低的每日频次，并在连续失败后由 `XSourceHealthStore.feed_allowed()` 自动暂停。
+- `creator`：对 `x_creator_subscriptions` 里到期的订阅逐个调 `XClient.user_tweets(handle)`，按 `creator_refresh_hours` 控制刷新节奏。
+
+每条推文经 `discovery.x_normalize.normalize_tweet()` 映射为 `DiscoveredContent`（`content_type ∈ {tweet, thread}`、`body_text` 带全文），enqueue 进 `discovery_candidates` 待评估池——producer **只 fetch，不写 `content_cache`、不调评估器**，由共享混源 evaluator 完成 admission。每个策略 run 都把成功 / 失败结果回写 `XSourceHealthStore`（成功 `record_success()`，失败 `record_error(exc)` 按 401/403/429 落对应健康态）。预算护栏：`daily_search_budget` / `daily_feed_budget` / `daily_creator_budget`（`0` = 不设上限）+ 两次请求间 `request_interval_seconds` 间隔。`enabled=false` 时整条路径 no-op，绝不 import `twitter_cli` / `curl_cffi`。
+
+X 客户端 `XClient`（`sources/x_client.py`）封装可选 extra `openbiliclaw[x]` 的 `twitter-cli`，全程只读，方法用 `asyncio.to_thread` 包成 async；底层 `TwitterAPIError` / `AuthenticationError` 映射为 `XMissingCookieError` / `XAuthError`(401) / `XBlockedError`(403) / `XRateLimitError`(429)，供源健康状态机分流退避。
+
 ### Source Bootstrap Task Results
 
 XHS / 抖音 / YouTube 的插件任务桥保留两层去重：
@@ -266,4 +286,4 @@ XHS / 抖音 / YouTube 的插件任务桥保留两层去重：
 
 刷新调度不使用 `scheduler.discovery_cron`。该字段仅保留为旧配置兼容；实际触发由 `refresh_check_interval_seconds` 轮询、候选池缺口、`signal_event_threshold`、`trending_refresh_hours`、`explore_refresh_hours` 和 `discovery_limit` 共同决定。
 
-`ContinuousRefreshController.run_forever()` 当前并行启动 refresh、pool precompute、soul pipeline、XHS producer、Douyin producer、YouTube producer 和 proactive push 七条 loop。共享的 `background_llm_work_allowed()` gate 覆盖所有 daemon-owned LLM / embedding 工作；YouTube 与 XHS / Douyin 一样会在 gate 关闭时跳过 tick。不同点是 YouTube 不通过扩展任务队列做 steady-state discovery，而是在后端直接调用 YouTube strategies；`yt_tasks` 只保留给 bootstrap profile 导入。三类外站 producer 和 B 站主 refresh 都会优先把 raw candidates 交给同一个 `DiscoveryCandidatePipeline`，后续混源 batch 评估和入池逻辑一致，并由 pipeline drain lock 串行化。
+`ContinuousRefreshController.run_forever()` 当前并行启动 refresh、pool precompute、soul pipeline、XHS producer、Douyin producer、YouTube producer、X producer 和 proactive push 八条 loop。共享的 `background_llm_work_allowed()` gate 覆盖所有 daemon-owned LLM / embedding 工作；YouTube / X 与 XHS / Douyin 一样会在 gate 关闭时跳过 tick。不同点是 YouTube 和 X 都不通过扩展任务队列做 steady-state discovery，而是在后端直接调用各自 strategies（X 经 `XClient` 服务端 cookie 重放）；`yt_tasks` 只保留给 bootstrap profile 导入，X 没有 init 期 bootstrap 任务。四类外站 producer 和 B 站主 refresh 都会优先把 raw candidates 交给同一个 `DiscoveryCandidatePipeline`，后续混源 batch 评估和入池逻辑一致，并由 pipeline drain lock 串行化。
