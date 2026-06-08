@@ -539,6 +539,35 @@ class RuntimeContext:
         xiaohongshu_adapter = XiaohongshuAdapter()
         new_discovery_engine.register_adapter(xiaohongshu_adapter)
 
+        # Register X (Twitter) adapter — server-side cookie replay, like
+        # Bilibili / Douyin-direct (a real fetch(), NOT an extension stub).
+        # Gated on [sources.twitter].enabled. The branch is the ONLY place
+        # twitter_cli / x_client are imported, so non-X installs (where the
+        # optional ``openbiliclaw[x]`` extra is absent) never touch them.
+        twitter_cfg = getattr(getattr(new_config, "sources", None), "twitter", None)
+        if twitter_cfg is not None and bool(getattr(twitter_cfg, "enabled", False)):
+            from openbiliclaw.api.app import resolve_x_cookie
+            from openbiliclaw.discovery.strategies.x import (
+                XCreatorStrategy,
+                XForYouStrategy,
+                XSearchStrategy,
+            )
+            from openbiliclaw.sources.twitter_adapter import XAdapter
+            from openbiliclaw.sources.x_client import XClient
+
+            x_cookie = resolve_x_cookie(
+                data_dir=new_config.data_path,
+                cookie_env=str(getattr(twitter_cfg, "cookie_env", "OPENBILICLAW_X_COOKIE")),
+            )
+            x_client = XClient(cookie=x_cookie)
+            twitter_adapter = XAdapter(
+                client=x_client,
+                search=XSearchStrategy(client=x_client, llm_service=new_llm_service),
+                feed=XForYouStrategy(client=x_client),
+                creator=XCreatorStrategy(client=x_client),
+            )
+            new_discovery_engine.register_adapter(twitter_adapter)
+
         # 8. Continuous refresh controller
         from openbiliclaw.discovery.candidate_pipeline import DiscoveryCandidatePipeline
 

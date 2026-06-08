@@ -295,6 +295,21 @@ class YoutubeSourceConfig:
 
 
 @dataclass
+class TwitterSourceConfig:
+    """X (Twitter) direct-cookie discovery configuration.
+
+    Minimal v1: just the enable switch and the cookie env var so the runtime
+    can gate adapter registration on ``[sources.twitter].enabled``. Steady-
+    state discovery is server-side cookie replay (search / For-You / creator),
+    mirroring the Douyin-direct path. Budgets / scheduling / source-share
+    knobs are added by the X producer task; keep this minimal until then.
+    """
+
+    enabled: bool = False
+    cookie_env: str = "OPENBILICLAW_X_COOKIE"
+
+
+@dataclass
 class BilibiliSourceConfig:
     """Bilibili discovery source switch."""
 
@@ -322,6 +337,7 @@ class SourcesConfig:
     xiaohongshu: XiaohongshuSourceConfig = field(default_factory=XiaohongshuSourceConfig)
     douyin: DouyinSourceConfig = field(default_factory=DouyinSourceConfig)
     youtube: YoutubeSourceConfig = field(default_factory=YoutubeSourceConfig)
+    twitter: TwitterSourceConfig = field(default_factory=TwitterSourceConfig)
 
 
 @dataclass
@@ -621,6 +637,7 @@ def _build_config(raw: dict[str, Any]) -> Config:
     xhs_raw = sources_raw.get("xiaohongshu", {})
     douyin_raw = sources_raw.get("douyin", {})
     youtube_raw = sources_raw.get("youtube", {})
+    twitter_raw = sources_raw.get("twitter", {})
     sources = SourcesConfig(
         browser_cdp_url=sources_browser_raw.get("cdp_url", ""),
         browser_headed=sources_browser_raw.get("headed", False),
@@ -649,6 +666,10 @@ def _build_config(raw: dict[str, Any]) -> Config:
             daily_channel_budget=int(youtube_raw.get("daily_channel_budget", 0)),
             request_interval_seconds=int(youtube_raw.get("request_interval_seconds", 2)),
             min_interval_minutes=max(0, int(youtube_raw.get("min_interval_minutes", 60))),
+        ),
+        twitter=TwitterSourceConfig(
+            enabled=bool(twitter_raw.get("enabled", False)),
+            cookie_env=str(twitter_raw.get("cookie_env", "OPENBILICLAW_X_COOKIE")),
         ),
     )
 
@@ -1640,6 +1661,10 @@ def _render_config_toml(
             f"daily_channel_budget = {config.sources.youtube.daily_channel_budget}",
             f"request_interval_seconds = {config.sources.youtube.request_interval_seconds}",
             f"min_interval_minutes = {config.sources.youtube.min_interval_minutes}",
+            "",
+            "[sources.twitter]",
+            f"enabled = {_toml_bool(config.sources.twitter.enabled)}",
+            f"cookie_env = {_toml_string(config.sources.twitter.cookie_env)}",
             "",
             "[scheduler]",
             f"enabled = {_toml_bool(config.scheduler.enabled)}",
