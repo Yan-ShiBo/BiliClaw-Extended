@@ -414,6 +414,29 @@ def bundle_ollama_binary(
     return written
 
 
+def repair_macos_ad_hoc_signature(app_bundle: Path) -> None:
+    """Re-seal a macOS app bundle with an ad-hoc signature after local mutations.
+
+    PyInstaller may leave a macOS bundle ad-hoc signed. The build script then adds
+    resources such as bundled Ollama, which invalidates the sealed resources and
+    makes Gatekeeper report the app as damaged. Without a Developer ID account we
+    still cannot notarize, but a final ad-hoc signature keeps the bundle internally
+    consistent for users who explicitly bypass Gatekeeper.
+    """
+    if not app_bundle.exists():
+        raise FileNotFoundError(f"macOS app bundle not found: {app_bundle}")
+
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        raise RuntimeError("codesign is required to finalize macOS app bundles")
+
+    print("[build] Re-sealing macOS .app with an ad-hoc signature ...")
+    subprocess.check_call([codesign, "--force", "--deep", "--sign", "-", str(app_bundle)])
+    subprocess.check_call(
+        [codesign, "--verify", "--deep", "--strict", "--verbose=2", str(app_bundle)]
+    )
+
+
 def build(
     *,
     archive_version: str | None = None,
@@ -484,6 +507,11 @@ def build(
                     "[build] WARNING: no ollama binary found (set OPENBILICLAW_OLLAMA_BIN "
                     "or --ollama-bin); packaged app will fall back to a user-installed ollama"
                 )
+
+        if platform.system() == "Darwin":
+            app_bundle = DIST_DIR / "OpenBiliClaw.app"
+            if app_bundle.exists():
+                repair_macos_ad_hoc_signature(app_bundle)
 
         print()
         print("=" * 60)

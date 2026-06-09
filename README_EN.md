@@ -188,7 +188,7 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.109 / extension v0.3.72: settings-page parity & unified source status (2026-06-09)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.110 / extension v0.3.72: macOS installer ad-hoc signature repair (2026-06-09)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
 - **New X (Twitter) source** — the sixth source; server-side cookie-replay discovery (search / For-You / followed authors), with the x.com cookie auto-synced once you log in.
 - **X history backfill** — `openbiliclaw init` reads your own X likes / bookmarks into the profile, same as Bilibili favorites.
@@ -274,7 +274,14 @@ Grab the installer for your OS from [Releases](https://github.com/whiteguo233/Op
 It bundles local Ollama + `bge-m3` embedding (works out of the box) and lives in the **macOS menu bar / Windows system tray**; right-click for "Open Web UI / View runtime logs / Quit". Data uses the same directory as the AI / script installers: `~/OpenBiliClaw` (macOS / Linux) / `%USERPROFILE%\OpenBiliClaw` (Windows), and survives upgrades and uninstalls. Data from older packaged builds under `~/Library/Application Support/OpenBiliClaw` / `%LOCALAPPDATA%\OpenBiliClaw` is copied back on first launch without overwriting existing files.
 
 > ⚠️ **First launch needs a system-prompt bypass (the app isn't signed / notarized yet)**:
-> - **macOS**: right-click the icon → "Open" → click "Open" again in the dialog; or allow it under "System Settings → Privacy & Security".
+> - **macOS**: drag it into Applications first, then right-click the icon → "Open" → click "Open" again in the dialog; or allow it under "System Settings → Privacy & Security". If macOS still says the app is damaged, confirm the package came from this project's Releases and run:
+>
+>   ```bash
+>   APP="/Applications/OpenBiliClaw.app"
+>   xattr -dr com.apple.quarantine "$APP"
+>   codesign --force --deep --sign - "$APP"
+>   open "$APP"
+>   ```
 > - **Windows**: on the SmartScreen prompt, click "More info → Run anyway".
 >
 > This is an **experimental pre-release**: unsigned, rolling with the backend version, best for trying it fast without the command line. To hack on the source, use Option B.
@@ -532,7 +539,7 @@ The whole loop stays local — OpenClaw just calls the CLI bridge; your profile 
 - 💬 **Warm Recommendations** — Not "because you watched similar videos", but friend-like explanations of why you'd enjoy something
 - 🔄 **Continuous Learning** — Socratic dialogue + behavioral analysis + instant feedback, understands you better over time
 - 🧩 **Browser Extension (Chrome / Edge / Brave / Arc and more)** — Side panel for recommendations, cross-site behavior collection (Bilibili + Xiaohongshu + Douyin + YouTube + X), chat, and cognition update cards — install and go
-- 🚀 **Guided init in the UI** — No terminal required: the extension's "Recommend" tab shows a prerequisite checklist (Bilibili login / LLM / embedding) and a "Start init" button that builds your profile and first content pool right in the panel (the CLI `openbiliclaw init` remains an equivalent entry point)
+- 🚀 **Guided init in the UI** — No terminal required: the packaged `/setup/` wizard, Desktop Web `/web` uninitialized state, and the extension's "Recommend" tab all show a prerequisite checklist (Bilibili login / LLM / embedding) and a "Start init" button that builds your profile and first content pool in place (the CLI `openbiliclaw init` remains an equivalent entry point)
 - 🔬 **Self-Optimizing Eval Loops** — Five modules each have an LLM-as-judge SGD/RL loop that automatically improves prompt quality over rounds — no manual tuning needed
 - 🔒 **Fully Private** — All data in local SQLite; LLM calls use your own key; each instance is built for exactly one person
 - 🔌 **Local Embedding Provider** — Optional Ollama + bge-m3, no extra embedding API key required for similarity computation (CPU-only, runs on Mac/Win/Linux)
@@ -646,7 +653,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.109 / extension v0.3.72: settings-page parity & unified source status (2026-06-09)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages and desktop installers live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags.
+Latest: **v0.3.110 / extension v0.3.72: macOS installer ad-hoc signature repair (2026-06-09)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages and desktop installers live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags.
 
 ## 🗺️ Roadmap
 

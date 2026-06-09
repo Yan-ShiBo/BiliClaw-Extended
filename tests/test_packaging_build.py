@@ -66,11 +66,11 @@ def test_inno_installer_sets_numeric_file_version_resource() -> None:
 
 
 def test_pyinstaller_spec_uses_windows_version_file_env() -> None:
-    spec = (
-        Path(__file__).resolve().parent.parent / "packaging" / "openbiliclaw.spec"
-    ).read_text(encoding="utf-8")
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "openbiliclaw.spec").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'OPENBILICLAW_WINDOWS_VERSION_FILE' in spec
+    assert "OPENBILICLAW_WINDOWS_VERSION_FILE" in spec
     assert "version=version_file" in spec
 
 
@@ -164,3 +164,43 @@ def test_bundle_ollama_binary_targets_app_resources_on_macos(tmp_path: Path) -> 
 
     assert (dist / "OpenBiliClaw" / "ollama") in written
     assert (dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "ollama") in written
+
+
+def test_repair_macos_ad_hoc_signature_signs_then_verifies(tmp_path: Path, monkeypatch) -> None:
+    app_bundle = tmp_path / "OpenBiliClaw.app"
+    app_bundle.mkdir()
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        build_module.shutil,
+        "which",
+        lambda name: "/usr/bin/codesign" if name == "codesign" else None,
+    )
+    monkeypatch.setattr(build_module.subprocess, "check_call", lambda cmd: calls.append(cmd))
+
+    build_module.repair_macos_ad_hoc_signature(app_bundle)
+
+    assert calls == [
+        ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(app_bundle)],
+        [
+            "/usr/bin/codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            str(app_bundle),
+        ],
+    ]
+
+
+def test_macos_build_repairs_signature_after_bundle_mutations_before_archives() -> None:
+    source = (Path(__file__).resolve().parent.parent / "packaging" / "build.py").read_text(
+        encoding="utf-8"
+    )
+    build_block = source[source.index("def build(") : source.index("def main()")]
+
+    sign_index = build_block.index("repair_macos_ad_hoc_signature(app_bundle)")
+
+    assert sign_index > build_block.index("bundle_ollama_binary(")
+    assert sign_index < build_block.index("create_archive(")
+    assert sign_index < build_block.index("make_macos_dmg(")

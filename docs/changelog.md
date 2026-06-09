@@ -4,6 +4,12 @@
 
 ---
 
+## v0.3.110 / extension v0.3.72: macOS 安装包签名封印修复（2026-06-09）
+
+macOS 桌面安装包在无 Apple Developer 账号下改为后处理完成后 ad-hoc 重签，避免 Gatekeeper 把封印失效误报为“已损坏”。
+
+- 修复无 Apple Developer 账号场景下的 macOS 安装包封印失效：PyInstaller 产出的 `.app` 会带 ad-hoc 签名，但构建脚本随后把随包 `ollama` 等资源写进 bundle，导致 Gatekeeper 报“已损坏”。现在 macOS build 在所有 bundle 后处理完成后执行 `codesign --force --deep --sign -` 并立刻 `codesign --verify --deep --strict`，DMG 打包前保证 `.app` 至少处于内部自洽的 ad-hoc 签名状态；文档和 Release 文案同步补充可信来源下的 `xattr` / 本机重签处理命令。仍未做 Apple Developer ID 签名 / notarization。
+
 ## v0.3.109 / extension v0.3.72: 配置页对齐与统一来源接入状态（2026-06-09）
 
 桌面 Web 配置页补齐到与插件设置页同等的可配置面，五大来源新增统一的「接入状态」彩点，并修复一个 `GET /api/config` 漏返回的字段。
