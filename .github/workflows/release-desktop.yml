@@ -173,7 +173,7 @@ jobs:
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --generate-notes --notes-file "$notes_file"
           else
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --notes-file "$notes_file"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --notes-file "$notes_file"
           fi
           shopt -s nullglob
           assets=(release-artifacts/*.dmg release-artifacts/*.exe)

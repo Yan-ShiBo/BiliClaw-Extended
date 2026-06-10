@@ -12,6 +12,7 @@
 - 设置页与插件的 `/api/config/probe-service` LLM 测试按钮不再传 `max_tokens=8`，保留 `temperature=0` 与 `reasoning_effort=""`，让可关闭 thinking 的 provider 仍轻量探测，同时兼容 SenseNova 这类 OpenAI-compatible reasoning-first 服务。
 - 桌面安装包与插件包 release workflow 的发布步骤改用 GitHub CLI 创建 / 上传 Release 资产，绕过 `softprops/action-gh-release@v2` 在当前 runner 上创建 release 时返回 401 的问题。
 - Release 资产上传改为显式 `--repo`、同时暴露 `GH_TOKEN` / `GITHUB_TOKEN`，并逐个文件重试上传，避免多资产上传时单个 zip / 安装包因 `uploads.github.com` 401 中断整次发布。
+- 重新打 tag 后若 GitHub 把既有 Release 置回 draft，发布步骤会显式执行 `gh release edit --draft=false`；桌面安装包继续保持 prerelease 标记。
 - 后端包版本提升到 `v0.3.117`，浏览器插件版本提升到 `0.3.76`，准备发布 `backend-v0.3.117`、`desktop-v0.3.117` 与 `extension-v0.3.76`。
 
 ## v0.3.116 / extension v0.3.75: 惊喜推荐生命周期闭环（2026-06-10）
