@@ -146,6 +146,25 @@ def _remote_has_credentials(remote_url: str) -> bool:
     return False
 
 
+def _dirty_paths_besides_uv_lock(porcelain: str) -> list[str]:
+    """Return dirty paths from ``git status --porcelain``, ignoring uv.lock.
+
+    ``uv sync`` rewrites uv.lock whenever a release tag ships a stale lock
+    (the version bump forgot ``uv lock``), so virtually every install has a
+    modified uv.lock from day one. That alone must not block updates — the
+    apply flow resets uv.lock before merging and re-syncs afterwards.
+    """
+    dirty: list[str] = []
+    for line in porcelain.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip().strip('"')
+        if path == "uv.lock":
+            continue
+        dirty.append(path)
+    return dirty
+
+
 def _merge_or_rebase_in_progress(root: Path, git_dir_text: str) -> bool:
     git_dir = Path(git_dir_text)
     if not git_dir.is_absolute():
@@ -448,7 +467,7 @@ class AutoUpdateService:
         status = await self._run_git(["status", "--porcelain"], root)
         if status.returncode != 0:
             return "unsupported_install_mode"
-        if status.stdout.strip():
+        if _dirty_paths_besides_uv_lock(status.stdout):
             return "dirty_worktree"
 
         git_dir = await self._run_git(["rev-parse", "--git-dir"], root)
@@ -474,6 +493,11 @@ class AutoUpdateService:
         """Fast-forward to *tag*, reinstall dependencies, and restart."""
         root = _project_root()
         try:
+            # Drop the local uv.lock rewrite (stale-lock releases make uv sync
+            # dirty it on install) so --ff-only is not refused for "local
+            # changes would be overwritten"; the post-merge sync regenerates it.
+            await self._run_git(["checkout", "--", "uv.lock"], root)
+
             merge = await self._run_git(["merge", "--ff-only", tag], root, timeout=120)
             if merge.returncode != 0:
                 await self._mark_apply_failed("branch_not_fast_forwardable")
