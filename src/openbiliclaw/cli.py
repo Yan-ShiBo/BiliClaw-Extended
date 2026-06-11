@@ -5469,6 +5469,11 @@ def profile_consolidate(
         "--apply",
         help="真正写入合并结果。默认 dry-run：只打印建议，不改任何数据。",
     ),
+    revert: str = typer.Option(
+        "",
+        "--revert",
+        help="按 run_id 回滚一次已应用的整理（备份在 data/memory/consolidation_runs/）。",
+    ),
 ) -> None:
     """用 LLM 整理合并画像里重复的喜欢 / 讨厌主题。
 
@@ -5519,6 +5524,16 @@ def profile_consolidate(
         llm_service=llm_service,
         embedding_service=embedding_service,
     )
+
+    if revert.strip():
+        ok = consolidator.revert(revert.strip())
+        if ok:
+            console.print(f"  [green]已回滚 run {revert.strip()}，画像与覆盖层均已恢复。[/green]")
+            console.print("  [dim]被回滚的合并已记入 no-merge 记忆，下轮整理不会重做。[/dim]")
+        else:
+            console.print(f"[bold red]  回滚失败：找不到 run 记录 {revert.strip()}。[/bold red]")
+            raise typer.Exit(code=1)
+        return
 
     mode_label = "[bold]apply[/bold]" if apply else "dry-run（加 --apply 才会写入）"
     console.print(f"  模式: {mode_label}")

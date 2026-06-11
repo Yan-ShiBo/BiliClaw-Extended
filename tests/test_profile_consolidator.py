@@ -579,3 +579,125 @@ profile_consolidation_interval_hours = 6
     defaults = load_config(tmp_path / "missing.toml")
     assert defaults.scheduler.profile_consolidation_enabled is True
     assert defaults.scheduler.profile_consolidation_interval_hours == 12
+
+
+class _OverridesMemory(_FakeMemory):
+    """Fake memory that also persists ProfileOverrides like the real one."""
+
+    def __init__(self, preference: dict[str, Any], overrides_raw: dict[str, Any]) -> None:
+        super().__init__(preference)
+        self._overrides_raw = overrides_raw
+
+    def load_profile_overrides(self) -> Any:
+        from openbiliclaw.soul.overrides import ProfileOverrides
+
+        return ProfileOverrides.from_dict(self._overrides_raw)
+
+    def save_profile_overrides(self, overrides: Any) -> None:
+        self._overrides_raw = overrides.to_dict()
+
+
+async def test_merge_remaps_user_override_strings(tmp_path: Path) -> None:
+    memory = _OverridesMemory(
+        {
+            "interests": [],
+            "disliked_topics": ["偶像练习室物料", "偶像团体练习室内容"],
+        },
+        {
+            "version": 1,
+            "list_edits": {
+                "interest.disliked_topics": {
+                    "add": [],
+                    # The user manually removed this exact topic string; a
+                    # raw-store rename must follow it or the removal
+                    # silently stops matching.
+                    "remove": ["偶像团体练习室内容"],
+                }
+            },
+        },
+    )
+    memory._data_dir = tmp_path
+    llm = _StubLLM(
+        {
+            "likes": [],
+            "dislikes": [
+                {
+                    "cluster_id": "D1",
+                    "op": "merge",
+                    "members": ["偶像练习室物料", "偶像团体练习室内容"],
+                    "canonical": "偶像练习室物料",
+                }
+            ],
+        }
+    )
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=llm,
+        embedding_service=_StubEmbedding([["偶像练习室物料", "偶像团体练习室内容"]]),
+        data_dir=tmp_path,
+    )
+
+    await consolidator.run(dry_run=False)
+
+    remove_list = memory._overrides_raw["list_edits"]["interest.disliked_topics"]["remove"]
+    assert remove_list == ["偶像练习室物料"]
+    # run record keeps the pre-remap overrides for revert
+    record_path = next((tmp_path / "consolidation_runs").glob("*.json"))
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["overrides_before"]["list_edits"]["interest.disliked_topics"]["remove"] == [
+        "偶像团体练习室内容"
+    ]
+
+
+async def test_revert_restores_preference_overrides_and_pins_no_merge(tmp_path: Path) -> None:
+    memory = _OverridesMemory(
+        {
+            "interests": [
+                _interest("智能体开发", 0.97),
+                _interest("智能体开发与实现", 0.88),
+            ],
+            "disliked_topics": [],
+        },
+        {"version": 1, "list_edits": {}},
+    )
+    memory._data_dir = tmp_path
+    llm = _StubLLM(
+        {
+            "likes": [
+                {
+                    "cluster_id": "L1",
+                    "op": "merge",
+                    "members": ["智能体开发", "智能体开发与实现"],
+                    "canonical": "智能体开发",
+                }
+            ],
+            "dislikes": [],
+        }
+    )
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=llm,
+        embedding_service=_StubEmbedding([["智能体开发", "智能体开发与实现"]]),
+        data_dir=tmp_path,
+    )
+
+    report = await consolidator.run(dry_run=False)
+    assert len(memory.get_layer("preference").data["interests"]) == 1
+
+    ok = consolidator.revert(report.run_id)
+    assert ok
+    names = [item["name"] for item in memory.get_layer("preference").data["interests"]]
+    assert names == ["智能体开发", "智能体开发与实现"]
+
+    # The rolled-back merge is pinned distinct: a fresh run re-clusters the
+    # pair but does not re-ask the LLM, so the merge is not redone.
+    second = await consolidator.run(dry_run=False)
+    assert second.clusters_sent == 0
+    assert llm.calls == 1
+    assert len(memory.get_layer("preference").data["interests"]) == 2
+
+
+def test_revert_missing_run_id_returns_false(tmp_path: Path) -> None:
+    memory = _FakeMemory({"interests": [], "disliked_topics": []})
+    consolidator = ProfileConsolidator(memory=memory, llm_service=None, data_dir=tmp_path)
+    assert consolidator.revert("nonexistent") is False

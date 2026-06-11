@@ -308,7 +308,8 @@ class ProfileConsolidator:
             preference_layer.data["disliked_topics"] = dislikes_raw
             preference_layer.save()
             self._rebuild_profile_tree(preference_layer.data)
-            self._write_run_record(report, before_snapshot, rename_map)
+            overrides_before = self._remap_overrides(rename_map)
+            self._write_run_record(report, before_snapshot, rename_map, overrides_before)
             self._append_changelog(report, current)
 
         # Record judged-distinct pairs so future runs skip them, and
@@ -610,6 +611,101 @@ class ProfileConsolidator:
         except Exception:
             logger.exception("Failed to rebuild profile tree after consolidation")
 
+    # -- Overrides passthrough + revert ------------------------------------------------
+
+    def _remap_overrides(self, rename_map: dict[str, str]) -> dict[str, object] | None:
+        """Apply the merge rename map to user profile overrides.
+
+        Overrides match by exact string (e.g. a removed disliked topic), so
+        a raw-store rename would silently un-match the user's edit and let
+        a removed avoid-topic resurrect under its canonical name. Returns
+        the pre-remap overrides dict (for revert) when anything changed.
+        """
+        if not rename_map:
+            return None
+        loader = getattr(self._memory, "load_profile_overrides", None)
+        saver = getattr(self._memory, "save_profile_overrides", None)
+        if not callable(loader) or not callable(saver):
+            return None
+        try:
+            from openbiliclaw.soul.overrides import ProfileOverrides
+
+            overrides = loader()
+            raw: dict[str, object] = dict(overrides.to_dict())
+            remapped = _remap_strings(raw, rename_map)
+            if json.dumps(raw, ensure_ascii=False, sort_keys=True) == json.dumps(
+                remapped, ensure_ascii=False, sort_keys=True
+            ):
+                return None
+            saver(ProfileOverrides.from_dict(remapped))
+            return raw
+        except Exception:
+            logger.exception("Failed to remap profile overrides after consolidation")
+            return None
+
+    def revert(self, run_id: str) -> bool:
+        """Restore the preference store (and overrides) from a run record.
+
+        The reverted merges' member pairs are added to the no-merge memory
+        so the next scheduled run does not simply redo the same merge the
+        user just rolled back.
+        """
+        if self._data_dir is None:
+            return False
+        record_path = self._data_dir / _RUNS_DIRNAME / f"{run_id}.json"
+        if not record_path.exists():
+            return False
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.exception("Failed to read consolidation run record %s", run_id)
+            return False
+        before = record.get("before")
+        if not isinstance(before, dict):
+            return False
+
+        preference_layer = self._memory.get_layer("preference")
+        preference_layer.data["interests"] = [
+            dict(item) for item in before.get("interests", []) if isinstance(item, dict)
+        ]
+        preference_layer.data["disliked_topics"] = _as_str_list(before.get("disliked_topics"))
+        preference_layer.save()
+        self._rebuild_profile_tree(preference_layer.data)
+
+        overrides_before = record.get("overrides_before")
+        if isinstance(overrides_before, dict):
+            saver = getattr(self._memory, "save_profile_overrides", None)
+            if callable(saver):
+                try:
+                    from openbiliclaw.soul.overrides import ProfileOverrides
+
+                    saver(ProfileOverrides.from_dict(overrides_before))
+                except Exception:
+                    logger.exception("Failed to restore profile overrides for %s", run_id)
+
+        # Pin the rolled-back merges as known-distinct so the next run
+        # doesn't redo them.
+        state = self._load_state()
+        no_merge = set(str(p) for p in state.get("no_merge_pairs", []))
+        for merge in record.get("merges", []):
+            if not isinstance(merge, dict):
+                continue
+            names = [*_as_str_list(merge.get("members")), str(merge.get("canonical", ""))]
+            names = [n for n in dict.fromkeys(names) if n]
+            for i, a in enumerate(names):
+                for b in names[i + 1 :]:
+                    no_merge.add(_pair_key(a, b))
+        state["no_merge_pairs"] = sorted(no_merge)[:_NO_MERGE_PAIRS_CAP]
+        state["last_input_digest"] = ""
+        self._save_state(state)
+
+        try:
+            with (self._data_dir / _CHANGELOG_FILENAME).open("a", encoding="utf-8") as fh:
+                fh.write(f"\n## 画像整理回滚 {run_id}（{datetime.now().isoformat()}）\n")
+        except Exception:
+            logger.debug("Failed to append revert changelog", exc_info=True)
+        return True
+
     # -- Persistence -------------------------------------------------------------------
 
     def _state_path(self) -> Path | None:
@@ -655,6 +751,7 @@ class ProfileConsolidator:
         report: ConsolidationReport,
         before_snapshot: dict[str, object],
         rename_map: dict[str, str],
+        overrides_before: dict[str, object] | None = None,
     ) -> None:
         if self._data_dir is None:
             return
@@ -668,6 +765,7 @@ class ProfileConsolidator:
                 "merges": report.merges,
                 "rename_map": rename_map,
                 "rejected_clusters": report.rejected_clusters,
+                "overrides_before": overrides_before,
             }
             (runs_dir / f"{report.run_id}.json").write_text(
                 json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -719,3 +817,34 @@ def _earliest(*values: object) -> str:
 def _latest(*values: object) -> str:
     candidates = [str(v) for v in values if v]
     return max(candidates) if candidates else ""
+
+
+def _remap_strings(value: object, rename_map: dict[str, str]) -> Any:
+    """Recursively replace exact string matches per ``rename_map``.
+
+    Only whole-string equality is rewritten (never substrings), covering
+    list entries, dict string values, and dict keys. Colliding renamed
+    keys keep the first occurrence.
+    """
+    if isinstance(value, str):
+        return rename_map.get(value, value)
+    if isinstance(value, list):
+        seen: set[str] = set()
+        result: list[Any] = []
+        for item in value:
+            remapped = _remap_strings(item, rename_map)
+            if isinstance(remapped, str):
+                if remapped in seen:
+                    continue
+                seen.add(remapped)
+            result.append(remapped)
+        return result
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            new_key = rename_map.get(key, key) if isinstance(key, str) else key
+            if new_key in out:
+                continue
+            out[new_key] = _remap_strings(item, rename_map)
+        return out
+    return value
