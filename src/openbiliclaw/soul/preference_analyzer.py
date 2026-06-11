@@ -22,9 +22,10 @@ logger = logging.getLogger(__name__)
 
 # Stored disliked_topics are recency-ordered and capped so the list (and
 # the preference-analysis prompt that echoes it back) stay bounded.
-# Comfortably above the downstream display cap (_DISLIKED_TOPICS_CAP=16)
-# so re-ranking has headroom; the stalest topics decay out past this.
-_DISLIKED_TOPICS_STORE_CAP = 40
+# 2x the downstream display cap (_DISLIKED_TOPICS_CAP=64) so re-ranking
+# and LLM consolidation have boundary headroom; the stalest topics decay
+# out past this.
+_DISLIKED_TOPICS_STORE_CAP = 128
 
 _COMPACT_METADATA_KEYS = frozenset(
     {

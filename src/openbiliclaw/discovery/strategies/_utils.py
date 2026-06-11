@@ -19,8 +19,8 @@ _T = TypeVar("_T")
 # happened to be listed first.
 _INTEREST_DOMAIN_CAP = 8
 _SPECIFICS_PER_DOMAIN = 5
-_INTEREST_TAG_CAP = 30
-_DISLIKED_TOPICS_CAP = 16
+_INTEREST_TAG_CAP = 64
+_DISLIKED_TOPICS_CAP = 64
 
 
 @runtime_checkable
