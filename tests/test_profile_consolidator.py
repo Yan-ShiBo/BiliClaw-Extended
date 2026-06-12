@@ -78,6 +78,48 @@ class _StubLLM:
         return SimpleNamespace(content=json.dumps(self.payload, ensure_ascii=False))
 
 
+def _extract_prompt_json_block(user_input: str, tag: str) -> Any:
+    start = f"<{tag}>"
+    end = f"</{tag}>"
+    raw = user_input.split(start, 1)[1].split(end, 1)[0].strip()
+    return json.loads(raw)
+
+
+class _PayloadAwareMergingLLM:
+    def __init__(self, *, fail_first: bool = False) -> None:
+        self.fail_first = fail_first
+        self.calls = 0
+        self.user_inputs: list[str] = []
+
+    async def complete_structured_task(self, **kwargs: Any) -> Any:
+        self.calls += 1
+        user_input = str(kwargs.get("user_input", ""))
+        self.user_inputs.append(user_input)
+        if self.fail_first and self.calls == 1:
+            raise RuntimeError("batch failed")
+
+        likes = _extract_prompt_json_block(user_input, "likes_clusters")
+        like_ops: list[dict[str, Any]] = []
+        for cluster in likes:
+            members = [
+                str(member.get("name", ""))
+                for member in cluster.get("members", [])
+                if isinstance(member, dict)
+            ]
+            if len(members) >= 2:
+                like_ops.append(
+                    {
+                        "cluster_id": str(cluster.get("cluster_id", "")),
+                        "op": "merge",
+                        "members": members,
+                        "canonical": members[0],
+                    }
+                )
+        return SimpleNamespace(
+            content=json.dumps({"likes": like_ops, "dislikes": []}, ensure_ascii=False)
+        )
+
+
 def _interest(name: str, weight: float, category: str = "科技", **extra: Any) -> dict[str, Any]:
     return {
         "name": name,
@@ -87,6 +129,18 @@ def _interest(name: str, weight: float, category: str = "科技", **extra: Any) 
         "last_seen": extra.get("last_seen", "2026-06-01T00:00:00"),
         "source": "watch history",
     }
+
+
+def _paired_interests(pair_count: int) -> tuple[list[dict[str, Any]], list[list[str]]]:
+    interests: list[dict[str, Any]] = []
+    groups: list[list[str]] = []
+    for pair_index in range(pair_count):
+        a = f"主题{pair_index}A"
+        b = f"主题{pair_index}B"
+        groups.append([a, b])
+        interests.append(_interest(a, 1.0 - pair_index * 0.001))
+        interests.append(_interest(b, 0.99 - pair_index * 0.001))
+    return interests, groups
 
 
 async def test_same_name_cross_category_no_longer_rule_merged(tmp_path: Path) -> None:
@@ -359,6 +413,108 @@ def test_consolidation_system_prompt_has_homonym_keep_rule() -> None:
 
     assert "同名异义" in _PROFILE_CONSOLIDATION_SYSTEM_PROMPT
     assert "category" in _PROFILE_CONSOLIDATION_SYSTEM_PROMPT
+
+
+async def test_full_boundary_surfaces_clusters_beyond_top128(tmp_path: Path) -> None:
+    interests = [
+        _interest(f"普通兴趣{i}", 1.0 - i * 0.001)
+        for i in range(150)
+    ]
+    interests[140]["name"] = "长尾同义A"
+    interests[141]["name"] = "长尾同义B"
+    memory = _FakeMemory({"interests": interests, "disliked_topics": []}, data_dir=tmp_path)
+    embedding = _StubEmbedding([["长尾同义A", "长尾同义B"]])
+
+    default_report = await ProfileConsolidator(
+        memory=memory,
+        llm_service=None,
+        embedding_service=embedding,
+        data_dir=tmp_path,
+    ).run(dry_run=True)
+    full_report = await ProfileConsolidator(
+        memory=memory,
+        llm_service=None,
+        embedding_service=embedding,
+        data_dir=tmp_path,
+        likes_boundary=150,
+    ).run(dry_run=True)
+
+    assert default_report.clusters_sent == 0
+    assert full_report.clusters_sent == 1
+
+
+async def test_judge_batches_at_most_30_clusters_per_call(tmp_path: Path) -> None:
+    interests, groups = _paired_interests(31)
+    memory = _FakeMemory({"interests": interests, "disliked_topics": []}, data_dir=tmp_path)
+    llm = _PayloadAwareMergingLLM()
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=llm,
+        embedding_service=_StubEmbedding(groups),
+        data_dir=tmp_path,
+    )
+
+    report = await consolidator.run(dry_run=False)
+
+    assert llm.calls == 2
+    for user_input in llm.user_inputs:
+        likes = _extract_prompt_json_block(user_input, "likes_clusters")
+        assert len(likes) <= 30
+    assert len(report.merges) == 31
+
+
+async def test_multi_batch_apply_writes_single_run_record_and_full_revert(tmp_path: Path) -> None:
+    interests, groups = _paired_interests(31)
+    memory = _FakeMemory({"interests": interests, "disliked_topics": []}, data_dir=tmp_path)
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=_PayloadAwareMergingLLM(),
+        embedding_service=_StubEmbedding(groups),
+        data_dir=tmp_path,
+    )
+
+    report = await consolidator.run(dry_run=False)
+
+    runs = list((tmp_path / "consolidation_runs").glob("*.json"))
+    assert len(runs) == 1
+    assert len(memory.get_layer("preference").data["interests"]) == 31
+    assert consolidator.revert(report.run_id)
+    assert len(memory.get_layer("preference").data["interests"]) == 62
+
+
+async def test_single_batch_failure_isolated(tmp_path: Path) -> None:
+    interests, groups = _paired_interests(31)
+    memory = _FakeMemory({"interests": interests, "disliked_topics": []}, data_dir=tmp_path)
+    llm = _PayloadAwareMergingLLM(fail_first=True)
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=llm,
+        embedding_service=_StubEmbedding(groups),
+        data_dir=tmp_path,
+    )
+
+    report = await consolidator.run(dry_run=False)
+
+    assert llm.calls == 2
+    assert len(report.merges) == 1
+    assert report.errors and "batch 1" in report.errors[0]
+    assert report.rejected_clusters == []
+
+
+async def test_default_path_single_call_regression(tmp_path: Path) -> None:
+    interests, groups = _paired_interests(2)
+    memory = _FakeMemory({"interests": interests, "disliked_topics": []}, data_dir=tmp_path)
+    llm = _PayloadAwareMergingLLM()
+    consolidator = ProfileConsolidator(
+        memory=memory,
+        llm_service=llm,
+        embedding_service=_StubEmbedding(groups),
+        data_dir=tmp_path,
+    )
+
+    await consolidator.run(dry_run=False)
+
+    assert llm.calls == 1
 
 
 async def test_dislike_merge_keeps_frontmost_position(tmp_path: Path) -> None:

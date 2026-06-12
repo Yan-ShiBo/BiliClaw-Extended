@@ -5479,6 +5479,11 @@ def profile_consolidate(
         "--migrate-categories",
         help="一次性把存量一级分类迁移到固定词表（默认 dry-run，配 --apply 写入）。",
     ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="把 likes 整理边界从 top-128 开到全量标签库（嫌疑簇 ≤30/批送审）。",
+    ),
 ) -> None:
     """用 LLM 整理合并画像里重复的喜欢 / 讨厌主题。
 
@@ -5491,6 +5496,7 @@ def profile_consolidate(
       - 默认 dry-run，先看建议再决定
       - --apply 写入,自动备份到 data/memory/consolidation_runs/
       - --migrate-categories 一次性分类词表迁移（同样 dry-run/--apply/--revert）
+      - --full 一次性全量清理 likes 长尾标签（与 --migrate-categories 互斥）
       - 审计记录追加到 data/memory/soul_changelog.md
     """
     import asyncio as _asyncio
@@ -5525,11 +5531,28 @@ def profile_consolidate(
     if embedding_service is None:
         console.print("[dim]  embedding 服务不可用，退回子串聚类。[/dim]")
 
-    consolidator = ProfileConsolidator(
-        memory=memory,
-        llm_service=llm_service,
-        embedding_service=embedding_service,
-    )
+    if full and migrate_categories:
+        console.print("[bold red]  --full 与 --migrate-categories 不能同时使用。[/bold red]")
+        console.print("[dim]  推荐顺序：先 --migrate-categories --apply，再 --full --apply。[/dim]")
+        raise typer.Exit(code=1)
+
+    if full:
+        raw_interests = memory.get_layer("preference").data.get("interests", [])
+        interest_count = len([item for item in raw_interests if isinstance(item, dict)])
+        likes_boundary = max(interest_count, 128)
+        console.print(f"  [cyan]--full：likes 边界开到全量（{likes_boundary} 条）。[/cyan]")
+        consolidator = ProfileConsolidator(
+            memory=memory,
+            llm_service=llm_service,
+            embedding_service=embedding_service,
+            likes_boundary=likes_boundary,
+        )
+    else:
+        consolidator = ProfileConsolidator(
+            memory=memory,
+            llm_service=llm_service,
+            embedding_service=embedding_service,
+        )
 
     if revert.strip():
         ok = consolidator.revert(revert.strip())

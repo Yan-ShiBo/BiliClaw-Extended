@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 _LIKES_BOUNDARY = 128
 _SIMILARITY_THRESHOLD = 0.85
 _DEFAULT_MIN_INTERVAL_SECONDS = 12 * 3600
+_JUDGE_BATCH_SIZE = 30
 _STATE_FILENAME = "consolidation_state.json"
 _RUNS_DIRNAME = "consolidation_runs"
 _CHANGELOG_FILENAME = "soul_changelog.md"
@@ -295,13 +296,11 @@ class ProfileConsolidator:
         valid_ops: list[dict[str, object]] = []
         judged_clusters: list[_Cluster] = []
         if clusters and self._llm_service is not None:
-            try:
-                ops_by_cluster = await self._judge(clusters)
-            except Exception as exc:
-                logger.warning("profile consolidation LLM call failed: %s", exc)
-                report.errors.append(f"llm: {exc}")
-                ops_by_cluster = {}
+            ops_by_cluster, judged_ids, judge_errors = await self._judge(clusters)
+            report.errors.extend(judge_errors)
             for cluster in clusters:
+                if cluster.cluster_id not in judged_ids:
+                    continue
                 ops = ops_by_cluster.get(cluster.cluster_id, [])
                 problem = self._validate_cluster_ops(cluster, ops)
                 if problem:
@@ -481,9 +480,11 @@ class ProfileConsolidator:
 
     # -- Stage 2: LLM judgement ----------------------------------------------------
 
-    async def _judge(self, clusters: list[_Cluster]) -> dict[str, list[dict[str, Any]]]:
+    async def _judge(
+        self, clusters: list[_Cluster]
+    ) -> tuple[dict[str, list[dict[str, Any]]], set[str], list[str]]:
         if self._llm_service is None:
-            return {}
+            return {}, set(), []
         preference_layer = self._memory.get_layer("preference")
         weight_by_name = {
             str(item.get("name", "")): _coerce_float(item.get("weight"))
@@ -500,56 +501,68 @@ class ProfileConsolidator:
             if name not in best_weight_by_name or weight > best_weight_by_name[name]:
                 best_weight_by_name[name] = weight
                 category_by_name[name] = str(item.get("category", ""))
-        likes_payload: list[dict[str, object]] = [
-            {
-                "cluster_id": c.cluster_id,
-                "members": [
-                    {
-                        "name": name,
-                        "weight": round(weight_by_name.get(name, 0.0), 3),
-                        "category": (
-                            c.member_categories[idx]
-                            if c.member_categories is not None
-                            else category_by_name.get(name, "")
-                        ),
-                    }
-                    for idx, name in enumerate(c.members)
-                ],
-            }
-            for c in clusters
-            if c.scope == "likes"
-        ]
-        dislikes_payload: list[dict[str, object]] = [
-            {"cluster_id": c.cluster_id, "members": list(c.members)}
-            for c in clusters
-            if c.scope == "dislikes"
-        ]
-        messages = build_profile_consolidation_prompt(
-            likes_clusters=likes_payload,
-            dislikes_clusters=dislikes_payload,
-        )
-        response = await self._llm_service.complete_structured_task(
-            system_instruction=messages[0]["content"],
-            user_input=messages[1]["content"],
-            temperature=0.2,
-            max_tokens=DEFAULT_STRUCTURED_MAX_TOKENS,
-            caller="soul.consolidation",
-        )
-        parsed = parse_llm_json_tolerant(response.content)
-        if not isinstance(parsed, dict):
-            raise ValueError("consolidation response is not a JSON object")
+
         ops_by_cluster: dict[str, list[dict[str, Any]]] = {}
-        for scope_key in ("likes", "dislikes"):
-            entries = parsed.get(scope_key)
-            if not isinstance(entries, list):
+        judged_ids: set[str] = set()
+        errors: list[str] = []
+        for start in range(0, len(clusters), _JUDGE_BATCH_SIZE):
+            batch = clusters[start : start + _JUDGE_BATCH_SIZE]
+            likes_payload: list[dict[str, object]] = [
+                {
+                    "cluster_id": c.cluster_id,
+                    "members": [
+                        {
+                            "name": name,
+                            "weight": round(weight_by_name.get(name, 0.0), 3),
+                            "category": (
+                                c.member_categories[idx]
+                                if c.member_categories is not None
+                                else category_by_name.get(name, "")
+                            ),
+                        }
+                        for idx, name in enumerate(c.members)
+                    ],
+                }
+                for c in batch
+                if c.scope == "likes"
+            ]
+            dislikes_payload: list[dict[str, object]] = [
+                {"cluster_id": c.cluster_id, "members": list(c.members)}
+                for c in batch
+                if c.scope == "dislikes"
+            ]
+            messages = build_profile_consolidation_prompt(
+                likes_clusters=likes_payload,
+                dislikes_clusters=dislikes_payload,
+            )
+            batch_index = start // _JUDGE_BATCH_SIZE + 1
+            try:
+                response = await self._llm_service.complete_structured_task(
+                    system_instruction=messages[0]["content"],
+                    user_input=messages[1]["content"],
+                    temperature=0.2,
+                    max_tokens=DEFAULT_STRUCTURED_MAX_TOKENS,
+                    caller="soul.consolidation",
+                )
+                parsed = parse_llm_json_tolerant(response.content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("consolidation response is not a JSON object")
+            except Exception as exc:
+                logger.warning("profile consolidation LLM batch %d failed: %s", batch_index, exc)
+                errors.append(f"llm batch {batch_index}: {exc}")
                 continue
-            for entry in entries:
-                if not isinstance(entry, dict):
+            judged_ids.update(cluster.cluster_id for cluster in batch)
+            for scope_key in ("likes", "dislikes"):
+                entries = parsed.get(scope_key)
+                if not isinstance(entries, list):
                     continue
-                cluster_id = str(entry.get("cluster_id", ""))
-                if cluster_id:
-                    ops_by_cluster.setdefault(cluster_id, []).append(entry)
-        return ops_by_cluster
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    cluster_id = str(entry.get("cluster_id", ""))
+                    if cluster_id:
+                        ops_by_cluster.setdefault(cluster_id, []).append(entry)
+        return ops_by_cluster, judged_ids, errors
 
     def _validate_cluster_ops(self, cluster: _Cluster, ops: list[dict[str, Any]]) -> str:
         """Return a rejection reason, or '' when the cluster's ops are valid."""
