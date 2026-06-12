@@ -269,6 +269,7 @@ def _extract_interest_tags(profile: SoulProfile) -> list[dict[str, object]]:
     if isinstance(profile, OnionProfile):
         ranked = _likes_by_weight(profile)
         interests: list[dict[str, object]] = []
+        seen_names: set[str] = set()
         # Domain tags first: every ranked domain keeps tag-level exposure
         # even when higher-weight domains carry many specifics.
         for dom in ranked:
@@ -284,24 +285,35 @@ def _extract_interest_tags(profile: SoulProfile) -> list[dict[str, object]]:
                     "source": dom.source,
                 }
             )
-        for dom in ranked:
+            seen_names.add(dom.domain)
+        # Remaining slots: specifics ranked by their OWN weight across all
+        # domains. A per-domain quota here let umbrella domains (200+
+        # specifics on real profiles) hide 0.8-weight tags behind their
+        # top-5 while 0.4-weight tags from tiny domains got in. Per-domain
+        # exposure is already guaranteed by the domain tags above and the
+        # interest_domains section, so the flat list can be purely
+        # weight-ranked.
+        all_specifics = sorted(
+            ((spec, dom) for dom in ranked for spec in dom.specifics if spec.name.strip()),
+            key=lambda pair: pair[0].weight,
+            reverse=True,
+        )
+        for spec, dom in all_specifics:
             if len(interests) >= _INTEREST_TAG_CAP:
                 break
-            for spec in dom.specifics[:_SPECIFICS_PER_DOMAIN]:
-                if len(interests) >= _INTEREST_TAG_CAP:
-                    break
-                if not spec.name.strip():
-                    continue
-                interests.append(
-                    {
-                        "name": spec.name,
-                        "category": dom.domain,
-                        "weight": spec.weight,
-                        "first_seen": _format_profile_timestamp(dom.first_seen),
-                        "last_seen": _format_profile_timestamp(dom.last_seen),
-                        "source": dom.source,
-                    }
-                )
+            if spec.name in seen_names:
+                continue
+            seen_names.add(spec.name)
+            interests.append(
+                {
+                    "name": spec.name,
+                    "category": dom.domain,
+                    "weight": spec.weight,
+                    "first_seen": _format_profile_timestamp(dom.first_seen),
+                    "last_seen": _format_profile_timestamp(dom.last_seen),
+                    "source": dom.source,
+                }
+            )
         return interests
 
     ranked_flat = sorted(

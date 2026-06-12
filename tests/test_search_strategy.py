@@ -670,3 +670,43 @@ def test_build_profile_summary_keeps_newest_window_and_all_dislikes() -> None:
     assert [i["hypothesis"] for i in summary["active_insights"]] == [
         f"洞察{i}" for i in range(2, 7)
     ]
+
+
+def test_extract_interest_tags_fills_specifics_by_global_weight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openbiliclaw.discovery.strategies import _utils
+
+    profile = OnionProfile(
+        interest=InterestLayer(
+            likes=[
+                InterestDomain(
+                    domain="娱乐",
+                    weight=0.9,
+                    specifics=[
+                        InterestSpecific(name="娱乐头部", weight=0.85),
+                        InterestSpecific(name="娱乐次级", weight=0.3),
+                    ],
+                ),
+                InterestDomain(
+                    domain="小域",
+                    weight=0.5,
+                    specifics=[
+                        # Same name as its domain: must not duplicate.
+                        InterestSpecific(name="小域", weight=0.95),
+                        InterestSpecific(name="小域强项", weight=0.8),
+                    ],
+                ),
+            ]
+        )
+    )
+    monkeypatch.setattr(_utils, "_INTEREST_TAG_CAP", 4)
+
+    summary = build_profile_summary(profile)
+    names = [str(i["name"]) for i in summary["interests"]]
+
+    # Domain tags first, then remaining slots go to the globally
+    # highest-weight specifics: 小域强项 (0.8) beats 娱乐次级 (0.3) even
+    # though its domain ranks lower. The old per-domain fill order
+    # admitted 娱乐次级 here and hid 小域强项.
+    assert names == ["娱乐", "小域", "娱乐头部", "小域强项"]

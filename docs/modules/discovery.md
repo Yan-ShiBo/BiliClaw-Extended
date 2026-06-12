@@ -627,7 +627,7 @@ profile_summary = build_profile_summary(profile)
 行为说明：
 
 - 这是 discovery 各策略共享的画像摘要入口，用来把 `SoulProfile` / `OnionProfile` 压成可序列化、可注入 prompt 的 dict。
-- 摘要会保留一级兴趣 `interest_domains`（前 128 个域，每域最多 5 个 specifics）和扁平兴趣 `interests`（最多 256 条），并带上 `first_seen` / `last_seen` / `source`，让搜索词生成和内容评估能区分长期稳定兴趣、近期新增兴趣和推断来源。两个列表都按 weight 降序排序后再截断，强兴趣不会被列表顺序挤掉；扁平 tag 先填所有域 tag、再按域权重填 specifics，保证每个高权重域至少有 tag 级曝光。
+- 摘要会保留一级兴趣 `interest_domains`（前 128 个域，每域最多 5 个 specifics）和扁平兴趣 `interests`（最多 256 条），并带上 `first_seen` / `last_seen` / `source`，让搜索词生成和内容评估能区分长期稳定兴趣、近期新增兴趣和推断来源。两个列表都按 weight 降序排序后再截断，强兴趣不会被列表顺序挤掉；扁平 tag 先填所有域 tag，剩余名额按 specifics **自身权重全局排序**填充（不设每域配额——此前伞形大域 200+ specifics 只露 top-5，0.8 权重的细分兴趣反而不可见），域级多样性由域 tag 和 `interest_domains` 区保证。
 - 摘要会带入 `disliked_topics[:128]`（与 `_DISLIKED_TOPICS_STORE_CAP` 对齐，存储的避雷项全部可见）；这些是长期避雷项，和 batch evaluator 的短期 `negative_examples` 互补。
 - 摘要会带入人格与决策上下文：`core_traits`、`cognitive_style`、`values`、`motivational_drivers`、`deep_needs`、`current_phase`、`life_stage`、`mbti`、`recent_awareness`、`active_insights`（觉察 / 洞察窗口按时间旧→新存储，摘要取**最新** 5 条——v0.3.121 及之前误取最旧 5 条）。
 - 摘要会带入消费上下文：`style`（含 `quality_sensitivity`）、`context`、`exploration_openness`、`source_platform_mix` 和 `_active_speculations`。
