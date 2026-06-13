@@ -225,7 +225,6 @@ discovery 不是“把整个找片过程都交给 LLM”。当前实现里，LLM
 
 ```json
 {
-  "personality_portrait": "最近更像在主动搭建自己的理解框架，喜欢把复杂问题拆开看。",
   "core_traits": ["理性", "好奇", "重结构"],
   "interests": [
     {"name": "国际局势", "category": "知识", "weight": 0.92},
@@ -316,7 +315,6 @@ discovery 不是“把整个找片过程都交给 LLM”。当前实现里，LLM
 ```json
 {
   "profile_summary": {
-    "personality_portrait": "更偏好高信息密度、能把复杂问题讲透的内容。",
     "core_traits": ["理性", "重结构"],
     "cognitive_style": ["喜欢结构化拆解", "先看证据再下判断"],
     "values": ["真实", "自主"],
@@ -604,6 +602,8 @@ discovery 不是“把整个找片过程都交给 LLM”。当前实现里，LLM
 | v0.3.x discovery 画像上下文补齐 | ✅ | `build_profile_summary()` 会把 `disliked_topics`、认知风格、价值观、内在驱动力、当前阶段、life stage、MBTI、来源平台分布、近期觉察、当前洞察、质量敏感度和兴趣来源时间一起带入 discovery profile summary，让 search / trending / explore / YouTube query 生成和 batch 内容评估都能看到更完整的画像上下文 |
 | v0.3.x 画像 / 评估输入上限放宽 | ✅ | 画像摘要扁平兴趣 tag 上限 10 → 30 → 64 → 256（一级域 8 → 128），且兴趣域 / 兴趣 tag 一律按 weight 降序排序后再截断（域 tag 先于 specifics 填充，保证每个高权重域至少有 tag 级曝光）；`disliked_topics` 8 → 16 → 64 → 128（与存储上限对齐，避雷项不再截断）；batch 评估 payload 的 `description` 截断 200 → 400 字符；负例锚定上限 8 → 16（见 soul 模块）。64 上限与计划中的 12h LLM 画像整理任务配套（整理卡 64 边界做去重合并） |
 | v0.3.x 画像输出移除 UP 主维度 | ✅ | `build_profile_summary()` 不再输出 `favorite_up_users`，`build_search_queries_prompt` 同步删除配套的「favorite_up_users 仅供背景参考」规则——避免模型从创作者名反推内容兴趣。`RelatedChainStrategy` 仍直接读 `preferences.favorite_up_users[:1]` 作种子，`/api/profile-summary` 用户视图不受影响 |
+| v0.3.123 统一 profile prompt 输入 + 移除人格素描 | ✅ | `build_profile_summary()` 成为各来源唯一的结构化画像输入：发现（search / trending / explore / 内容评估）与推荐（评估 / 文案 / 理由）共用同一份字段；不再输出 `personality_portrait` 那段总结性叙事（结构化字段已承载同样信号，且 prose 里的比喻会带偏 query / 文案生成）。人格素描仍照常生成并在画像页展示，只是不再进任何 LLM prompt。新增可选 `interests=` 形参，供推荐侧传入 embedding 选出的内容相关兴趣 |
+| v0.3.123 X/小红书/抖音关键词生成并入统一画像 + 字段上限 30 | ✅ | X (`strategies/x.py`)、小红书 (`sources/xhs_keyword_gen.py`)、抖音 (`strategies/douyin_direct.py`) 的搜索关键词生成统一改为吃完整 `build_profile_summary`（与 B站 / YouTube 关键词生成一致、带 `disliked_topics` 避雷）。X / 小红书取消原 top-15 兴趣元组截断；抖音从确定性取兴趣名升级为 LLM 生成（即设计里 deferred 的 `dy_explore`），**无 llm_service / 调用失败 / 空返回**时回退确定性兴趣名、`seed_keywords` 仍最优先。各自保留平台风格静态 system prompt。**内容评估**环节五平台本就共用 `build_profile_summary`。同时 `build_profile_summary` 中 `cognitive_style` / `values` / `motivational_drivers` / `deep_needs` 等原 `[:5]` → `[:30]`、`recent_awareness` / `active_insights` 窗口 `[-5:]` → `[-30:]`、每域 specifics（`_SPECIFICS_PER_DOMAIN`）`5` → `30` |
 | X (Twitter) 服务端 discovery | ✅ | 第六个内容源 `source_platform="twitter"`（标签 `"X"`）。`XAdapter` 服务端 cookie 重放（`XClient` 封装可选 extra `openbiliclaw[x]` 的 `twitter-cli`，lazy import + 只读），分发 `search`（画像关键词）/ `feed`（For-You）/ `creator`（账号订阅）三策略，经 `x_normalize.normalize_tweet()` 转 `DiscoveredContent`（`content_type ∈ {tweet, thread}` + `body_text` 全文）入统一候选池；后台由 `XDiscoveryProducer` 按预算 + 源健康调度 |
 | X 文字候选 body_text / content_type | ✅ | `DiscoveredContent` 增设 `body_text`（推文 / `note_tweet` 长文全文）+ `content_type`（`video`/`note`/`tweet`/`thread`，复用候选池既有 shape 字段，不新造 `media_type`）；两处 `content_type` 硬编码（`candidate_pool` write + 引擎候选 dict）改为优先取 `item.content_type`，全链路（enqueue → claim → admission → cache → API）透传，保证文字 / thread 候选正确流过 pending 评估 |
 | SearchStrategy LLM 评估 | ✅ | `SearchStrategy` 现在默认走 `evaluate_content()` LLM 打分（`llm_evaluation=True`），不再只用本地启发式（上限 0.62），可通过 `llm_evaluation=False` 关闭 |

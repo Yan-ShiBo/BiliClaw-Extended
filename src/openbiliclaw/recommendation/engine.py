@@ -47,16 +47,6 @@ def _profile_style_summary(profile: SoulProfile) -> dict[str, object]:
     }
 
 
-def _profile_context_summary(profile: SoulProfile) -> dict[str, object]:
-    context = profile.preferences.context
-    return {
-        "weekday_patterns": context.weekday_patterns,
-        "weekend_patterns": context.weekend_patterns,
-        "time_of_day_patterns": context.time_of_day_patterns,
-        "session_type": context.session_type,
-    }
-
-
 def _clone_tone_profile(tone: ToneProfile) -> ToneProfile:
     return {
         "density": tone["density"],
@@ -70,40 +60,18 @@ def _recommendation_profile_summary(
     profile: SoulProfile,
     *,
     interests: list[dict[str, object]] | None = None,
-    include_active_insights: bool = False,
 ) -> dict[str, object]:
-    summary: dict[str, object] = {
-        "personality_portrait": profile.personality_portrait,
-        "core_traits": profile.core_traits[:30],
-        "deep_needs": profile.deep_needs[:5],
-        "interests": interests
-        if interests is not None
-        else [
-            {
-                "name": item.name,
-                "category": item.category,
-                "weight": item.weight,
-            }
-            for item in _interests_by_weight(profile)[:256]
-        ],
-        "style": _profile_style_summary(profile),
-        "context": _profile_context_summary(profile),
-        "exploration_openness": profile.preferences.exploration_openness,
-        # Cap matches _DISLIKED_TOPICS_STORE_CAP (128) so avoid-topics are
-        # never cut: legacy store entries are alphabetically ordered, so any
-        # smaller cut would drop topics by codepoint, not by relevance.
-        "disliked_topics": profile.preferences.disliked_topics[:128],
-    }
-    if include_active_insights:
-        summary["active_insights"] = [
-            {
-                "hypothesis": str(getattr(ins, "hypothesis", "")),
-                "confidence": float(getattr(ins, "confidence", 0.5)),
-            }
-            # Chronological window: newest insights are at the tail.
-            for ins in getattr(profile, "active_insights", [])[-5:]
-        ]
-    return summary
+    """Unified profile input for recommendation prompts.
+
+    Delegates to :func:`build_profile_summary` so recommendation feeds the LLM
+    the exact same structured profile as discovery: no ``personality_portrait``
+    narrative, every other field included. Pass ``interests`` to substitute the
+    embedding-selected, content-relevant tag list for the default weight-ranked
+    one.
+    """
+    from openbiliclaw.discovery.strategies._utils import build_profile_summary
+
+    return build_profile_summary(profile, interests=interests)
 
 
 def _content_result_keys(content: DiscoveredContent) -> set[str]:
@@ -1274,10 +1242,7 @@ class RecommendationEngine:
 
         tone_profile = self._expression_tone_profile(profile, content)
         messages = build_delight_reason_prompt(
-            profile_summary=_recommendation_profile_summary(
-                profile,
-                include_active_insights=True,
-            ),
+            profile_summary=_recommendation_profile_summary(profile),
             content_summary={
                 "title": content.title,
                 "up_name": content.up_name,

@@ -18,7 +18,7 @@ _T = TypeVar("_T")
 # truncation so the strongest interests survive the cut, not whichever
 # happened to be listed first.
 _INTEREST_DOMAIN_CAP = 128
-_SPECIFICS_PER_DOMAIN = 5
+_SPECIFICS_PER_DOMAIN = 30
 _INTEREST_TAG_CAP = 256
 # Matches _DISLIKED_TOPICS_STORE_CAP so avoid-topics are NEVER cut from
 # prompts: the store predates the recency-ordered union (v0.3.121), so
@@ -349,7 +349,7 @@ def _summarize_mbti(profile: SoulProfile) -> dict[str, object] | None:
                 key: {"pole": dim.pole, "strength": dim.strength}
                 for key, dim in mbti.dimensions.items()
             },
-            "inferred_from": mbti.inferred_from[:5],
+            "inferred_from": mbti.inferred_from[:30],
         }
 
     raw_mbti = getattr(profile, "_raw_mbti", None)
@@ -375,7 +375,7 @@ def _summarize_mbti(profile: SoulProfile) -> dict[str, object] | None:
         "type": mbti_type,
         "confidence": _coerce_profile_float(raw_mbti.get("confidence", 0.0), 0.0),
         "dimensions": dimensions,
-        "inferred_from": _coerce_profile_str_list(raw_mbti.get("inferred_from"), limit=5),
+        "inferred_from": _coerce_profile_str_list(raw_mbti.get("inferred_from"), limit=30),
     }
 
 
@@ -383,7 +383,7 @@ def _summarize_recent_awareness(profile: SoulProfile) -> list[dict[str, str]]:
     notes: list[dict[str, str]] = []
     # The window is chronological oldest→newest, so the newest notes live
     # at the tail — [:5] would feed the LLM the *stalest* observations.
-    for note in profile.recent_awareness[-5:]:
+    for note in profile.recent_awareness[-30:]:
         item = {
             "date": note.date,
             "observation": note.observation,
@@ -398,10 +398,10 @@ def _summarize_recent_awareness(profile: SoulProfile) -> list[dict[str, str]]:
 def _summarize_active_insights(profile: SoulProfile) -> list[dict[str, object]]:
     insights: list[dict[str, object]] = []
     # Chronological window: newest insights are at the tail.
-    for insight in profile.active_insights[-5:]:
+    for insight in profile.active_insights[-30:]:
         item: dict[str, object] = {
             "hypothesis": insight.hypothesis,
-            "evidence": insight.evidence[:5],
+            "evidence": insight.evidence[:30],
             "confidence": insight.confidence,
             "validated": insight.validated,
         }
@@ -412,30 +412,45 @@ def _summarize_active_insights(profile: SoulProfile) -> list[dict[str, object]]:
     return insights
 
 
-def build_profile_summary(profile: SoulProfile) -> dict[str, object]:
-    """Build a compact summary dict from a :class:`SoulProfile`.
+def build_profile_summary(
+    profile: SoulProfile,
+    *,
+    interests: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Build the canonical structured profile input shared by every prompt.
+
+    This is the single profile representation fed to the LLM across all
+    source-platform content calls — discovery (search / trending / explore /
+    evaluation) and recommendation (evaluation / expression / reason) alike.
+
+    The free-form ``personality_portrait`` narrative is deliberately excluded:
+    the structured fields below already carry the same signal, and the prose
+    summary only duplicated it (and biased query/expression generation with its
+    decorative metaphors). The portrait is still generated and shown in the
+    profile UI — it just no longer enters any LLM prompt.
 
     Includes both domain-level (一级) and specific (二级) interests so that
     discovery prompts can generate queries at different granularity levels.
+    Pass ``interests`` to override the default weight-ranked tag list (e.g.
+    recommendation's embedding-selected, content-relevant interests).
     """
     interest_domains = _extract_interest_domains(profile)
     summary: dict[str, object] = {
-        "personality_portrait": profile.personality_portrait,
         "core_traits": profile.core_traits[:30],
-        "cognitive_style": profile.cognitive_style[:5],
-        "values": profile.values[:5],
-        "motivational_drivers": profile.motivational_drivers[:5],
+        "cognitive_style": profile.cognitive_style[:30],
+        "values": profile.values[:30],
+        "motivational_drivers": profile.motivational_drivers[:30],
         "current_phase": profile.current_phase,
         "life_stage": profile.life_stage,
         "interest_domains": interest_domains,
-        "interests": _extract_interest_tags(profile),
+        "interests": interests if interests is not None else _extract_interest_tags(profile),
         # favorite_up_users is intentionally excluded from the LLM-facing
         # profile output: "常看某创作者" ≠ "对该创作者内容类型感兴趣", and it
         # only invited the model to back-derive interests from creator names.
         # The user's UP list still lives in /api/profile-summary (their own
         # view) and seeds related_chain directly — just not here.
         "disliked_topics": profile.preferences.disliked_topics[:_DISLIKED_TOPICS_CAP],
-        "deep_needs": profile.deep_needs[:5],
+        "deep_needs": profile.deep_needs[:30],
         "style": {
             "preferred_duration": profile.preferences.style.preferred_duration,
             "preferred_pace": profile.preferences.style.preferred_pace,
@@ -465,7 +480,7 @@ def build_profile_summary(profile: SoulProfile) -> dict[str, object]:
                 "domain": s.domain if hasattr(s, "domain") else str(s.get("domain", "")),
                 "reason": s.reason if hasattr(s, "reason") else str(s.get("reason", "")),
             }
-            for s in speculations[:5]
+            for s in speculations[:30]
         ]
     return summary
 

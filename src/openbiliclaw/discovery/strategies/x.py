@@ -33,6 +33,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from openbiliclaw.discovery.strategies._utils import build_profile_summary
 from openbiliclaw.discovery.x_normalize import normalize_tweet
 from openbiliclaw.llm.json_utils import parse_llm_json_tolerant
 
@@ -183,18 +184,13 @@ class XSearchStrategy:
     async def _generate_keywords(self, profile: SoulProfile) -> list[str]:
         if self.llm_service is None:
             return []
-        interests = list(profile.preferences.interests)
-        if not interests:
-            return []
-        interests.sort(key=lambda t: t.weight, reverse=True)
-        interest_tuples = [(t.name, t.category, t.weight) for t in interests if t.name]
-        if not interest_tuples:
+        if not profile.preferences.interests:
             return []
 
         try:
             response = await self.llm_service.complete_structured_task(
                 system_instruction=_KEYWORDS_SYSTEM_PROMPT,
-                user_input=_build_keyword_user_prompt(interest_tuples, self.keywords_per_run),
+                user_input=_build_keyword_user_prompt(profile, self.keywords_per_run),
                 temperature=0.8,
                 max_tokens=512,
                 caller="discovery.x.keyword_gen",
@@ -208,16 +204,18 @@ class XSearchStrategy:
         return _parse_keywords(text, count=self.keywords_per_run)
 
 
-def _build_keyword_user_prompt(
-    interest_tags: list[tuple[str, str, float]],
-    count: int,
-) -> str:
-    lines = ["用户兴趣画像（name | category | weight）："]
-    for name, category, weight in interest_tags[:15]:
-        cat = category or "-"
-        lines.append(f"- {name} | {cat} | {weight:.2f}")
-    lines.append(f"\n请输出 {count} 个适合 X 搜索的关键词。")
-    return "\n".join(lines)
+def _build_keyword_user_prompt(profile: SoulProfile, count: int) -> str:
+    # Same canonical structured profile every other discovery prompt sees
+    # (B站 / YouTube query-gen, all-platform evaluation) — no divergent
+    # representation. Deterministic dump keeps the prompt-cache prefix stable.
+    summary = build_profile_summary(profile)
+    return (
+        "<profile_summary>\n"
+        + json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n</profile_summary>\n\n"
+        + "请基于上面画像里的兴趣（interests / interest_domains），结合 disliked_topics 避雷，"
+        + f"输出 {count} 个适合 X 搜索的关键词。"
+    )
 
 
 # ── XForYouStrategy ──────────────────────────────────────────────────

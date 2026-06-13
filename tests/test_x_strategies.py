@@ -105,6 +105,26 @@ async def test_search_strategy_calls_client_search_and_normalizes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_keyword_prompt_uses_unified_profile_summary() -> None:
+    # Keyword generation now feeds the same build_profile_summary dict as
+    # B站 / YouTube query-gen — not the old top-15 name|category|weight tuples.
+    client = _FakeXClient(search_result=[_tweet("1790000000000000009")])
+    llm = _FakeLLMService('{"keywords": ["rust async runtime"]}')
+    strategy = XSearchStrategy(client=client, llm_service=llm)
+
+    await strategy.discover(_profile(), limit=5)
+
+    assert llm.calls and llm.calls[0]["caller"] == "discovery.x.keyword_gen"
+    user_input = str(llm.calls[0]["user_input"])
+    assert "<profile_summary>" in user_input
+    # interest_domains / disliked_topics are structured fields the old tuple
+    # prompt never carried — their presence proves the unified dict is in use.
+    assert "interest_domains" in user_input
+    assert "disliked_topics" in user_input
+    assert "name | category | weight" not in user_input
+
+
+@pytest.mark.asyncio
 async def test_search_strategy_explicit_query_skips_llm() -> None:
     client = _FakeXClient(search_result=[_tweet("1790000000000000002")])
     llm = _FakeLLMService('{"keywords": ["should not be used"]}')

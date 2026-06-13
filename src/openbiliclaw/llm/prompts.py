@@ -1473,12 +1473,10 @@ def build_explore_domains_prompt(
      - 幽默·吐槽·消遣    ：搞笑、鬼畜、整活、轻松吐槽
    例：5 个 domain 不许全在"拆解·系统·结构"轴里换皮（钟表/榫卯/开发板/电路/模型
    都属于同一个轴——拆解结构——这种安排是错的）；必须把 5 个槽位分散到至少 4 个不同的轴。
-12. 重要：personality_portrait 里出现的具体名词（如"机械结构""手工技艺""琢磨某物"
-   "钻研某活"等）只是写作时的文风装饰，**不是真实的兴趣信号**。
-   你判断用户兴趣方向时**只能依赖 `interests` 字段中的明确标签**，
-   绝对不要把 portrait 里的比喻或例子当成探索目标。
-   如果 portrait 提到"机械结构"，你不应该把"机械"或"精密拆解"当成 domain；
-   而应该看 interests 实际有什么、并在心理诉求轴清单里挑一个**还没被占用**的轴去拓展。
+12. 重要：判断用户兴趣方向时**只能依赖 `interests` / `interest_domains` 字段中的明确标签**，
+   不要从 core_traits、deep_needs 等人格/心理描述里的比喻或例子反推出兴趣目标
+   （例如看到"钻研""精密"这类字眼就臆造出"机械结构""精密拆解"之类 domain）。
+   应该看 interests 实际有什么、并在心理诉求轴清单里挑一个**还没被占用**的轴去拓展。
 13. **盲区优先 (v0.3.31+)**: 如果 user 消息里给了 `<covered_topic_groups>` 块，
    表示这些 topic_group 在用户推荐池里已经堆积，本轮探索**尽量绕开**这些方向，
    优先去探索没被覆盖的领域。如果实在某条 domain 跟 covered 列表里的方向有重合，
@@ -1569,7 +1567,7 @@ def build_speculation_generation_prompt(
         "<signal_weights>\n"
         "综合用户信号时按以下权重决策：\n"
         "  ≈50%  用户的 likes 分布（直接反映 ta 实际在看什么、占比多少）\n"
-        "  ≈30%  portrait + deep_needs + motivational_drivers（内在动力）\n"
+        "  ≈30%  deep_needs + motivational_drivers（内在动力）\n"
         "  ≈15%  core_traits + cognitive_style（处理信息的风格）\n"
         "   ≤5%  MBTI（**仅作弱参考**）\n"
         "\n"

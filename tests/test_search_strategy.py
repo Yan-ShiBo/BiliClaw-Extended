@@ -646,6 +646,8 @@ def test_build_profile_summary_keeps_newest_window_and_all_dislikes() -> None:
     profile.preferences.disliked_topics = [f"避雷{i}" for i in range(1, 141)]
     # Windows are chronological oldest→newest (cognition_cycle keeps the
     # tail); the summary must surface the newest entries, not the stalest.
+    # 31 entries against a 30-wide window: the oldest one must drop, proving
+    # the summary surfaces the newest 30 (tail), not the stalest.
     profile.recent_awareness = [
         AwarenessNote(
             date=f"2026-06-{day:02d}",
@@ -653,11 +655,11 @@ def test_build_profile_summary_keeps_newest_window_and_all_dislikes() -> None:
             trend="",
             emotion_guess="",
         )
-        for day in range(1, 9)
+        for day in range(1, 32)
     ]
     profile.active_insights = [
         InsightHypothesis(hypothesis=f"洞察{i}", evidence=["证据"], confidence=0.5)
-        for i in range(1, 7)
+        for i in range(1, 32)
     ]
 
     summary = build_profile_summary(profile)
@@ -665,10 +667,10 @@ def test_build_profile_summary_keeps_newest_window_and_all_dislikes() -> None:
     # Dislike cap == store cap (128): nothing stored is hidden from prompts.
     assert summary["disliked_topics"] == [f"避雷{i}" for i in range(1, 129)]
     assert [n["observation"] for n in summary["recent_awareness"]] == [
-        f"观察{day}" for day in range(4, 9)
+        f"观察{day}" for day in range(2, 32)
     ]
     assert [i["hypothesis"] for i in summary["active_insights"]] == [
-        f"洞察{i}" for i in range(2, 7)
+        f"洞察{i}" for i in range(2, 32)
     ]
 
 

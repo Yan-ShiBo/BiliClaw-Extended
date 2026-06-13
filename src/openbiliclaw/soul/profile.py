@@ -112,15 +112,21 @@ class SoulProfile:
     updated_at: str = ""
     version: int = 0
 
-    def to_llm_context(self) -> str:
+    def to_llm_context(self, *, include_portrait: bool = True) -> str:
         """Generate a natural language summary for LLM context.
 
         Returns a rich description that can be injected into LLM prompts
         to give the agent full understanding of the user.
+
+        Set ``include_portrait=False`` to omit the free-form
+        ``personality_portrait`` narrative — production prompts that consume
+        the structured fields keep it out (see the prompt-input unification),
+        while eval/persona rendering keeps the default so the portrait stays
+        part of the persona ground truth.
         """
         parts = []
 
-        if self.personality_portrait:
+        if include_portrait and self.personality_portrait:
             parts.append(f"## 用户画像\n{self.personality_portrait}")
 
         if self.core_traits:
@@ -711,9 +717,9 @@ class OnionProfile:
             version=2,
         )
 
-    def to_llm_context(self) -> str:
+    def to_llm_context(self, *, include_portrait: bool = True) -> str:
         parts: list[str] = []
-        if self.personality_portrait:
+        if include_portrait and self.personality_portrait:
             parts.append(f"## 用户画像\n{self.personality_portrait}")
         if self.core.core_traits:
             parts.append(f"## 核心特质\n{', '.join(self.core.core_traits)}")
