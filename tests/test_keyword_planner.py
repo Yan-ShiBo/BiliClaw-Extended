@@ -356,6 +356,134 @@ async def test_missing_platform_in_result_falls_back(db: Database) -> None:
     assert _pending(db, _XHS, digest) == ["露营", "和田玉"]
 
 
+# ── P2.2 decline vs failure ───────────────────────────────────────────────
+
+
+async def test_explicit_empty_platform_declines_no_fallback(db: Database) -> None:
+    """A SUCCESSFUL merged call where a platform returns an explicit ``[]`` is an
+    intentional decline (P2.2): that platform gets NO interest-name fallback and
+    NO pending row, while a different platform that returned words still gets
+    them. The declined platform keeps its (here empty) pending for next cycle."""
+    profile = _profile(("露营", 0.9), ("和田玉", 0.7))
+    digest = profile_kw_digest(profile)
+    # bilibili gets keywords; xiaohongshu explicitly declines with [].
+    llm = _FakeLLM(payload={_BILI: ["露营 盘点", "和田玉 入门"], _XHS: []})
+    deficit = _FakeDeficitSource(deficits={_BILI: 40, _XHS: 33})
+    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit)
+
+    ledger = await planner.run_once()
+
+    # bilibili used the model output.
+    assert _pending(db, _BILI, digest) == ["露营 盘点", "和田玉 入门"]
+    assert ledger[_BILI] == 2
+    # xiaohongshu declined → NO interest-name fallback, NO pending row.
+    assert _pending(db, _XHS, digest) == []
+    assert ledger[_XHS] == 0
+    # Crucially the fallback interest names were NOT inserted for XHS.
+    assert "露营" not in _pending(db, _XHS, digest)
+
+
+async def test_declined_platform_does_not_recycle(db: Database) -> None:
+    """A declined platform is left fully alone — even when it has ``used`` words
+    that recycle-on-shortfall could otherwise top up, decline wins (no recycle,
+    no fallback). Distinguishes decline from the sparse-profile recycle path."""
+    profile = _profile(("露营", 0.9))
+    digest = profile_kw_digest(profile)
+    # Seed a used word so a recycle WOULD be possible if the platform were not
+    # declining (proves decline suppresses recycle-on-shortfall too).
+    db.insert_pending_keywords(_XHS, ["老词"], digest)
+    [seed] = db.claim_keywords(_XHS, 1)
+    db.mark_keyword_used(int(seed["id"]))
+    assert db.count_pending_keywords(_XHS, digest) == 0
+
+    llm = _FakeLLM(payload={_XHS: []})  # explicit decline
+    deficit = _FakeDeficitSource(deficits={_XHS: 33})
+    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit)
+
+    ledger = await planner.run_once()
+
+    # Declined → still empty, the used word was NOT recycled back.
+    assert _pending(db, _XHS, digest) == []
+    assert ledger[_XHS] == 0
+
+
+async def test_call_failure_falls_back_for_all_due_even_with_decline_shape(
+    db: Database,
+) -> None:
+    """When the merged LLM call FAILS entirely, every due platform falls back to
+    interest names — there is no 'decline' on a failed call (P2.2: decline is
+    only inferred from a successful, parsed response)."""
+    profile = _profile(("露营", 0.9), ("和田玉", 0.7))
+    digest = profile_kw_digest(profile)
+    llm = _RaisingLLM()
+    deficit = _FakeDeficitSource(deficits={_BILI: 40, _XHS: 33, _DOUYIN: 33})
+    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit)
+
+    ledger = await planner.run_once()
+
+    assert llm.calls == ["discovery.keyword_planner"]
+    # ALL three due platforms fell back (none treated as a decline).
+    for platform in (_BILI, _XHS, _DOUYIN):
+        assert _pending(db, platform, digest) == ["露营", "和田玉"]
+        assert ledger[platform] == 2
+
+
+# ── P2.3 recycle-on-shortfall ─────────────────────────────────────────────
+
+
+async def test_recycle_on_shortfall_tops_up_low_non_declined_platform(db: Database) -> None:
+    """A non-declined platform that produced SOME new words but whose pending is
+    still below ``kw_cache_low`` is topped up from its oldest ``used`` words
+    (P2.3) — no extra LLM call, conservative top-up only to the gap."""
+    profile = _profile(("露营", 0.9))
+    digest = profile_kw_digest(profile)
+    # Three used words available to recycle (oldest-first).
+    db.insert_pending_keywords(_XHS, ["旧1", "旧2", "旧3"], digest)
+    for row in db.claim_keywords(_XHS, 3):
+        db.mark_keyword_used(int(row["id"]))
+    assert db.count_pending_keywords(_XHS, digest) == 0
+
+    # low=5; the model returns only 1 NEW word → pending=1 < low → recycle tops
+    # up the 4-word gap from the 3 available used words (capped by availability).
+    cfg = _discovery_cfg(kw_cache_low=5, kw_cache_high=30)
+    llm = _FakeLLM(payload={_XHS: ["新词"]})
+    deficit = _FakeDeficitSource(deficits={_XHS: 33})
+    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit, discovery=cfg)
+
+    ledger = await planner.run_once()
+
+    pending = _pending(db, _XHS, digest)
+    # The new word plus the recycled used words (all 3, since 3 < the 4-word gap).
+    assert "新词" in pending
+    assert {"旧1", "旧2", "旧3"}.issubset(set(pending))
+    # ledger counts the new insert (1) + recycled rows (3) = 4.
+    assert ledger[_XHS] == 4
+
+
+async def test_no_recycle_when_pending_already_at_or_above_low(db: Database) -> None:
+    """When a platform's pending is already at / above ``kw_cache_low`` after the
+    insert, recycle-on-shortfall does NOT fire (it stays conservative)."""
+    profile = _profile(("露营", 0.9))
+    digest = profile_kw_digest(profile)
+    # A used word that COULD be recycled if shortfall fired.
+    db.insert_pending_keywords(_XHS, ["可回收"], digest)
+    [seed] = db.claim_keywords(_XHS, 1)
+    db.mark_keyword_used(int(seed["id"]))
+
+    # low=2; model returns 2 new words → pending=2 == low → no shortfall.
+    cfg = _discovery_cfg(kw_cache_low=2, kw_cache_high=30)
+    llm = _FakeLLM(payload={_XHS: ["新1", "新2"]})
+    deficit = _FakeDeficitSource(deficits={_XHS: 33})
+    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit, discovery=cfg)
+
+    ledger = await planner.run_once()
+
+    pending = _pending(db, _XHS, digest)
+    assert set(pending) == {"新1", "新2"}
+    assert "可回收" not in pending  # not recycled
+    assert ledger[_XHS] == 2
+
+
 async def test_bilibili_catalyst_due_even_when_cache_not_below_low(db: Database) -> None:
     """B站 enters ``due`` on its catalyst (pool-below-target / ≥6 signals) even
     when its keyword cache is NOT below the low watermark and it has no
@@ -523,7 +651,12 @@ async def test_cycle_ledger_captures_per_platform_generated_and_yield(db: Databa
 
     llm = _FakeLLM(payload={_BILI: ["露营 盘点", "和田玉 入门"], _XHS: ["露营 vlog"]})
     deficit = _FakeDeficitSource(deficits={_BILI: 40, _XHS: 33})
-    planner = _make_planner(db, llm=llm, profile=profile, deficit=deficit)
+    # kw_cache_low=1 keeps this an observability-only assertion: the 2/1
+    # generated counts already clear the watermark, so P2.3 recycle-on-shortfall
+    # does not fire and the ledger reflects the raw model output.
+    planner = _make_planner(
+        db, llm=llm, profile=profile, deficit=deficit, discovery=_discovery_cfg(kw_cache_low=1)
+    )
 
     generated = await planner.run_once()
 

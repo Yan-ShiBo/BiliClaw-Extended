@@ -17,10 +17,20 @@ controller's ``run_forever``) and, when the
    builds one merged ``<platforms>`` block and issues a **single** structured
    LLM call covering all due platforms. Parsed keywords are inserted as
    ``pending`` per platform under the current digest.
-3. On LLM failure — or for any platform the model omits / returns nothing for
-   — that platform falls back to deterministic weight-ranked interest names.
-   If a due platform still yields nothing new (sparse profile), the planner
-   recycles that platform's oldest ``used`` keywords back to ``pending``.
+3. Decline vs failure (P2.2). When the merged call **succeeds**, a platform the
+   model explicitly returned an empty list ``[]`` for is an **intentional
+   decline** (its supply advantage doesn't fit the user) — it is skipped this
+   cycle with NO interest-name fallback (it stays at its current pending and is
+   re-offered next cycle if still due). A platform the model **omits** still
+   falls back. When the merged call **fails entirely** (raised / no usable
+   response), ALL due platforms fall back to deterministic interest names.
+4. Rotation polish (P2.3). ``claim_keywords`` is FIFO (oldest pending first), so
+   generated words rotate fairly. After a generation cycle, a non-declined due
+   platform whose pending is still below ``kw_cache_low`` is conservatively
+   topped up from its oldest ``used`` words via ``recycle_oldest_used`` (no
+   extra LLM call) so variety keeps flowing; a declined platform is left alone.
+   The sparse-profile recycle (generation + fallback produced nothing new)
+   stays as the deeper safety valve.
 
 It never fetches — fetch (claim → search) is P1.7. Single-flight is enforced
 through the DB-level planner lock, whose write transaction is released
@@ -37,7 +47,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from openbiliclaw.discovery.keyword_digest import profile_kw_digest
 from openbiliclaw.discovery.pool_snapshot import build_pool_distribution_snapshot
-from openbiliclaw.llm.prompts import build_merged_keywords_prompt, parse_merged_keywords
+from openbiliclaw.llm.prompts import (
+    build_merged_keywords_prompt,
+    parse_merged_keywords_with_presence,
+)
 
 if TYPE_CHECKING:
     from openbiliclaw.config import Config, DiscoveryConfig
@@ -321,6 +334,13 @@ class KeywordPlanner:
             )
 
         generated: dict[str, list[str]] = {}
+        present: set[str] = set()
+        # ``call_failed`` distinguishes "the merged LLM call raised / returned
+        # nothing usable" (→ fall back for ALL due platforms) from "the call
+        # succeeded but platform X returned an explicit empty list" (→ X
+        # declined, skip it without a fallback). It stays False when there was
+        # nothing to call (``blocks`` empty) — no failure, just nothing to do.
+        call_failed = False
         if blocks:
             target_platforms = [str(block["platform"]) for block in blocks]
             try:
@@ -336,7 +356,7 @@ class KeywordPlanner:
                     reasoning_effort="",
                 )
                 content = str(getattr(response, "content", "") or "")
-                generated = parse_merged_keywords(
+                generated, present = parse_merged_keywords_with_presence(
                     content,
                     target_platforms,
                     per_platform_cap=max(0, int(self._discovery.gen_batch)),
@@ -348,7 +368,10 @@ class KeywordPlanner:
                     target_platforms,
                 )
                 generated = {}
+                present = set()
+                call_failed = True
 
+        low = int(self._discovery.kw_cache_low)
         ledger: dict[str, int] = {}
         # Only platforms with a real need (need > 0) generate / insert. A
         # platform marked due purely by the B站 catalyst whose cache is already
@@ -356,17 +379,40 @@ class KeywordPlanner:
         # receive a fallback insert.
         for platform in needs:
             words = generated.get(platform, [])
+            declined = False
             if not words:
-                # Missing platform / LLM failure / empty → deterministic
-                # interest-name fallback (P1.3 mirror), capped at gen_batch.
-                cap = max(0, int(self._discovery.gen_batch))
-                words = self._interest_fallback(profile, cap)
+                if not call_failed and platform in present:
+                    # P2.2 decline: the merged call succeeded and the model
+                    # explicitly returned [] for this platform → intentional
+                    # decline (interests don't fit its supply advantage). Skip:
+                    # NO fallback, NO recycle. It keeps its current pending and
+                    # is re-offered next cycle if still due.
+                    declined = True
+                else:
+                    # Call failed entirely, or the model omitted this platform →
+                    # deterministic interest-name fallback (P1.3 mirror).
+                    cap = max(0, int(self._discovery.gen_batch))
+                    words = self._interest_fallback(profile, cap)
+
+            if declined:
+                ledger[platform] = 0
+                continue
+
             inserted = self._insert(platform, words, digest)
             if inserted <= 0:
                 # Sparse profile: generation + fallback produced nothing new
                 # for a due platform → recycle its oldest used keywords so the
                 # cache does not starve.
-                inserted = self._recycle(platform, needs[platform], digest)
+                inserted += self._recycle(platform, needs[platform], digest)
+            else:
+                # P2.3 recycle-on-shortfall: the platform produced SOME new
+                # words but its pending is still below the low watermark → top
+                # it up from its oldest used words (no extra LLM call) so
+                # variety keeps flowing. Conservative: only the remaining gap to
+                # low, and never for a declined platform (handled above).
+                shortfall = low - self._count_pending(platform, digest)
+                if shortfall > 0:
+                    inserted += self._recycle(platform, shortfall, digest)
             ledger[platform] = inserted
 
         self._emit_cycle_ledger(ledger, digest)

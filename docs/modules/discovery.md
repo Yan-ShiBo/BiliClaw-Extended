@@ -583,6 +583,8 @@ discovery 不是“把整个找片过程都交给 LLM”。当前实现里，LLM
 
 **成本可观测**：合并调用是**一次 response**，token 无法在平台间拆分 → 统一记单一 caller `discovery.keyword_planner`（`openbiliclaw cost --by caller` 可见 search 关键词总成本随合并而塌缩）。per-platform 归因不靠冒充 token 拆分，而靠 planner 每轮 emit 的结构化 ledger（`{platform: {generated, yield}}`，`generated` 取本轮产词数、`yield` 取 `keyword_yield_total(platform)` 的累计 admit 产出），落在 `keyword planner cycle ledger` 日志行、并存于 `KeywordPlanner.last_cycle_ledger`。
 
+**P2 打磨（供给优势 / 弃权 / 轮换）**：合并 prompt 的静态 system 里加了**平台供给优势表**（B站 学习区/梗、小红书 生活/美妆、抖音 娱乐/热点、YouTube 英文长内容、X 实时/英文），让模型把用户兴趣映射到各平台真正有货的方向；并允许**弃权**——某平台供给与用户兴趣不匹配时可少出或返回 `[]`。planner 区分「弃权」与「调用失败」：合并调用**成功**但某平台返回空 = 故意弃权（**不**回退确定性兴趣名、本轮跳过）；**整次调用失败**才对所有 due 平台回退兴趣名。轮换上 `claim_keywords` 严格 FIFO（最旧 pending 先出），非弃权平台生成后仍低于低水位则按缺口 `recycle_oldest_used` 补足，保持多样性而不再额外调 LLM。
+
 **如何开启**：把 `config.toml` 里 `[discovery].unified_keyword_planner_enabled` 设为 `true`（其余 `kw_cache_high/low`、`gen_batch`、`fetch_batch`、`history_window_*`、`claim_lease_minutes`、`planner_poll_seconds`、`plan_ttl_hours` 用 §6 默认即可，详见 `docs/modules/config.md`）。生产启用是一次显式 opt-in 配置切换；端到端正确性由 `tests/test_keyword_backpressure_e2e.py` 在 flag-on 下覆盖。
 
 ## 已实现功能

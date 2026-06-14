@@ -104,6 +104,30 @@ class TestAtomicClaim:
         assert db.claim_keywords(_BILI, 0) == []
         assert db.claim_keywords(_XHS, 5) == []  # different platform, nothing pending
 
+    def test_claim_is_fifo_oldest_pending_first(self, db: Database) -> None:
+        """P2.3: ``claim_keywords`` claims the OLDEST pending rows first so
+        generated words rotate through fairly. With distinct ``created_at``
+        stamps the order is unambiguous; a partial claim leaves the newest."""
+        # Three words inserted; rewind created_at so "oldest" is well-defined
+        # (a single batch shares a second-granularity CURRENT_TIMESTAMP).
+        db.insert_pending_keywords(_BILI, ["oldest", "middle", "newest"], _DIGEST_A)
+        ids = {
+            str(r["keyword"]): int(r["id"])
+            for r in db.conn.execute(
+                "SELECT id, keyword FROM discovery_keywords WHERE platform = ?", (_BILI,)
+            ).fetchall()
+        }
+        _backdate(db, ids["oldest"], "created_at", minutes_ago=30)
+        _backdate(db, ids["middle"], "created_at", minutes_ago=20)
+        _backdate(db, ids["newest"], "created_at", minutes_ago=10)
+
+        # Claim two → must be the two oldest, in oldest-first order.
+        first_two = [str(r["keyword"]) for r in db.claim_keywords(_BILI, 2)]
+        assert first_two == ["oldest", "middle"]
+        # The newest stays pending and is claimed last.
+        remaining = [str(r["keyword"]) for r in db.claim_keywords(_BILI, 2)]
+        assert remaining == ["newest"]
+
 
 class TestLifecycleTransitions:
     def test_used_only_from_inflight(self, db: Database) -> None:

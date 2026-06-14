@@ -1890,9 +1890,10 @@ def build_profile_consolidation_prompt(
 # CLAUDE.md "LLM Prompt-Cache Convention": NOTHING per-call lives here —
 # the profile, the due-platform set, each platform's need count, recent
 # keywords, and avoid_* hints ALL live in the user message (<profile_summary>
-# + <platforms>). The supply-advantage hints below are kept deliberately
-# MINIMAL (one native-flavor line per platform); the rich supply table is
-# P2's job, not this builder's.
+# + <platforms>). The <supply_advantage> block below (P2) is STATIC per
+# platform (it describes where each platform structurally has good content,
+# never anything about *this* user), so it belongs in the system constant and
+# the call-invariance test still holds.
 _MERGED_KEYWORDS_SYSTEM_PROMPT = (
     "<task>\n"
     "你要为多个平台的内容发现一次性生成搜索关键词。\n"
@@ -1901,6 +1902,19 @@ _MERGED_KEYWORDS_SYSTEM_PROMPT = (
     "(要生成多少个该平台关键词)、recent_keywords(最近已经搜过、不要再出的词)、"
     "avoid_topics / avoid_styles / avoid_franchises(当前推荐池已饱和、要避开的方向)。\n"
     "</task>\n\n"
+    "<supply_advantage>\n"
+    "每个平台结构性擅长的内容方向不同(下面是平台的固有供给优势,与具体用户无关)。"
+    "请把用户画像里的兴趣,映射到该平台真正有好内容的形态上:\n"
+    "  - bilibili:学习区 / 知识科普 / 深度长视频 / 梗文化 / 技术。把兴趣做成"
+    "主题 + 风格词(盘点 / 入门 / 测评 / 教程 / 整活)。\n"
+    "  - xiaohongshu:生活方式 / 好物种草 / 教程攻略 / 美妆 / 体验分享。具象、带场景的"
+    "长尾(教程 / 攻略 / vlog / 踩坑 / 真实体验),避免裸类目词。\n"
+    "  - douyin:短视频 / 娱乐 / 热点 / 搞笑 / 才艺。短平快、口语、跟得上当下热度。\n"
+    "  - youtube:英文长内容 / 纪录片 / 讲座 / 国际视角。2-4 词,中英文按话题选最常见的"
+    "搜索语言。\n"
+    "  - twitter:实时讨论 / 英文技术 / 观点 / 资讯。1-4 词,技术 / 小众话题尤其优先英文,"
+    "华语圈话题可用中文。\n"
+    "</supply_advantage>\n\n"
     "<rules>\n"
     "1. 输出必须是严格 JSON 对象,不要附带解释。\n"
     "2. JSON 的 key 必须是 <platforms> 里出现的 platform 标识符"
@@ -1912,15 +1926,12 @@ _MERGED_KEYWORDS_SYSTEM_PROMPT = (
     "5. **不要重复**该平台 recent_keywords 里已有的词(换皮、加无意义尾词也算重复)。\n"
     "6. 避开该平台的 avoid_topics / avoid_styles / avoid_franchises;这些是软避让信号,"
     "不要为了避让而生成与用户画像无关的词。\n"
-    "7. 保持每个平台的原生搜索风格,把同一个兴趣映射到该平台最擅长的形态:\n"
-    "   - bilibili:学习向 + 梗文化,兴趣主题 + 风格词(盘点 / 入门 / 测评 / 整活)。\n"
-    "   - xiaohongshu:生活化、具象、带场景,偏美妆 / 生活 / 体验长尾"
-    "(教程 / 攻略 / vlog / 踩坑 / 真实体验),避免裸类目词。\n"
-    "   - douyin:娱乐 + 热点,短平快、口语、跟得上当下热度的词。\n"
-    "   - youtube:英文长内容为主,2-4 词,中英文按话题选最常见的搜索语言。\n"
-    "   - twitter:实时 / 英文讨论为主,1-4 词,技术 / 小众话题尤其优先英文,"
-    "华语圈话题可用中文。\n"
-    "8. 同一平台内各关键词的核心主题词要两两不同,不要同一概念换皮出现多次。\n"
+    "7. 把同一个兴趣映射到该平台 <supply_advantage> 里描述的强项形态上,保持该平台的"
+    "原生搜索风格。\n"
+    "8. **弃权(可少出 / 不出)**:如果用户的兴趣和某个平台的 <supply_advantage> 基本不"
+    "匹配(在该平台搜不到对用户有价值的内容),就为该平台返回更少、甚至空数组 []——"
+    "不要硬凑、不要为了填满 need 而编造不契合该平台的词。该平台留空是允许且正确的。\n"
+    "9. 同一平台内各关键词的核心主题词要两两不同,不要同一概念换皮出现多次。\n"
     "</rules>\n\n"
     "<output_schema>\n"
     "{\n"
@@ -2001,18 +2012,53 @@ def parse_merged_keywords(
         ``{platform: [keyword, ...]}`` for every platform in ``platforms``,
         each list deduped (order-preserving) and capped at ``per_platform_cap``.
     """
+    keywords, _present = parse_merged_keywords_with_presence(
+        content, platforms, per_platform_cap=per_platform_cap
+    )
+    return keywords
+
+
+def parse_merged_keywords_with_presence(
+    content: str,
+    platforms: list[str],
+    *,
+    per_platform_cap: int,
+) -> tuple[dict[str, list[str]], set[str]]:
+    """Like :func:`parse_merged_keywords` but also report decline vs omission.
+
+    The planner (P2.2) must tell an **intentional decline** — the model
+    addressed the platform and returned an explicit empty list ``[]`` (the
+    user's interests don't fit that platform's supply advantage, see system
+    prompt rule 8) — apart from an **omission** (the platform key is absent /
+    non-list garbage, the model never answered for it). The first must NOT
+    trigger the interest-name fallback (skip the platform this cycle); the
+    second still falls back.
+
+    A platform counts as "present" when the parsed payload is a dict and that
+    platform's value is a JSON list (``[]`` included). A non-list value
+    (``"x"`` / ``42`` / missing) is NOT present → omission → fallback. With
+    ``per_platform_cap <= 0`` nothing is parsed and no platform is present.
+
+    Returns:
+        ``(keywords_by_platform, present_platforms)`` where ``keywords`` has a
+        key for every requested platform (deduped, capped) and
+        ``present_platforms`` is the subset whose value was an explicit list.
+    """
     result: dict[str, list[str]] = {platform: [] for platform in platforms}
+    present: set[str] = set()
     if per_platform_cap <= 0:
-        return result
+        return result, present
 
     payload = parse_llm_json_tolerant(content)
     if not isinstance(payload, dict):
-        return result
+        return result, present
 
     for platform in platforms:
         raw = payload.get(platform)
         if not isinstance(raw, list):
             continue
+        # An explicit list (even empty) means the model addressed this platform.
+        present.add(platform)
         seen: set[str] = set()
         keywords: list[str] = []
         for item in raw:
@@ -2026,4 +2072,4 @@ def parse_merged_keywords(
             if len(keywords) >= per_platform_cap:
                 break
         result[platform] = keywords
-    return result
+    return result, present
