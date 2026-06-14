@@ -192,12 +192,12 @@
 
 ## 最近更新
 
-最新版本：**v0.3.122: 画像 prompt 截断治理 + 自动更新守卫落地（2026-06-13）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
+最新版本：**v0.3.123: 统一各来源 profile prompt 输入（移除人格素描总结）（2026-06-14）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
 
-- **画像整理覆盖全量** —— 12 小时整理从只看 top-128 兴趣扩到 top-512，千级标签存量的措辞变体都能被合并，LLM 裁决分批执行更稳。
-- **避雷项零截断** —— 进发现 / 推荐 prompt 的避雷上限 64 → 128 与存储对齐，你标记过的雷点全部生效。
-- **近期觉察取最新** —— 修复觉察 / 洞察截断一直取最旧 5 条的 bug，推荐解释贴近你最近的状态。
-- **自动更新守卫真正落地** —— v0.3.121 宣称的 Windows 卡死修复、tag 重打解卡、TLS 兜底本版起实际生效。
+- **画像输入全平台统一** —— 发现 / 推荐 / 探测各处的画像输入收敛成同一份结构化画像，字段补齐、上限统一抬到 30。
+- **人格素描不再进 prompt** —— 那段总结性叙事不再喂任何 LLM 输入（仍在画像页正常展示），搜索词与文案不再被比喻带偏。
+- **五平台搜索词生成对齐 + 抖音补 LLM 生成** —— X / 小红书 / 抖音 / YouTube / B站 关键词生成全部吃同一份完整画像。
+- **新增统一关键词背压子系统（默认关、可 opt-in）** —— 五平台搜索词可收敛成一次合并生成，按缺口拉动、逐平台自适应避让 / 水位 / 供给。
 
 ## 用户交流群
 
@@ -665,7 +665,7 @@ OpenBiliClaw/
 
 ## 📜 更新日志
 
-最新版本：**v0.3.122: 画像 prompt 截断治理 + 自动更新守卫落地（2026-06-13）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。插件包和桌面安装包见 [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，后端源码更新看 `backend-v*` tag。
+最新版本：**v0.3.123: 统一各来源 profile prompt 输入（移除人格素描总结）（2026-06-14）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。插件包和桌面安装包见 [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases)，后端源码更新看 `backend-v*` tag。
 
 ## 🗺️ 后续规划
 

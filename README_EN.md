@@ -188,12 +188,12 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.122: profile prompt truncation fixes + auto-update guards landed (2026-06-13)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.123: unified profile prompt input across all sources (personality portrait dropped from prompts) (2026-06-14)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
-- **Consolidation now covers the whole store** — the 12-hour tidy-up widens from the top-128 interests to top-512, so phrasing variants across a 1000+ tag store actually get merged, with LLM adjudication running in stable batches.
-- **Avoid-topics are never truncated** — the dislike cap feeding discovery / recommendation prompts grows 64 → 128 to match storage, so every topic you flagged takes effect.
-- **Freshest awareness wins** — fixed a slicing bug that fed the *oldest* 5 awareness notes / insights into prompts; recommendations now reflect your recent state.
-- **Auto-update guards actually landed** — the Windows hang fix, re-tagged-tag recovery, and TLS fallback advertised in v0.3.121 take effect from this version.
+- **One profile input across every platform** — discovery / recommendation / speculator prompts all collapse onto a single structured profile, with missing fields filled and caps unified at 30.
+- **Personality portrait no longer enters prompts** — that prose summary is dropped from every LLM input (still shown on the profile page), so queries and copy stop getting skewed by its metaphors.
+- **Five-platform keyword generation aligned + Douyin gains LLM gen** — X / Xiaohongshu / Douyin / YouTube / Bilibili keyword generation all eat the same full profile.
+- **New unified keyword-backpressure subsystem (off by default, opt-in)** — the five platforms' search-keyword generation can collapse into one merged, deficit-pulled call with per-platform adaptive avoid / water-level / supply.
 
 ## Community
 
@@ -653,7 +653,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.122: profile prompt truncation fixes + auto-update guards landed (2026-06-13)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages and desktop installers live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags.
+Latest: **v0.3.123: unified profile prompt input across all sources (personality portrait dropped from prompts) (2026-06-14)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Extension packages and desktop installers live on [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases); backend source updates use `backend-v*` tags.
 
 ## 🗺️ Roadmap
 
