@@ -570,6 +570,7 @@ The whole loop stays local — OpenClaw just calls the CLI bridge; your profile 
 │         recommendations · chat_turns · avoidance_state  │
 │ Profile overrides: edits -> profile_overrides.json overlay │
 │         (merged at read · rebuild-proof · 3 frontends)   │
+│ Profile taxonomy: fixed interest categories · migration · homonym-safe cleanup │
 └─────────────────────────────────────────────────────┘
 ```
 

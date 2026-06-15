@@ -5493,6 +5493,16 @@ def profile_consolidate(
         "--revert",
         help="按 run_id 回滚一次已应用的整理（备份在 data/memory/consolidation_runs/）。",
     ),
+    migrate_categories: bool = typer.Option(
+        False,
+        "--migrate-categories",
+        help="一次性把存量一级分类迁移到固定词表（默认 dry-run，配 --apply 写入）。",
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="把 likes 整理边界从默认 top-512 开到全量标签库（嫌疑簇 32/批送审）。",
+    ),
 ) -> None:
     """用 LLM 整理合并画像里重复的喜欢 / 讨厌主题。
 
@@ -5505,6 +5515,8 @@ def profile_consolidate(
     \b
       - 默认 dry-run，先看建议再决定
       - --apply 写入,自动备份到 data/memory/consolidation_runs/
+      - --migrate-categories 一次性分类词表迁移（同样 dry-run/--apply/--revert）
+      - --full 一次性全量清理 likes 长尾标签（与 --migrate-categories 互斥）
       - 审计记录追加到 data/memory/soul_changelog.md
     """
     import asyncio as _asyncio
@@ -5540,11 +5552,28 @@ def profile_consolidate(
     if embedding_service is None:
         console.print("[dim]  embedding 服务不可用，退回子串聚类。[/dim]")
 
-    consolidator = ProfileConsolidator(
-        memory=memory,
-        llm_service=llm_service,
-        embedding_service=embedding_service,
-    )
+    if full and migrate_categories:
+        console.print("[bold red]  --full 与 --migrate-categories 不能同时使用。[/bold red]")
+        console.print("[dim]  推荐顺序：先 --migrate-categories --apply，再 --full --apply。[/dim]")
+        raise typer.Exit(code=1)
+
+    if full:
+        raw_interests = memory.get_layer("preference").data.get("interests", [])
+        interest_count = len([item for item in raw_interests if isinstance(item, dict)])
+        likes_boundary = max(interest_count, 128)
+        console.print(f"  [cyan]--full：likes 边界开到全量（{likes_boundary} 条）。[/cyan]")
+        consolidator = ProfileConsolidator(
+            memory=memory,
+            llm_service=llm_service,
+            embedding_service=embedding_service,
+            likes_boundary=likes_boundary,
+        )
+    else:
+        consolidator = ProfileConsolidator(
+            memory=memory,
+            llm_service=llm_service,
+            embedding_service=embedding_service,
+        )
 
     if revert.strip():
         ok = consolidator.revert(revert.strip())
@@ -5553,6 +5582,40 @@ def profile_consolidate(
             console.print("  [dim]被回滚的合并已记入 no-merge 记忆，下轮整理不会重做。[/dim]")
         else:
             console.print(f"[bold red]  回滚失败：找不到 run 记录 {revert.strip()}。[/bold red]")
+            raise typer.Exit(code=1)
+        return
+
+    if migrate_categories:
+        from openbiliclaw.soul.category_migration import CategoryMigrator
+
+        migrator = CategoryMigrator(memory=memory, llm_service=llm_service)
+        migration_report = _asyncio.run(migrator.run(dry_run=not apply))
+        for err in migration_report.errors:
+            console.print(f"[yellow]  ⚠ {err}[/yellow]")
+        console.print(
+            f"  现存分类: {len(migration_report.histogram)} 个，"
+            f"标签 {sum(migration_report.histogram.values())} 条"
+        )
+        for old, new in sorted(
+            migration_report.mapping.items(),
+            key=lambda item: -migration_report.histogram.get(item[0], 0),
+        ):
+            console.print(f"  {old}({migration_report.histogram.get(old, 0)}) → [bold]{new}[/bold]")
+        if migration_report.mapping:
+            suffix = "  [yellow]⚠ 超过 10%[/yellow]" if migration_report.other_ratio > 0.10 else ""
+            console.print(f"\n  「其他」占比: {migration_report.other_ratio:.1%}{suffix}")
+        if not apply and migration_report.mapping:
+            console.print("\n  [dim]满意的话用 --apply 真正写入。[/dim]")
+        if migration_report.applied:
+            console.print(
+                "\n  [dim]已备份，"
+                f"run_id={migration_report.run_id}（--revert {migration_report.run_id} 可回滚）"
+                "[/dim]"
+            )
+        # 只有「LLM 服务不可用」是降级只读预览（打印 histogram 即成功，code=0）；
+        # LLM 调用异常 / 映射校验失败必须非零退出，脚本化调用才能区分失败与预览。
+        degraded = migration_report.errors == ["llm: service unavailable"]
+        if migration_report.errors and not migration_report.mapping and not degraded:
             raise typer.Exit(code=1)
         return
 

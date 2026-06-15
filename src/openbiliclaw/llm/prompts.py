@@ -133,13 +133,13 @@ def render_preference_summary(preference_summary: dict[str, object]) -> str:
     return json.dumps(preference_summary, ensure_ascii=False, indent=2)
 
 
-def build_preference_analysis_prompt(
-    *,
-    events: list[dict[str, object]],
-    existing_preference: dict[str, object],
-) -> list[dict[str, str]]:
-    """Build a structured prompt for extracting user preferences from events."""
-    system_prompt = """
+def _category_vocab_line() -> str:
+    from openbiliclaw.soul.taxonomy import CATEGORY_VOCAB
+
+    return "、".join(CATEGORY_VOCAB)
+
+
+_PREFERENCE_ANALYSIS_SYSTEM_PROMPT = """
 <task>
 你要从一批用户行为事件中提取稳定偏好画像。
 </task>
@@ -149,7 +149,9 @@ def build_preference_analysis_prompt(
 2. 输出必须是严格 JSON，不要附带解释。
 3. 如果证据不足，返回空数组、默认值或较低权重。
 4. 兴趣标签控制在 5~25 个以内，weight 在 0~1 之间。证据充分时可多提，证据不足时宁可少提、给低权重，不要为了凑数编造标签。
-5. 所有文本字段（name、category、context 下的 patterns/session_type、disliked_topics）必须用中文。
+5. 所有文本字段（name、context 下的 patterns/session_type、disliked_topics）必须用中文。
+   category 必须从以下固定词表中逐字选择，不得发明新分类、不得使用同义变体：
+   __CATEGORY_VOCAB__。拿不准归属时用「其他」。
 6. favorite_up_users 必须从事件的 up_name 字段原样复制，一个字都不能改。先逐条扫描所有事件收集 up_name 值，再与 existing_preference.favorite_up_users 合并去重。严禁根据话题推测可能的UP主名称。如果本批事件中无 up_name 字段，保留 existing_preference 中的原有列表不变。
 7. cognitive_style 描述用户的信息处理偏好（如思维方式、阅读习惯、理解路径），3~5 条，基于观看行为模式推断，不要照搬兴趣标签。
 8. 每条事件都自带一个 `context` 字段（v0.3.22+ 起所有源都统一填充），它是该事件的中文自然语言摘要（如"在 B 站收藏了《讲透历史叙事》,作者:历史实验室"或"小红书点赞:手冲咖啡入门 作者:豆子老师"）。**优先把 context 作为人类可读的事件描述**来理解用户行为；同时用 metadata 里的结构化字段（up_name、bvid、folder、source_platform 等）做精确匹配 / 复制。
@@ -184,7 +186,16 @@ def build_preference_analysis_prompt(
 输入事件里如果多次出现长视频、纪录片、深度讲解，
 可以提高 “历史/纪录片/知识” 相关标签和 depth_preference。
 </examples>
-""".strip()
+""".strip().replace("__CATEGORY_VOCAB__", _category_vocab_line())
+
+
+def build_preference_analysis_prompt(
+    *,
+    events: list[dict[str, object]],
+    existing_preference: dict[str, object],
+) -> list[dict[str, str]]:
+    """Build a structured prompt for extracting user preferences from events."""
+    system_prompt = _PREFERENCE_ANALYSIS_SYSTEM_PROMPT
     user_prompt = "\n\n".join(
         [
             "<existing_preference>",
@@ -1833,7 +1844,8 @@ _PROFILE_CONSOLIDATION_SYSTEM_PROMPT = (
     "\n"
     "<rules>\n"
     "1. 只能输出操作（op），不能输出整理后的列表。每个操作是 merge 或 keep。\n"
-    "2. merge 的 members 必须从该簇的 members 中【逐字原样复制】，一个字都不能改。\n"
+    "2. merge 的 members 必须从该簇的 members 中【逐字原样复制】；普通成员可用字符串，\n"
+    "   同名异类成员必须用 {\"name\": 原名, \"category\": 原分类} 精确引用。\n"
     "3. 每个簇内的每个主题，必须被 merge 或 keep 恰好覆盖一次，不能遗漏、不能重复。\n"
     "4. merge 至少 2 个 members。canonical 是合并后的规范名：优先从 members 里选\n"
     "   最准确的一个；只有当所有 members 都不够准确时才起新名，新名必须与\n"
@@ -1844,9 +1856,13 @@ _PROFILE_CONSOLIDATION_SYSTEM_PROMPT = (
     "   canonical 绝不能比 members 更宽泛（如把「一个案例反复切悬念拖时长」归并成\n"
     "   「低质内容」是严重错误，会误伤大量正常内容）。拿不准时一律 keep。\n"
     "7. likes 组可以稍宽松，但同样不允许把具体兴趣合并成大类。\n"
-    "8. 输出严格 JSON，不要附带解释文本。\n"
-    "9. 各变量见 user 消息：likes_clusters / dislikes_clusters（各簇带 cluster_id、\n"
-    "   members 及其权重元数据）。\n"
+    "8. likes 成员带 category（一级分类）。同名/近名但 category 不同且语义不同的条目\n"
+    "   是【同名异义】（如 苹果(科技) vs 苹果(美食)），必须分别 keep，严禁合并。\n"
+    "   只有确认它们是同一概念被误标了不同分类时才 merge；此时 merge.members 和\n"
+    "   keep.member 都必须使用 {name, category}，使每个同名条目可被逐一追踪。\n"
+    "9. 输出严格 JSON，不要附带解释文本。\n"
+    "10. 各变量见 user 消息：likes_clusters / dislikes_clusters（各簇带 cluster_id、\n"
+    "   members 及其权重 / category 元数据）。\n"
     "</rules>\n"
     "\n"
     "<output_schema>\n"
@@ -1855,7 +1871,10 @@ _PROFILE_CONSOLIDATION_SYSTEM_PROMPT = (
     '    {"cluster_id": "L1", "op": "merge", "members": ["智能体开发", "智能体开发与实现"],\n'
     '     "canonical": "智能体开发", "reason": "同一概念的措辞变体"},\n'
     '    {"cluster_id": "L2", "op": "keep", "name": "篮球", "reason": "NBA 是其子集而非同义"},\n'
-    '    {"cluster_id": "L2", "op": "merge", "members": ["NBA篮球", "NBA球星动态"], "canonical": "NBA"}\n'
+    '    {"cluster_id": "H1", "op": "merge",\n'
+    '     "members": [{"name": "苹果", "category": "科技"}, {"name": "苹果", "category": "资讯"}],\n'
+    '     "canonical": "苹果公司"},\n'
+    '    {"cluster_id": "H1", "op": "keep", "member": {"name": "苹果", "category": "美食"}}\n'
     "  ],\n"
     '  "dislikes": [\n'
     '    {"cluster_id": "D1", "op": "merge", "members": ["偶像团体练习室内容", "偶像练习室物料"],\n'
@@ -1874,7 +1893,7 @@ def build_profile_consolidation_prompt(
     """Build the prompt for LLM-judged consolidation of like/dislike topics.
 
     Each cluster dict carries ``cluster_id`` and ``members`` (list of dicts
-    with name + weight metadata for likes, plain strings for dislikes).
+    with name + weight + category metadata for likes, plain strings for dislikes).
     System prompt is fully static (cache-friendly per CLAUDE.md convention);
     all per-call data lives in the user message with deterministic
     serialization.
@@ -1893,6 +1912,31 @@ def build_profile_consolidation_prompt(
         {"role": "system", "content": _PROFILE_CONSOLIDATION_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
+
+
+_CATEGORY_MAPPING_SYSTEM_PROMPT = (
+    "<task>\n"
+    "你是用户画像分类体系的迁移器。user 消息提供：vocab（固定一级分类词表）和\n"
+    "categories（现存分类及各自的标签数 tag_count）。\n"
+    "你要为【每一个】现存分类选择词表中【恰好一个】目标分类。\n"
+    "</task>\n"
+    "\n"
+    "<rules>\n"
+    "1. mapping 必须覆盖 categories 里的每一个分类，一个都不能漏，也不能多出输入里没有的分类。\n"
+    "2. 映射目标必须逐字来自 vocab，不得发明新分类、不得返回 vocab 之外的写法。\n"
+    "3. 优先语义归属（如 泛娱乐/文娱→娱乐；宠物/动物→萌宠；技术/数码/人工智能→科技；\n"
+    "   二次元→动漫；商业→财经）。\n"
+    "4. 现存分类本身已在 vocab 中的，映射到它自己。\n"
+    "5. 实在无法归属的才映射到「其他」，不要偷懒批量扔「其他」。\n"
+    "6. 输出严格 JSON，不要附带解释文本。\n"
+    "</rules>\n"
+    "\n"
+    "<output_schema>\n"
+    "{\n"
+    '  "mapping": {"泛娱乐": "娱乐", "宠物": "萌宠", "内容消费方式": "其他"}\n'
+    "}\n"
+    "</output_schema>"
+)
 
 
 # Module-level constant: 100% static system prompt for the MERGED, multi-
@@ -1959,6 +2003,52 @@ _MERGED_KEYWORDS_SYSTEM_PROMPT = (
     "}\n"
     "</output_schema>"
 )
+
+
+def _category_tag_count(category: dict[str, object]) -> int:
+    raw = category.get("tag_count", 0)
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return 0
+    return 0
+
+
+def build_category_mapping_prompt(
+    *,
+    categories: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    """Build a cache-friendly prompt for mapping categories to the fixed vocab."""
+    from openbiliclaw.soul.taxonomy import CATEGORY_VOCAB
+
+    payload = {
+        "categories": sorted(
+            categories,
+            key=lambda c: (
+                -_category_tag_count(c),
+                str(c.get("category", "")),
+            ),
+        ),
+        "vocab": list(CATEGORY_VOCAB),
+    }
+    user_prompt = "\n\n".join(
+        [
+            "<category_mapping_context>",
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            "</category_mapping_context>",
+        ]
+    )
+    return [
+        {"role": "system", "content": _CATEGORY_MAPPING_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
 
 def build_merged_keywords_prompt(

@@ -259,13 +259,14 @@ Agent：那我理解了。这是一个很有意思的特质——你可能也会
 │  ┌──────────────┐ ┌──────────────┐ ┌────────────────┐      │
 │  │ User Soul    │ │ Content      │ │ Recommendation │      │
 │  │ Engine       │ │ Discovery    │ │ Engine         │      │
-│  │ (画像+探针)   │ │ (发现+待评估池)│ │ (排序+表达)     │      │
+│  │ (词表画像+探针)│ │ (发现+待评估池)│ │ (排序+表达)     │      │
 │  └──────────────┘ └──────────────┘ └────────────────┘      │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │     PoolCurator + 双轴 fatigue + per-group 窗口 + 新兴趣放大保护 │ │
 │  │     ContinuousRefreshController + B/XHS/DY/YT/X=8/1/1/1/1 │ │
 │  │     DiscoveryCandidatePipeline: raw candidates -> mixed batch eval -> pool │ │
 │  │     LLM gate: scheduler + extension presence          │   │
+│  │     Soul taxonomy: CATEGORY_VOCAB + category migration + homonym-aware consolidation │ │
 │  │     Autostart: user login item + Ollama preflight/self-heal │ │
 │  │     Bili DOM fallback + XHS/Douyin/YouTube/X producers: 按平台缺口独立补池 │ │
 │  │     Hot reload one-shots: interest/avoidance force_tick │   │

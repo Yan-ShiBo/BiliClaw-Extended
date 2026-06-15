@@ -611,6 +611,21 @@ def _builder_test_inputs() -> list[tuple[str, dict, dict]]:
             ),
         ),
         (
+            "build_preference_analysis_prompt",
+            dict(events=[{"event_type": "view", "title": "A"}], existing_preference={"a": 1}),
+            dict(events=[{"event_type": "like", "title": "B"}], existing_preference={"a": 2}),
+        ),
+        (
+            "build_category_mapping_prompt",
+            dict(categories=[{"category": "泛娱乐", "tag_count": 12}]),
+            dict(
+                categories=[
+                    {"category": "内容消费方式", "tag_count": 3},
+                    {"category": "宠物", "tag_count": 7},
+                ]
+            ),
+        ),
+        (
             "build_merged_keywords_prompt",
             dict(
                 profile_summary={"interests": [{"name": "AI", "weight": 0.9}]},
@@ -685,6 +700,32 @@ def test_prompt_builder_system_messages_are_call_invariant() -> None:
         "input — extends provider cache miss across all calls): "
         f"{failures}. Refactor to put per-call variables in user_prompt."
     )
+
+
+def test_category_mapping_prompt_user_message_carries_vocab_and_histogram() -> None:
+    from openbiliclaw.llm.prompts import build_category_mapping_prompt
+    from openbiliclaw.soul.taxonomy import CATEGORY_VOCAB
+
+    messages = build_category_mapping_prompt(categories=[{"category": "泛娱乐", "tag_count": 12}])
+    system = messages[0]["content"]
+    user = messages[1]["content"]
+
+    assert all(term in user for term in CATEGORY_VOCAB)
+    assert "泛娱乐" in user
+    assert '"tag_count": 12' in user
+    assert '"tag_count": 12' not in system
+    assert '"mapping"' in system
+
+
+def test_preference_analysis_system_prompt_contains_full_vocab() -> None:
+    from openbiliclaw.llm.prompts import build_preference_analysis_prompt
+    from openbiliclaw.soul.taxonomy import CATEGORY_VOCAB
+
+    messages = build_preference_analysis_prompt(events=[], existing_preference={})
+    system = messages[0]["content"]
+
+    assert all(term in system for term in CATEGORY_VOCAB)
+    assert "category 必须" in system
 
 
 # ----------------------------------------------------------------------
