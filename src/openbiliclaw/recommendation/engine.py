@@ -806,10 +806,36 @@ class RecommendationEngine:
             except Exception:
                 logger.exception("precompute_delight_scores detach failed")
 
+        completed = await self._drain_expression_copy(
+            profile=profile, limit=limit, batch_size=batch_size
+        )
+
+        # Fire delight scoring outside the expression lock so the next
+        # expression batch can start immediately while delight catches up.
+        _spawn_delight()
+        return completed
+
+    async def _drain_expression_copy(
+        self,
+        *,
+        profile: SoulProfile,
+        limit: int,
+        batch_size: int = 30,
+    ) -> int:
+        """Generate popup copy for classified-but-uncopied pool candidates.
+
+        Copy-only: unlike :meth:`precompute_pool_copy` it does NOT spawn
+        classify / delight, so the post-classify hook
+        (:meth:`_safe_classify_pool_backlog`, lever 2b) can call it the
+        moment freshly-classified items become copy-eligible — draining
+        their expression copy in the same cycle instead of waiting for the
+        next refresh-loop tick — without re-entering classify. The shared
+        ``_expression_lock`` serialises it against the regular precompute
+        pass so the same items are never double-spent on LLM tokens.
+        """
         async with self._expression_lock:
             candidates = self._load_pool_candidates_needing_copy(limit=max(0, limit))
             if not candidates:
-                _spawn_delight()
                 return 0
 
             batches = [
@@ -825,10 +851,6 @@ class RecommendationEngine:
                     logger.warning("Expression batch failed: %s", r)
                     continue
                 completed += int(r or 0)
-
-        # Fire delight scoring outside the expression lock so the next
-        # expression batch can start immediately while delight catches up.
-        _spawn_delight()
         return completed
 
     # ── Source-agnostic content classification ───────────────────────
@@ -879,12 +901,27 @@ class RecommendationEngine:
         backoff or a flood of fresh XHS notes) stall precompute for
         minutes; now precompute reads whatever's classified-ready right
         now while classify catches up in parallel.
+
+        v0.3.124+ (lever 2b): when classify actually labels new items, drain
+        their expression copy immediately rather than leaving them for the
+        next refresh-loop precompute tick. This closes the "classified but
+        not yet serveable" gap (the items still need ``pool_expression`` /
+        ``pool_topic_label`` before the pool-availability gate counts them).
+        The drain is copy-only so it can't re-enter classify, and the
+        shared ``_expression_lock`` serialises it against the in-flight
+        precompute pass.
         """
         try:
-            return await self.classify_pool_backlog(profile=profile, limit=limit)
+            classified = await self.classify_pool_backlog(profile=profile, limit=limit)
         except Exception:
             logger.exception("classify_pool_backlog (detached) failed")
             return 0
+        if classified > 0:
+            try:
+                await self._drain_expression_copy(profile=profile, limit=max(limit, classified))
+            except Exception:
+                logger.exception("post-classify expression drain failed")
+        return classified
 
     async def _safe_precompute_delight_scores(
         self,
