@@ -1869,6 +1869,163 @@ class TestBackendAPI:
         ]
         assert [event["event_type"] for event in memory.events] == ["click"]
 
+    def test_extension_e2e_rejects_state_changing_action_without_opt_in(self) -> None:
+        from fastapi.testclient import TestClient
+
+        app = create_app(memory_manager=object(), database=object(), soul_engine=object())
+        app.state.auth_gate.is_trusted_local = lambda request: True
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/extension/e2e/run",
+            json={"platforms": ["douyin"], "actions": {"douyin": ["like"]}},
+        )
+
+        assert response.status_code == 400
+        assert "allow_state_changing" in response.json()["detail"]
+
+    def test_extension_e2e_rejects_unknown_platform_via_schema(self) -> None:
+        from fastapi.testclient import TestClient
+
+        app = create_app(memory_manager=object(), database=object(), soul_engine=object())
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/extension/e2e/run",
+            json={"platforms": ["youtube"], "actions": {"youtube": ["snapshot"]}},
+        )
+
+        assert response.status_code == 422
+
+    def test_extension_e2e_result_rejects_bad_token(self) -> None:
+        from fastapi.testclient import TestClient
+
+        app = create_app(memory_manager=object(), database=object(), soul_engine=object())
+        app.state.auth_gate.is_trusted_local = lambda request: True
+        app.state.extension_e2e_runs["e2e-test"] = SimpleNamespace(token="good-token")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/extension/e2e/result",
+            json={
+                "run_id": "e2e-test",
+                "token": "bad-token",
+                "platforms": [],
+            },
+        )
+
+        assert response.status_code == 403
+
+    def test_match_e2e_event_matches_platform_action_and_uses_event_once(self) -> None:
+        from openbiliclaw.api.app import _match_e2e_event
+
+        events = [
+            {
+                "id": 1,
+                "event_type": "click",
+                "url": "https://www.douyin.com/video/1",
+                "title": "Douyin click",
+                "metadata": {"source_platform": "douyin"},
+            },
+            {
+                "id": 2,
+                "event_type": "click",
+                "url": "https://www.xiaohongshu.com/explore/1",
+                "title": "XHS click",
+                "metadata": {"source_platform": "xiaohongshu"},
+            },
+        ]
+        used_event_ids: set[int] = set()
+
+        assert _match_e2e_event(
+            events,
+            platform="douyin",
+            action="click",
+            used_event_ids=used_event_ids,
+        ) == {
+            "event_id": 1,
+            "event_type": "click",
+            "url": "https://www.douyin.com/video/1",
+            "title": "Douyin click",
+        }
+        assert used_event_ids == {1}
+        assert (
+            _match_e2e_event(
+                events,
+                platform="twitter",
+                action="click",
+                used_event_ids=used_event_ids,
+            )
+            is None
+        )
+        assert _match_e2e_event(
+            events,
+            platform="douyin",
+            action="click",
+            used_event_ids=used_event_ids,
+        ) is None
+
+    def test_extension_e2e_run_publishes_runtime_event_and_returns_timeout_report(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        import openbiliclaw.api.app as app_module
+
+        async def _instant_timeout(awaitable: object, timeout: float) -> object:
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+            raise TimeoutError
+
+        class FakeEventHub:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+
+            async def publish(self, event: dict[str, object]) -> None:
+                self.events.append(event)
+
+        class FakeMemoryManager:
+            def query_events(self, **_kwargs: object) -> list[dict[str, object]]:
+                return []
+
+        monkeypatch.setattr(app_module.asyncio, "wait_for", _instant_timeout)
+        hub = FakeEventHub()
+        app = create_app(
+            memory_manager=FakeMemoryManager(),
+            database=object(),
+            soul_engine=object(),
+            runtime_event_hub=hub,
+        )
+        app.state.auth_gate.is_trusted_local = lambda request: True
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/extension/e2e/run",
+            json={
+                "platforms": ["douyin"],
+                "actions": {"douyin": ["snapshot", "scroll"]},
+                "timeout_seconds": 5,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["run_id"].startswith("e2e-")
+        assert body["status"] == "timeout"
+        assert body["platforms"][0]["platform"] == "douyin"
+        assert [item["action"] for item in body["platforms"][0]["actions"]] == [
+            "snapshot",
+            "scroll",
+        ]
+        assert hub.events
+        event = hub.events[0]
+        assert event["type"] == "extension_e2e_run"
+        assert event["platforms"] == ["douyin"]
+        assert event["actions"] == {"douyin": ["snapshot", "scroll"]}
+        assert event["run_id"] == body["run_id"]
+        assert isinstance(event["token"], str) and event["token"]
+
     def test_events_endpoint_handles_extension_cors_preflight(self) -> None:
         from fastapi.testclient import TestClient
 
