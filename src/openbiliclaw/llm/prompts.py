@@ -77,8 +77,8 @@ def _render_tone_profile(
     tone = tone_profile or {
         "density": "balanced",
         "warmth": "warm",
-        "playfulness": "medium",
-        "directness": "balanced",
+        "playfulness": "low",
+        "directness": "direct",
     }
     return (
         _tone_context_line(source_platform_mix) + "\n"

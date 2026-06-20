@@ -261,7 +261,7 @@ def test_select_diversified_batch_caps_newly_confirmed_amplification_direction()
     assert sum(i.topic_group == "城市基础设施观察" for i in selected) <= 1
 
 
-def test_expression_tone_profile_softens_dense_profile_for_lifestyle_content() -> None:
+def test_expression_tone_profile_does_not_soften_based_on_style_key() -> None:
     profile = _build_profile()
     profile.preferences.style.depth_preference = 0.95
 
@@ -274,7 +274,8 @@ def test_expression_tone_profile_softens_dense_profile_for_lifestyle_content() -
         ),
     )
 
-    assert tone["density"] in {"light", "balanced"}
+    assert tone["density"] == "dense"
+    assert tone["playfulness"] == "low"
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,7 @@
 | 候选排序统一 | ✅ | freshly discovered 与 cache backfill 现在共享同一套 tier / relevance / recency 排序口径 |
 | 9.1 反馈处理 | ✅ | CLI、本地 API、插件 popup 与移动 Web 已统一写回推荐反馈与 `feedback` 事件；推荐点击会携带 `content_id / content_url / source_platform`，跨源内容不会被记成 B 站点击 |
 | 9.2 画像更新 | ✅ | 反馈累计到阈值后会自动触发偏好层重分析与画像重建 |
-| 体验优化：动态“老B友”语气 | ✅ | 推荐文案不再固定套模板，而是根据画像、偏好和近期反馈动态调整信息密度、温度、梗感与直给程度 |
+| 体验优化：画像驱动“老B友”语气 | ✅ | 推荐文案不再固定套模板，而是根据画像 tone profile 调整信息密度、温度、梗感与直给程度；`style_key` 只影响内容切入角度，不再改写用户语气 |
 | M106 候选池即时换一批 | ✅ | `content_cache` 现已作为 discovery pool 使用，popup 可秒级从池子里换一批新推荐 |
 | M107 候选池容量与状态展示 | ✅ | runtime 会按 `pool_target_count` 持续补货，popup 会展示可换数量、最近补货数量和补货方向。`pool_target_count` 表示前端真实可换目标：`count_pool_candidates()` 达标后 refresh（含 force_refresh）返回 `pool_at_cap`，raw 素材库存允许高于目标并由独立 raw ceiling 控制 |
 | M117 同批多样性约束 | ✅ | 同一批推荐不再只按分数直取前 N，而会对重复 topic 做限流，让一批里更容易同时出现不同方向 |
@@ -99,7 +99,7 @@ items = await engine.generate_recommendations(
 - 排序主键先看 `candidate_tier`，再看 `relevance_score`、`last_scored_at/discovered_at`、`view_count`
 - 生成结果后会写入 `recommendations` 表，避免下次重复选中
 - 每条推荐都会调用 `generate_expression()` 生成 `expression` 和 `topic_label`
-- 推荐表达会先从当前画像、偏好摘要、`disliked_topics` 和近期反馈推断 `ToneProfile`，再生成更贴近用户口味且避开长期雷点的“老B友”式文案
+- 推荐表达会先从当前画像、偏好摘要、`disliked_topics` 和近期反馈推断 `ToneProfile`，再生成更贴近用户口味且避开长期雷点的“老B友”式文案；内容 `style_key` 只用于决定从人物、场景、信息点或情绪等角度切入，不再把用户语气动态调轻
 - CLI 展示后会把对应推荐记录标记为 `presented = 1`
 - `feedback` 命令会把 `feedback_type` / `feedback_note` / `feedback_at` 写回推荐记录
 - 多样性回填会分阶段放宽 `style`、`source`、`topic` 约束，只有候选真的不足时才彻底兜底补满
@@ -456,7 +456,7 @@ report: PoolHealthReport = curator.check_pool_health()
 6. **三端走同一反馈语义**：CLI、API 和 popup 都只写入当前反馈状态，并同步追加 `feedback` 事件
 7. **先平衡候选，再放宽约束**：优先通过来源均衡和分阶段回填守住一批内容的丰富度，而不是靠最后一步无条件补满
 8. **反馈驱动学习延迟触发**：推荐反馈不会逐条立刻重写画像，而是累计到阈值后统一重分析，降低噪声
-9. **推荐语气跟着用户变**：表达风格不只看内容匹配度，还会根据画像和近期反馈动态调节“老B友”程度，尽量减少机械解释感
+9. **推荐语气跟着用户而不是内容类型变**：表达风格会根据画像和近期反馈推断 `ToneProfile`，但不会因为某条内容是轻聊天、日常或审美浏览就自动把语气调轻；`style_key` 只影响推荐理由的切入角度，避免同一个助手在不同内容之间人格漂移。
 10. **缓存候选不能退化成只看播放量**：一旦从 `content_cache` 回读候选，也必须恢复 `relevance_score`、`candidate_tier` 和时间字段，保持与实时发现同一排序标准
 11. **候选池先可展示，再做文案增强**：`discover` 入池时就要带 `relevance_reason`，popup “换一批”先秒级从池子里出片，`expression` 只是增强层，不再阻塞展示
 12. **同批推荐需要显式做多样性约束**：高分不是唯一目标，排序后仍要对重复 topic/tag 做软限流，避免一批里全是同一类内容

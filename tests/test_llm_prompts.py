@@ -108,6 +108,22 @@ def test_build_recommendation_expression_prompt_mentions_old_friend_tone() -> No
     assert "不像算法推荐" in messages[0]["content"]
 
 
+def test_recommendation_expression_prompt_defaults_to_warm_direct_tone() -> None:
+    messages = build_recommendation_expression_prompt(
+        profile_summary={"personality_portrait": "尚未建立完整画像"},
+        content_summary={"title": "讲透国际局势", "up_name": "某UP"},
+        tone_profile=None,
+        source_platform="bilibili",
+    )
+
+    user_prompt = messages[1]["content"]
+
+    assert "- 信息密度: balanced" in user_prompt
+    assert "- 情绪温度: warm" in user_prompt
+    assert "- 梗感强度: low" in user_prompt
+    assert "- 直给程度: direct" in user_prompt
+
+
 def test_recommendation_expression_prompts_treat_dislikes_as_avoidance() -> None:
     profile_summary = {
         "personality_portrait": "偏好高信息密度内容",

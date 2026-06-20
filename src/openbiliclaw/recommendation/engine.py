@@ -48,15 +48,6 @@ def _profile_style_summary(profile: SoulProfile) -> dict[str, object]:
     }
 
 
-def _clone_tone_profile(tone: ToneProfile) -> ToneProfile:
-    return {
-        "density": tone["density"],
-        "warmth": tone["warmth"],
-        "playfulness": tone["playfulness"],
-        "directness": tone["directness"],
-    }
-
-
 def _recommendation_profile_summary(
     profile: SoulProfile,
     *,
@@ -1664,25 +1655,6 @@ class RecommendationEngine:
             },
             recent_feedback=[],
         )
-        style_key = normalize_style_key(content.style_key)
-        if style_key in {
-            "daily_wander",
-            "mood_release",
-            "social_chat",
-            "ambient_companion",
-            "live_pulse",
-            "curiosity_spark",
-        }:
-            adjusted = _clone_tone_profile(tone)
-            adjusted["density"] = "light"
-            if adjusted["playfulness"] == "low":
-                adjusted["playfulness"] = "medium"
-            return adjusted
-        if style_key in {"story_immersion", "decision_support", "aesthetic_browse"}:
-            adjusted = _clone_tone_profile(tone)
-            if adjusted["density"] == "dense":
-                adjusted["density"] = "balanced"
-            return adjusted
         return tone
 
     def mark_presented(self, recommendation_ids: list[int]) -> None:
