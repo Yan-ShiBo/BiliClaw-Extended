@@ -20,7 +20,10 @@ interface ClickableElement {
   dispatchEvent?: (event: Event) => boolean;
   getAttribute?: (name: string) => string | null;
   getBoundingClientRect?: () => ElementRect;
+  matches?: (selector: string) => boolean;
+  parentElement?: ClickableElement | null;
   scrollIntoView?: (options?: ScrollIntoViewOptions) => void;
+  disabled?: boolean;
 }
 
 interface QueryDocument {
@@ -47,6 +50,7 @@ const SNAPSHOT_WAIT_MS = 150;
 const SCROLL_WAIT_MS = 300;
 const CLICK_WAIT_MS = 200;
 const TEXT_TARGET_SELECTOR = 'button, [role="button"], a, div, span';
+const BUTTON_CONTROL_SELECTOR = 'button, [role="button"]';
 
 const KNOWN_ACTIONS = new Set<E2EAction>([
   "snapshot",
@@ -62,7 +66,7 @@ const KNOWN_ACTIONS = new Set<E2EAction>([
 
 const RECIPES: Record<E2EPlatform, PlatformRecipe> = {
   douyin: {
-    clickSelectors: ['[data-e2e="feed-active-video"]', "video", '[role="button"]'],
+    clickSelectors: ['[data-e2e="feed-active-video"]', "video", 'a[href*="/video/"]'],
     textActions: {
       share: [/share/i, /分享/],
       like: [/like/i, /赞/],
@@ -71,7 +75,7 @@ const RECIPES: Record<E2EPlatform, PlatformRecipe> = {
     },
   },
   xiaohongshu: {
-    clickSelectors: [".note-item", 'a[href*="/explore/"]', "section"],
+    clickSelectors: [".note-item", 'a[href*="/explore/"]', 'a[href*="/discovery/item/"]'],
     textActions: {
       share: [/share/i, /分享/],
       like: [/like/i, /赞/],
@@ -80,7 +84,7 @@ const RECIPES: Record<E2EPlatform, PlatformRecipe> = {
     },
   },
   twitter: {
-    clickSelectors: ['article [role="link"]', "article", '[data-testid="tweet"]'],
+    clickSelectors: ['article[data-testid="tweet"]', '[data-testid="tweet"]', 'article a[href*="/status/"]'],
     textActions: {
       share: [/share/i],
       repost: [/repost/i, /retweet/i],
@@ -91,6 +95,46 @@ const RECIPES: Record<E2EPlatform, PlatformRecipe> = {
     },
   },
 };
+
+const ACTIVE_STATE_LABELS: Partial<Record<E2EAction, readonly RegExp[]>> = {
+  like: [
+    /\bunlike\b/i,
+    /\bliked\b/i,
+    /已赞/,
+    /已点赞/,
+    /取消赞/,
+  ],
+  favorite: [
+    /\bunfavorite\b/i,
+    /\bfavorited\b/i,
+    /\bremove\s+favorite\b/i,
+    /\bremove\s+bookmark\b/i,
+    /\bbookmarked\b/i,
+    /已收藏/,
+    /取消收藏/,
+  ],
+  follow: [
+    /\bfollowing\b/i,
+    /\bunfollow\b/i,
+    /已关注/,
+    /取消关注/,
+  ],
+  repost: [
+    /\bundo\s+repost\b/i,
+    /\bretweeted\b/i,
+    /\breposted\b/i,
+    /已转发/,
+    /取消转发/,
+  ],
+  bookmark: [
+    /\bremove\s+bookmark\b/i,
+    /\bbookmarked\b/i,
+    /已收藏/,
+    /取消收藏/,
+  ],
+};
+
+const registeredExecutorTargets = new WeakMap<object, Set<E2EPlatform>>();
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -115,16 +159,95 @@ function getEnv(env?: E2EExecutorEnv): Required<E2EExecutorEnv> {
   };
 }
 
-function isVisible(element: ClickableElement): boolean {
-  const rect = element.getBoundingClientRect?.();
-  if (!rect) return false;
-  return rect.width > 0 && rect.height > 0;
+function getComputedVisibilityStyle(element: ClickableElement): Pick<
+  CSSStyleDeclaration,
+  "display" | "visibility" | "pointerEvents" | "opacity"
+> | null {
+  const getter = typeof getComputedStyle === "undefined" ? undefined : getComputedStyle;
+  if (!getter) return null;
+
+  try {
+    return getter(element as Element);
+  } catch {
+    return null;
+  }
 }
 
-function queryVisible(documentLike: QueryDocument, selectors: readonly string[]): ClickableElement | null {
+function hasDisabledState(element: ClickableElement): boolean {
+  const disabledAttr = element.getAttribute?.("disabled");
+  const ariaDisabled = element.getAttribute?.("aria-disabled");
+  return (
+    element.disabled === true ||
+    (disabledAttr !== undefined && disabledAttr !== null) ||
+    ariaDisabled?.toLowerCase() === "true"
+  );
+}
+
+function isVisible(element: ClickableElement, viewportHeight: number): boolean {
+  const rect = element.getBoundingClientRect?.();
+  if (!rect) return false;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  if (rect.bottom <= 0 || rect.top >= viewportHeight + 400) return false;
+  if (hasDisabledState(element)) return false;
+
+  const style = getComputedVisibilityStyle(element);
+  if (!style) return true;
+  if (style.display === "none") return false;
+  if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+  if (style.pointerEvents === "none") return false;
+
+  const opacity = Number.parseFloat(style.opacity);
+  return !Number.isFinite(opacity) || opacity > 0;
+}
+
+function matchesSelector(element: ClickableElement, selector: string): boolean {
+  try {
+    return element.matches?.(selector) === true;
+  } catch {
+    return false;
+  }
+}
+
+function hasContentSemanticsBeforeControl(
+  target: ClickableElement,
+  control: ClickableElement,
+  contentSelectors: readonly string[],
+): boolean {
+  let current: ClickableElement | null | undefined = target;
+  while (current) {
+    const candidate: ClickableElement = current;
+    if (contentSelectors.some((selector) => matchesSelector(candidate, selector))) return true;
+    if (candidate === control) return false;
+    current = candidate.parentElement;
+  }
+  return false;
+}
+
+function isUnsafeClickControl(
+  target: ClickableElement,
+  contentSelectors: readonly string[],
+): boolean {
+  let current: ClickableElement | null | undefined = target;
+  while (current) {
+    if (matchesSelector(current, BUTTON_CONTROL_SELECTOR)) {
+      return !hasContentSemanticsBeforeControl(target, current, contentSelectors);
+    }
+    current = current.parentElement;
+  }
+  return false;
+}
+
+function queryClickTarget(
+  documentLike: QueryDocument,
+  selectors: readonly string[],
+  viewportHeight: number,
+): ClickableElement | null {
   for (const selector of selectors) {
     const elements = Array.from(documentLike.querySelectorAll(selector));
-    const target = elements.find(isVisible);
+    const target = elements.find((element) => (
+      isVisible(element, viewportHeight) &&
+      !isUnsafeClickControl(element, selectors)
+    ));
     if (target) return target;
   }
   return null;
@@ -144,12 +267,18 @@ function elementLabel(element: ClickableElement): string {
 function findTextTarget(
   documentLike: QueryDocument,
   patterns: readonly RegExp[],
+  action: E2EAction,
+  viewportHeight: number,
 ): ClickableElement | null {
+  const activePatterns = ACTIVE_STATE_LABELS[action] ?? [];
   const elements = Array.from(documentLike.querySelectorAll(TEXT_TARGET_SELECTOR));
   return elements.find((element) => {
-    if (!isVisible(element)) return false;
+    if (!isVisible(element, viewportHeight)) return false;
     const label = elementLabel(element);
-    return patterns.some((pattern) => pattern.test(label));
+    return (
+      patterns.some((pattern) => pattern.test(label)) &&
+      !activePatterns.some((pattern) => pattern.test(label))
+    );
   }) ?? null;
 }
 
@@ -223,8 +352,13 @@ export async function executeAction(
 
     const recipe = RECIPES[platform];
     const target = action === "click"
-      ? queryVisible(runtime.document, recipe.clickSelectors)
-      : findTextTarget(runtime.document, recipe.textActions[action] ?? []);
+      ? queryClickTarget(runtime.document, recipe.clickSelectors, runtime.window.innerHeight)
+      : findTextTarget(
+        runtime.document,
+        recipe.textActions[action] ?? [],
+        action,
+        runtime.window.innerHeight,
+      );
 
     if (!target) {
       return failedResult(action, "target_not_found");
@@ -256,7 +390,13 @@ async function executeActions(message: E2EContentExecuteMessage): Promise<E2ECon
 export function registerE2EExecutor(platform: E2EPlatform): void {
   if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
 
-  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  const onMessage = chrome.runtime.onMessage;
+  const registeredPlatforms = registeredExecutorTargets.get(onMessage) ?? new Set<E2EPlatform>();
+  if (registeredPlatforms.has(platform)) return;
+  registeredPlatforms.add(platform);
+  registeredExecutorTargets.set(onMessage, registeredPlatforms);
+
+  onMessage.addListener((message: unknown, _sender, sendResponse) => {
     if (!isExecuteMessage(message, platform)) return false;
 
     void executeActions(message)
