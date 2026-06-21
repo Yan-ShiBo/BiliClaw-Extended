@@ -194,7 +194,7 @@
 
 ## 最近更新
 
-最新版本：**v0.3.135 / extension v0.3.89: 抖音 search discovery 真实召回修复（2026-06-21）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
+最新版本：**v0.3.135 / extension v0.3.89 / desktop v0.3.135: 抖音 search discovery 真实召回修复（2026-06-21）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
 
 - **抖音搜索真实召回恢复** —— search 仍从首页搜索框输入并点击按钮提交，同时用 `search_navigation_ok` 校验进入真实结果页。
 - **搜索空结果自动走页面 API bridge** —— 当页面自身 fetch tap / DOM 都没有候选时，插件会用已登录页面的 MAIN-world search API bridge 兜底。
@@ -673,7 +673,7 @@ OpenBiliClaw/
 
 ## 📜 更新日志
 
-最新版本：**v0.3.135 / extension v0.3.89: 抖音 search discovery 真实召回修复（2026-06-21）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。普通用户从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 的 `openbiliclaw-v*` 聚合页下载插件包和可用桌面安装包；自动化频道 release 仍分别保留 `backend-v*`、`extension-v*`、`desktop-v*`。
+最新版本：**v0.3.135 / extension v0.3.89 / desktop v0.3.135: 抖音 search discovery 真实召回修复（2026-06-21）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。普通用户从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 的 `openbiliclaw-v*` 聚合页下载插件包和可用桌面安装包；自动化频道 release 仍分别保留 `backend-v*`、`extension-v*`、`desktop-v*`。
 
 ## 🗺️ 后续规划
 

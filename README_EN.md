@@ -190,7 +190,7 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.135 / extension v0.3.89: Douyin search discovery recovery (2026-06-21)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.135 / extension v0.3.89 / desktop v0.3.135: Douyin search discovery recovery (2026-06-21)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
 - **Douyin search discovery is back** — search still starts from the homepage search box, clicks the submit button, and verifies the real results route with `search_navigation_ok`.
 - **Search now falls back through the page API bridge** — when passive fetch tap and DOM parsing produce no candidates, the extension uses the logged-in MAIN-world search API bridge.
@@ -661,7 +661,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.135 / extension v0.3.89: Douyin search discovery recovery (2026-06-21)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+Latest: **v0.3.135 / extension v0.3.89 / desktop v0.3.135: Douyin search discovery recovery (2026-06-21)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 
