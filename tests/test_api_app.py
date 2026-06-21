@@ -23,6 +23,11 @@ def _wait_for_presence_count(ctx: object, expected: int) -> None:
     assert ctx.presence.snapshot()["active_count"] == expected
 
 
+class _ReadySoulEngine:
+    def is_profile_ready(self) -> bool:
+        return True
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep create_app() route tests independent from the developer machine.
@@ -1782,7 +1787,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -1810,6 +1815,51 @@ class TestBackendAPI:
         # existing extension build keeps working across the upgrade.
         assert memory.events[0]["metadata"]["source_platform"] == "bilibili"
 
+    def test_events_endpoint_ignores_pre_init_behavior_events(self) -> None:
+        from fastapi.testclient import TestClient
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+
+            async def propagate_event(self, event: dict[str, object]) -> None:
+                self.events.append(event)
+
+        class FakeSoulEngine:
+            def is_profile_ready(self) -> bool:
+                return False
+
+        memory = FakeMemoryManager()
+        app = create_app(memory_manager=memory, soul_engine=FakeSoulEngine())
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/events",
+            json={
+                "events": [
+                    {
+                        "type": "click",
+                        "url": "https://www.bilibili.com/video/BV1PREINIT",
+                        "title": "初始化前不该入库",
+                        "timestamp": 1710000000000,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "accepted": 0,
+            "rejected": [
+                {
+                    "index": 0,
+                    "type": "click",
+                    "reason": "not_initialized",
+                }
+            ],
+        }
+        assert memory.events == []
+
     def test_events_endpoint_preserves_source_platform(self) -> None:
         from fastapi.testclient import TestClient
 
@@ -1821,7 +1871,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -1871,7 +1921,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -1907,7 +1957,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -1941,7 +1991,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -1980,7 +2030,7 @@ class TestBackendAPI:
                 self.events.append(event)
 
         memory = FakeMemoryManager()
-        app = create_app(memory_manager=memory)
+        app = create_app(memory_manager=memory, soul_engine=_ReadySoulEngine())
         client = TestClient(app)
 
         response = client.post(
@@ -2996,6 +3046,50 @@ class TestBackendAPI:
         assert data["items"][0]["kind"] == "interest_added"
         assert any(item["kind"] == "feedback" for item in data["items"])
         assert any(item["kind"] == "pool_update" for item in data["items"])
+
+    def test_activity_feed_uninitialized_does_not_surface_pending_signals(self) -> None:
+        from fastapi.testclient import TestClient
+
+        class FakeDatabase:
+            def get_recommendations(
+                self, limit: int = 20, *, exclude_processed: bool = False
+            ) -> list[dict[str, object]]:
+                return []
+
+        class FakeMemoryManager:
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return []
+
+        class FakeRuntimeController:
+            def get_runtime_status(self) -> dict[str, object]:
+                return {
+                    "initialized": False,
+                    "recommendation_count": 0,
+                    "pending_signal_events": 219,
+                    "pool_available_count": 0,
+                    "pool_pending_count": 0,
+                    "last_replenished_count": 0,
+                    "last_discovered_count": 0,
+                    "manual_refresh_state": "idle",
+                    "manual_refresh_message": "",
+                }
+
+        app = create_app(
+            memory_manager=FakeMemoryManager(),
+            database=FakeDatabase(),
+            soul_engine=object(),
+            runtime_controller=FakeRuntimeController(),
+        )
+        client = TestClient(app)
+
+        response = client.get("/api/activity-feed")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "开始初始化" in data["live_summary"]
+        assert data["headline"] == data["live_summary"]
+        assert "219" not in data["live_summary"]
+        assert "记下" not in data["live_summary"]
 
     def test_refresh_recommendations_endpoint_triggers_runtime_refresh(self) -> None:
         from fastapi.testclient import TestClient

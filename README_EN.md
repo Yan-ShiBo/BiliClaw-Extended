@@ -190,12 +190,11 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.133 / extension v0.3.87: unified recommendation-pool admission (2026-06-21)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.134 / extension v0.3.88: pre-init event ingress guard (2026-06-21)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
-- **Unified admission floor at 0.60** — regular sources, plugin sources, and observed candidates all go through the evaluator score gate; source labels no longer bypass admission.
-- **Explore gets only a small novelty allowance** — `explore` keeps a slightly lower strategy threshold, but the old low-score discount is gone; Xiaohongshu no longer has special admission behavior.
-- **Recommendation reads now guard against old low-score data** — `content_cache`, historical recommendations, delight candidates, and regular pool reads all filter below the admission floor.
-- **First-run completion waits for real inventory** — setup completion now waits until recommendable content exists instead of entering an empty experience after profile generation alone.
+- **Ordinary events are ignored before initialization** — when the soul profile is explicitly uninitialized, `/api/events` returns `not_initialized`, writes no memory, and does not increase pending signals.
+- **The first screen no longer reports stale signal counts** — `/api/activity-feed` keeps showing the start-initialization state while there is no recommendation-pool output.
+- **First-run signals stay owned by guided init** — source task results still flow through the init-owned path after the user selects sources and clicks Start Initialization.
 
 ## Community
 
@@ -593,7 +592,7 @@ Four Bilibili strategies work in coordination, each with independent API quota; 
 | **Related Chain** | Expands from seed videos along recommendation chains | Fair share |
 | **Explore** | LLM-driven cross-domain exploration | Fair share |
 
-**Safe data fetching** — Bilibili and generic Web fetch backend-direct (Bilibili via WBI-signed APIs); if Bilibili search degrades or is blocked and cooling down, the backend task bridge can enqueue a search task, then the extension opens the real logged-in search page in a background tab and returns visible rendered DOM results as fallback candidates. Xiaohongshu / Douyin / YouTube are read by the browser extension inside your *already-logged-in* pages: init profiling doesn't deep-scroll by default and returns in batches, and the backend never crawls or logs in to those sites itself (YouTube can also import old history via Google Takeout). X is fetched backend-side via read-only server-side cookie replay using the x.com cookie the extension synced (`auth_token` + `ct0`); the extension only syncs the cookie and captures your own engagement. For steady-state refill, Douyin search / hot / feed background tabs first open the Douyin home page and perform real DOM interactions to trigger search, hot, or feed loading; search/feed passively collect page responses and rendered DOM, while hot can use a hot-board seed through the logged-in page's related API bridge when the page path returns no candidates. YouTube is refilled backend-side by platform deficit.
+**Safe data fetching** — Bilibili and generic Web fetch backend-direct (Bilibili via WBI-signed APIs); if Bilibili search degrades or is blocked and cooling down, the backend task bridge can enqueue a search task, then the extension opens the real logged-in search page in a background tab and returns visible rendered DOM results as fallback candidates. Xiaohongshu / Douyin / YouTube are read by the browser extension inside your *already-logged-in* pages: init profiling doesn't deep-scroll by default and returns in batches, and the backend never crawls or logs in to those sites itself (YouTube can also import old history via Google Takeout). X is fetched backend-side via read-only server-side cookie replay using the x.com cookie the extension synced (`auth_token` + `ct0`); the extension only syncs the cookie and captures your own engagement. Ordinary browser behavior events enter the continuous-learning path only after the profile is initialized; first-run profile signals are fetched only after you click "Start initialization" and only from the selected sources. For steady-state refill, Douyin search / hot / feed background tabs first open the Douyin home page and perform real DOM interactions to trigger search, hot, or feed loading; search/feed passively collect page responses and rendered DOM, while hot can use a hot-board seed through the logged-in page's related API bridge when the page path returns no candidates. YouTube is refilled backend-side by platform deficit.
 
 **Unified evaluation** — every source first writes raw candidates to `discovery_candidates`. The backend then claims mixed-source batches and scores them with the Soul profile, text / tags, engagement metrics, and recent negative examples. When optional cover-image evaluation is enabled and the evaluation model supports image input, covers are read from the runtime image cache first, fetched through the whitelist boundary only on cache miss, compressed, and sent to the same shared evaluator; the "will this user like it?" judgment does not live inside each platform producer.
 
@@ -662,7 +661,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.133 / extension v0.3.87: unified recommendation-pool admission (2026-06-21)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+Latest: **v0.3.134 / extension v0.3.88: pre-init event ingress guard (2026-06-21)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 

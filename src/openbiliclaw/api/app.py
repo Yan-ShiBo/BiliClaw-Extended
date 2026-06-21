@@ -2938,6 +2938,19 @@ def create_app(
     async def ingest_events(payload: BehaviorEventBatchIn) -> EventIngestResponse:
         from openbiliclaw.sources.event_format import build_event
 
+        if _health_profile_ready() is False:
+            return EventIngestResponse(
+                accepted=0,
+                rejected=[
+                    EventRejectedOut(
+                        index=index,
+                        type=str(item.type or "").strip(),
+                        reason="not_initialized",
+                    )
+                    for index, item in enumerate(payload.events)
+                ],
+            )
+
         accepted = 0
         rejected: list[EventRejectedOut] = []
         for index, item in enumerate(payload.events):
