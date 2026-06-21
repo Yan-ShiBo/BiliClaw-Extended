@@ -2669,6 +2669,7 @@ def test_init_runs_history_preference_profile_and_discovery(
             self,
             max_folders: int = 20,
             max_items_per_folder: int = 200,
+            max_total_items: int | None = None,
         ) -> list[object]:
             return []
 
@@ -2775,12 +2776,12 @@ def test_init_runs_history_preference_profile_and_discovery(
     assert fake_discovery.calls
 
 
-def test_init_caps_bilibili_favorites_at_300_and_following_at_100(
+def test_init_caps_bilibili_history_and_favorites_at_500_and_following_at_100(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
 ) -> None:
     class FakeBilibiliClient:
         async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
-            assert max_items == 300
+            assert max_items == 500
             return [
                 {
                     "history": {"bvid": "BV1A", "view_at": 1710000000},
@@ -2793,9 +2794,11 @@ def test_init_caps_bilibili_favorites_at_300_and_following_at_100(
             self,
             max_folders: int = 20,
             max_items_per_folder: int = 200,
+            max_total_items: int | None = None,
         ) -> list[object]:
+            assert max_total_items == 500
             items = [
-                SimpleNamespace(title=f"收藏视频 {idx}", upper=f"UP {idx}") for idx in range(350)
+                SimpleNamespace(title=f"收藏视频 {idx}", upper=f"UP {idx}") for idx in range(550)
             ]
             return [SimpleNamespace(folder=SimpleNamespace(title="默认收藏夹"), items=items)]
 
@@ -2874,12 +2877,12 @@ def test_init_caps_bilibili_favorites_at_300_and_following_at_100(
     assert result.exit_code == 0
     assert fake_soul.analyzed_events
     analyzed = fake_soul.analyzed_events[0]
-    assert len([event for event in analyzed if event["event_type"] == "favorite"]) == 300
+    assert len([event for event in analyzed if event["event_type"] == "favorite"]) == 500
     assert len([event for event in analyzed if event["event_type"] == "follow"]) == 100
-    assert len(fake_memory.events) == 401
+    assert len(fake_memory.events) == 601
     built_history = fake_soul.built_history[0]
     assert len(built_history) == 3
-    assert str(built_history[1]["_favorites_summary"]).startswith("共 300 个收藏")
+    assert str(built_history[1]["_favorites_summary"]).startswith("共 500 个收藏")
     assert str(built_history[2]["_following_summary"]).startswith("共关注 100 人")
 
 
@@ -2900,8 +2903,10 @@ def test_init_accepts_custom_bilibili_favorites_and_following_limits(
             self,
             max_folders: int = 20,
             max_items_per_folder: int = 200,
+            max_total_items: int | None = None,
         ) -> list[object]:
             assert max_items_per_folder == 2
+            assert max_total_items == 2
             items = [
                 SimpleNamespace(title=f"收藏视频 {idx}", upper=f"UP {idx}") for idx in range(5)
             ]
@@ -3023,6 +3028,7 @@ def test_init_includes_xhs_bootstrap_events(
             self,
             max_folders: int = 20,
             max_items_per_folder: int = 200,
+            max_total_items: int | None = None,
         ) -> list[object]:
             return []
 

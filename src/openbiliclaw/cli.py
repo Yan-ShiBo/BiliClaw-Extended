@@ -166,8 +166,8 @@ _INIT_DISCOVERY_PLAN = [
 # ``scheduler.pool_target_count`` (300 by default) over the following hour, so a
 # tiny init pool only delays diversity, never reduces it.
 _INIT_POOL_TARGET_COUNT = 15
-_INIT_BILIBILI_HISTORY_LIMIT = 300
-_INIT_BILIBILI_FAVORITE_LIMIT = 300
+_INIT_BILIBILI_HISTORY_LIMIT = 500
+_INIT_BILIBILI_FAVORITE_LIMIT = 500
 _INIT_BILIBILI_FOLLOW_LIMIT = 100
 # X (Twitter): the user's own Likes + Bookmarks, fetched server-side via
 # twitter-cli (no extension task). Both are strong explicit-preference signals.
@@ -4390,6 +4390,7 @@ async def _fetch_bilibili_init_data(
             await client.get_all_favorites(
                 max_folders=200,
                 max_items_per_folder=max(1, favorite_limit),
+                max_total_items=favorite_limit,
             )
             if favorite_limit > 0
             else []

@@ -626,20 +626,47 @@ class BilibiliAPIClient:
             }
         return items[:max_items]
 
-    async def get_favorites(self, media_id: int) -> list[dict[str, Any]]:
+    async def get_favorites(
+        self,
+        media_id: int,
+        *,
+        max_items: int = 20,
+        page_size: int = 20,
+    ) -> list[dict[str, Any]]:
         """Get content from a favorites folder.
 
         Args:
             media_id: Favorites folder media ID.
+            max_items: Maximum number of favorite items to fetch.
+            page_size: Page size for the Bilibili resource list endpoint.
 
         Returns:
             List of favorite item dicts.
         """
-        data = await self._get_json(
-            "/x/v3/fav/resource/list",
-            params={"media_id": media_id, "pn": 1, "ps": 20},
-        )
-        return _json_list(data.get("medias", []))
+        item_limit = max(0, int(max_items))
+        if item_limit <= 0:
+            return []
+
+        effective_page_size = max(1, min(int(page_size), 20))
+        items: list[dict[str, Any]] = []
+        page = 1
+        while len(items) < item_limit:
+            data = await self._get_json(
+                "/x/v3/fav/resource/list",
+                params={"media_id": media_id, "pn": page, "ps": effective_page_size},
+            )
+            batch = _json_list(data.get("medias", []))
+            if not batch:
+                break
+            items.extend(batch)
+            has_more = data.get("has_more")
+            if has_more is not None:
+                if not bool(has_more):
+                    break
+            elif len(batch) < effective_page_size:
+                break
+            page += 1
+        return items[:item_limit]
 
     async def get_favorite_folders(self) -> list[FavoriteFolder]:
         """Get the authenticated user's favorite folder metadata."""
@@ -663,22 +690,40 @@ class BilibiliAPIClient:
         *,
         max_folders: int = 10,
         max_items_per_folder: int = 50,
+        max_total_items: int | None = None,
     ) -> list[FavoriteFolderWithItems]:
         """Get favorite folders and fetch each folder's items within budget."""
         folders = await self.get_favorite_folders()
+        folder_limit = max(0, int(max_items_per_folder))
+        folder_count = max(0, int(max_folders))
+        if folder_count <= 0 or folder_limit <= 0:
+            return []
+
+        remaining_total: int | None
+        if max_total_items is None:
+            remaining_total = None
+        else:
+            remaining_total = max(0, int(max_total_items))
+            if remaining_total <= 0:
+                return []
+
         aggregated: list[FavoriteFolderWithItems] = []
-        for folder in folders[:max_folders]:
-            items = await self.get_favorites(folder.media_id)
-            limited_items = items[:max_items_per_folder]
+        for folder in folders[:folder_count]:
+            if remaining_total is not None and remaining_total <= 0:
+                break
+            current_limit = folder_limit
+            if remaining_total is not None:
+                current_limit = min(current_limit, remaining_total)
+            limited_items = await self.get_favorites(folder.media_id, max_items=current_limit)
             aggregated.append(
                 FavoriteFolderWithItems(
                     folder=folder,
                     items=limited_items,
-                    truncated=(
-                        len(items) > len(limited_items) or folder.media_count > len(limited_items)
-                    ),
+                    truncated=folder.media_count > len(limited_items),
                 )
             )
+            if remaining_total is not None:
+                remaining_total -= len(limited_items)
         return aggregated
 
     async def get_following(

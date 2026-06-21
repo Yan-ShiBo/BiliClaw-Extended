@@ -10,6 +10,8 @@
 
 - **未初始化 activity feed 不再抢显示待处理信号**：`/api/activity-feed` 现在和推荐空态使用同一初始化优先级；在 `initialized=false` 且还没有推荐 / 可换池 / 补货产物时，`pending_signal_events` 只保留为后台事实，不再把 popup / Web 首屏文案改成“已经记下 N 个信号”，避免保存 LLM provider 后误导用户以为初始化已经开始。
 - **初始化前普通行为事件不再入库**：`POST /api/events` 在 soul 画像明确未初始化时返回 `accepted=0` / `rejected.reason=not_initialized`，不写入 memory、不触发 `activity.added`、也不增加 `pending_signal_events`。首轮画像信号只由用户点击「开始初始化」后的 guided init 来源拉取；初始化任务自己的 `/api/sources/*/task-result` 仍按 init-owned 逻辑放行。
+- **B 站收藏夹初始化按页补齐**：`get_favorites()` 不再固定只取收藏夹第一页 20 条；分页停止优先遵守 B 站返回的 `has_more`，覆盖第一页不足 20 条但仍有后续页的真实账号形态。初始化会把 `--bilibili-favorite-limit` 作为跨收藏夹总预算传入，单个收藏夹按页补齐到剩余预算。
+- **B 站初始化默认信号上限调高**：首轮初始化默认导入的 B 站观看历史从 300 条提升到 500 条，收藏总预算从 300 条提升到 500 条；关注 UP 默认仍保持 100 人。
 
 ## v0.3.133 / extension v0.3.87: 推荐池 admission 统一收口（2026-06-21）
 

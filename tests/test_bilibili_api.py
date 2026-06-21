@@ -547,6 +547,122 @@ async def test_get_all_favorites_respects_budget_limits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_all_favorites_paginates_folder_until_item_limit() -> None:
+    client = BilibiliAPIClient(cookie="SESSDATA=abc")
+    page1 = [{"title": f"v{i}"} for i in range(20)]
+    page2 = [{"title": f"v{i}"} for i in range(20, 25)]
+    client._client = RouteAsyncClient(
+        {
+            "/x/web-interface/nav": [
+                {"code": 0, "data": {"isLogin": True, "uname": "alice", "mid": 42}}
+            ],
+            "/x/v3/fav/folder/created/list-all": [
+                {
+                    "code": 0,
+                    "data": {
+                        "list": [
+                            {"id": 1, "title": "默认收藏夹", "media_count": 25},
+                        ]
+                    },
+                }
+            ],
+            "/x/v3/fav/resource/list": [
+                {"code": 0, "data": {"medias": page1}},
+                {"code": 0, "data": {"medias": page2}},
+            ],
+        }
+    )
+
+    favorites = await client.get_all_favorites(max_folders=1, max_items_per_folder=25)
+
+    assert [item["title"] for item in favorites[0].items] == [f"v{i}" for i in range(25)]
+    fav_calls = [
+        params for url, params, _ in client._client.calls if url.endswith("/x/v3/fav/resource/list")
+    ]
+    assert [call["pn"] for call in fav_calls if call is not None] == [1, 2]
+    assert all(call is not None and call["ps"] == 20 for call in fav_calls)
+
+
+@pytest.mark.asyncio
+async def test_get_all_favorites_continues_when_sparse_page_has_more() -> None:
+    client = BilibiliAPIClient(cookie="SESSDATA=abc")
+    page1 = [{"title": f"v{i}"} for i in range(19)]
+    page2 = [{"title": f"v{i}"} for i in range(19, 25)]
+    client._client = RouteAsyncClient(
+        {
+            "/x/web-interface/nav": [
+                {"code": 0, "data": {"isLogin": True, "uname": "alice", "mid": 42}}
+            ],
+            "/x/v3/fav/folder/created/list-all": [
+                {
+                    "code": 0,
+                    "data": {
+                        "list": [
+                            {"id": 1, "title": "默认收藏夹", "media_count": 25},
+                        ]
+                    },
+                }
+            ],
+            "/x/v3/fav/resource/list": [
+                {"code": 0, "data": {"medias": page1, "has_more": True}},
+                {"code": 0, "data": {"medias": page2, "has_more": False}},
+            ],
+        }
+    )
+
+    favorites = await client.get_all_favorites(max_folders=1, max_items_per_folder=25)
+
+    assert [item["title"] for item in favorites[0].items] == [f"v{i}" for i in range(25)]
+    fav_calls = [
+        params for url, params, _ in client._client.calls if url.endswith("/x/v3/fav/resource/list")
+    ]
+    assert [call["pn"] for call in fav_calls if call is not None] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_get_all_favorites_respects_total_item_budget_across_folders() -> None:
+    client = BilibiliAPIClient(cookie="SESSDATA=abc")
+    page1 = [{"title": f"v{i}"} for i in range(20)]
+    page2 = [{"title": f"v{i}"} for i in range(20, 40)]
+    client._client = RouteAsyncClient(
+        {
+            "/x/web-interface/nav": [
+                {"code": 0, "data": {"isLogin": True, "uname": "alice", "mid": 42}}
+            ],
+            "/x/v3/fav/folder/created/list-all": [
+                {
+                    "code": 0,
+                    "data": {
+                        "list": [
+                            {"id": 1, "title": "默认收藏夹", "media_count": 40},
+                            {"id": 2, "title": "稍后看", "media_count": 40},
+                        ]
+                    },
+                }
+            ],
+            "/x/v3/fav/resource/list": [
+                {"code": 0, "data": {"medias": page1}},
+                {"code": 0, "data": {"medias": page2}},
+            ],
+        }
+    )
+
+    favorites = await client.get_all_favorites(
+        max_folders=2,
+        max_items_per_folder=40,
+        max_total_items=30,
+    )
+
+    assert len(favorites) == 1
+    assert len(favorites[0].items) == 30
+    fav_calls = [
+        params for url, params, _ in client._client.calls if url.endswith("/x/v3/fav/resource/list")
+    ]
+    assert [call["media_id"] for call in fav_calls if call is not None] == [1, 1]
+    assert [call["pn"] for call in fav_calls if call is not None] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_get_following_parses_users() -> None:
     client = BilibiliAPIClient(cookie="SESSDATA=abc")
     client._client = RouteAsyncClient(
