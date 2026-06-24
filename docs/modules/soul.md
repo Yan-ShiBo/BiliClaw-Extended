@@ -57,7 +57,9 @@
 | 账户同步事件分析 | ✅ | 后台低频同步导入的 `view/favorite/follow` 事件会复用 `analyze_events()` 进入偏好与画像链 |
 | 小红书初始化画像信号 | ✅ | `openbiliclaw init` 会把插件解析到的小红书 `saved/liked/xhs_history` 转成 `favorite/like/view` 事件，并与 B 站历史、收藏、关注一起进入 `analyze_events()` 和初始画像 history |
 | 抖音初始化画像信号 | ✅ | `openbiliclaw init --yes-douyin` 会把插件解析到的抖音 `dy_post/dy_collect/dy_like/dy_follow` 转成 `view/favorite/like/follow` 事件，并进入偏好分析和初始画像 history |
+| 普通行为事件增量画像 | ✅ | profile 已存在时，`POST /api/events` accepted 的浏览器行为事件会先落 memory，再通过 `signals_from_events()` 进入 `ProfileUpdatePipeline.ingest_batch()`；rejected / not_initialized 事件不进入 pipeline |
 | 小红书 / 抖音 / YouTube / 知乎增量画像事件 | ✅ | profile 已存在时，带画像更新语义的 bootstrap task-result 新增事件会在落 memory 后进入 `ProfileUpdatePipeline`，参与后续分层画像更新；知乎任务需在 payload 中显式设置 `profile_update=true`，普通 `fetch-zhihu` smoke 不触发 |
+| 普通行为事件增量画像 | ✅ | profile 已存在时，`POST /api/events` accepted 的浏览器行为事件会先落 memory，再通过 `signals_from_events()` 进入 `ProfileUpdatePipeline.ingest_batch()`；rejected / not_initialized 事件不进入 pipeline |
 | ToneProfile | ✅ | 从 `OnionProfile`、偏好摘要和近期反馈推断 `density/warmth/playfulness/directness`，统一驱动推荐、画像和聊天语气 |
 | Cognition updates | ✅ | 在反馈刷新和聊天学习后生成 `interest_added / dislike_added / profile_shift` 结构化 cognition card，包含 `summary / context_line / source_label / expand_hint / impact / reasoning / evidence / source / created_at`，供插件提醒与画像页展开展示；即时反馈和聊天会尽量指出具体内容或本轮聊天，聚合判断则保守回退到”基于最近几条相关内容” |
 | Layered profile cognition | ✅ | `OnionProfile` 新增 MBTI / Values / Interest 等分层，画像生成会同时消费 `history + preference + awareness + insights`，避免把兴趣 topic 堆成整段画像 |
@@ -436,7 +438,7 @@ active 池会做两层多样性保护：词面 / specifics 的 novelty guard 阻
 
 这意味着行为事件对画像的第一影响，通常不是直接改 `personality_portrait`，而是先慢慢把偏好层往一个更稳定的方向推。
 
-小红书 / 抖音 / YouTube / 知乎插件任务还有一条增量路径：当 `soul_engine.is_profile_ready()` 已经为真时，bootstrap task-result 新增的事件会先写入 memory，再通过 `signals_from_events()` 转成 `ProfileSignal` 进入 `ProfileUpdatePipeline.ingest_batch()`。首次 init 期间不会走这条增量更新，避免同一批初始化事件同时被 `analyze_events()` 和 pipeline 重复学习。知乎为了保留 `fetch-zhihu` 的 smoke 语义，只有任务 payload 显式带 `profile_update=true` 时才走这条 API 自动传播路径；CLI 手动回填使用 `fetch-zhihu --write-memory` / `--rebuild-profile`。
+普通浏览器事件和插件 bootstrap 任务结果都有一条增量路径：当 `soul_engine.is_profile_ready()` 已经为真时，`POST /api/events` 中 accepted 的事件，以及小红书 / 抖音 / YouTube / 知乎等 task-result 新增事件，会先写入 memory，再通过 `signals_from_events()` 转成 `ProfileSignal` 进入 `ProfileUpdatePipeline.ingest_batch()`。`/api/events` 会先用独立 `last_profile_pipeline_event_id` 游标补喂旧版本遗留在 discovery 水位后的行为事件，再喂当前 accepted 事件，随后通过 `request_replenishment(reason="event_ingest")` 只提交补货需求；真正补货由定时 tick 或用户刷新后的低库存检查统一触发。这个画像 backfill 游标不推进 discovery 的 `last_processed_event_id`。rejected / not_initialized 事件不会进入 pipeline。首次 init 期间不会走这条增量更新，避免同一批初始化事件同时被 `analyze_events()` 和 pipeline 重复学习。知乎为了保留 `fetch-zhihu` 的 smoke 语义，只有任务 payload 显式带 `profile_update=true` 时才走 API 自动传播路径；CLI 手动回填使用 `fetch-zhihu --write-memory` / `--rebuild-profile`。
 
 ### 3. 推荐反馈路径：分成“即时记住”和“批量学习”两档
 
@@ -702,7 +704,7 @@ system prompt 的核心约束是：
 
 为了避免画像抖动过快，当前实现刻意保守：
 
-- `propagate_event()` 只落事件，不自动全链路刷新
+- `propagate_event()` 只落事件；普通 `/api/events` 的增量画像由 API 层在 accepted 后显式喂给 `ProfileUpdatePipeline`，不会由 memory 层隐式触发全链路刷新
 - 单条反馈只做即时认知记录，不直接重建画像
 - 聊天信号必须高置信且重复出现，才能进入长期学习
 - 画像重建必须跨过“显著变化阈值”

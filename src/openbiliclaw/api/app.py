@@ -175,6 +175,16 @@ _EMBEDDING_PROBE_TIMEOUT_SECONDS = 15.0
 _LAN_IP_TTL_SECONDS = 30.0
 _AUTO_REPLENISH_DEBOUNCE_SECONDS = 30.0
 _FEEDBACK_BATCH_DEBOUNCE_SECONDS = 5.0
+_PROFILE_UPDATE_BACKFILL_LIMIT = 200
+_PROFILE_UPDATE_BACKFILL_EVENT_TYPES = [
+    "view",
+    "search",
+    "favorite",
+    "like",
+    "coin",
+    "comment",
+    "feedback",
+]
 
 # Canonical home is openbiliclaw.sources.x_auth (mirrors douyin_auth);
 # re-exported here because callers historically imported from api.app.
@@ -1360,42 +1370,156 @@ def create_app(
         with suppress(Exception):
             feedback_batch_scheduler.schedule()
 
-    async def _ingest_profile_update_events(events: list[dict[str, Any]]) -> None:
-        """Feed source task events into the profile-update pipeline when ready.
+    async def _ingest_profile_update_events(events: list[dict[str, Any]]) -> int:
+        """Feed events into the profile-update pipeline when ready.
 
         Init handles first-run analysis explicitly via ``analyze_events`` +
-        ``build_initial_profile``. After a profile exists, extension task
-        results should also affect the incremental update buffers instead of
-        only being persisted to event memory.
+        ``build_initial_profile``. After a profile exists, ordinary browser
+        events and extension task results should also affect the incremental
+        update buffers instead of only being persisted to event memory.
         """
         if not events or ctx.soul_engine is None:
-            return
+            return 0
         is_ready = getattr(ctx.soul_engine, "is_profile_ready", None)
         if callable(is_ready):
             with suppress(Exception):
                 if not bool(is_ready()):
-                    return
+                    return 0
 
         pipeline = getattr(ctx.soul_engine, "pipeline", None)
         if pipeline is None:
-            return
+            return 0
 
         from openbiliclaw.soul.pipeline import signals_from_events
 
         signals = signals_from_events(events)
         if not signals:
-            return
+            return 0
         try:
             ingest_batch = getattr(pipeline, "ingest_batch", None)
             if callable(ingest_batch):
                 await ingest_batch(signals)
-                return
+                return len(signals)
             ingest = getattr(pipeline, "ingest", None)
             if callable(ingest):
                 for signal in signals:
                     await ingest(signal)
+                return len(signals)
         except Exception:
-            logger.exception("Failed to ingest source task events into profile pipeline")
+            logger.exception("Failed to ingest events into profile pipeline")
+        return 0
+
+    def _event_cursor_value(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if not isinstance(value, int | float | str | bytes | bytearray):
+            return 0
+        try:
+            event_id = int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, event_id)
+
+    def _runtime_state_value(state: dict[str, object], key: str) -> int:
+        return _event_cursor_value(state.get(key, 0))
+
+    def _query_profile_update_backfill_events(
+        *,
+        after_event_id: int,
+        max_event_id: int,
+    ) -> list[dict[str, Any]]:
+        query_events_since = getattr(ctx.database, "query_events_since", None)
+        if not callable(query_events_since):
+            query_events_since = getattr(ctx.memory_manager, "query_events_since", None)
+        if not callable(query_events_since):
+            return []
+        try:
+            rows = query_events_since(
+                after_event_id=after_event_id,
+                event_types=list(_PROFILE_UPDATE_BACKFILL_EVENT_TYPES),
+            )
+        except Exception:
+            logger.exception("Failed to query profile pipeline backfill events")
+            return []
+        if not isinstance(rows, list | tuple):
+            return []
+
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                with suppress(Exception):
+                    row = dict(row)
+            if not isinstance(row, dict):
+                continue
+            event_id = _event_row_id(row)
+            if event_id is None:
+                continue
+            if max_event_id > 0 and event_id > max_event_id:
+                continue
+            event = dict(row)
+            event["metadata"] = _event_row_metadata(event)
+            events.append(event)
+            if len(events) >= _PROFILE_UPDATE_BACKFILL_LIMIT:
+                break
+        return events
+
+    async def _backfill_pending_discovery_events_to_profile_pipeline(
+        *,
+        max_event_id: int,
+    ) -> int:
+        """Feed discovery-pending event rows that predate the current request.
+
+        Older versions only used ``pending_signal_events`` as a discovery
+        refresh watermark. If such rows already exist on disk, this backfill
+        lets the next successful ordinary event ingest catch them up without
+        advancing the discovery cursor itself.
+        """
+        if max_event_id <= 0:
+            return 0
+        load_state = getattr(ctx.memory_manager, "load_discovery_runtime_state", None)
+        update_state = getattr(ctx.memory_manager, "update_discovery_runtime_state", None)
+        if not callable(load_state) or not callable(update_state):
+            return 0
+        try:
+            state = load_state()
+        except Exception:
+            logger.exception("Failed to load discovery runtime state for profile backfill")
+            return 0
+        if not isinstance(state, dict):
+            return 0
+
+        discovery_cursor = _runtime_state_value(state, "last_processed_event_id")
+        if "last_profile_pipeline_event_id" in state:
+            cursor = _runtime_state_value(state, "last_profile_pipeline_event_id")
+        elif discovery_cursor > 0 and discovery_cursor < max_event_id:
+            cursor = discovery_cursor
+        else:
+            cursor = max(0, max_event_id - _PROFILE_UPDATE_BACKFILL_LIMIT)
+        if cursor >= max_event_id:
+            return 0
+
+        events = _query_profile_update_backfill_events(
+            after_event_id=cursor,
+            max_event_id=max_event_id,
+        )
+        if not events:
+            return 0
+
+        ingested = await _ingest_profile_update_events(events)
+        if ingested <= 0:
+            return 0
+
+        latest_backfilled_id = max(_event_row_id(event) or 0 for event in events)
+        if latest_backfilled_id <= 0:
+            return ingested
+
+        def _advance(runtime_state: dict[str, object]) -> None:
+            current = _runtime_state_value(runtime_state, "last_profile_pipeline_event_id")
+            runtime_state["last_profile_pipeline_event_id"] = max(current, latest_backfilled_id)
+
+        with suppress(Exception):
+            update_state(_advance)
+        return ingested
 
     def _load_source_bootstrap_state() -> dict[str, object]:
         from openbiliclaw.sources.bootstrap_state import (
@@ -2371,9 +2495,8 @@ def create_app(
         Called by the CLI at the end of a successful init.  The handler
         broadcasts an ``init_completed`` event via WebSocket so the
         browser extension can immediately re-fetch profile, recommendations
-        and activity data.  It also kicks the continuous-refresh controller
-        so the discovery pool is picked up without waiting for the next
-        60-second tick.
+        and activity data.  It also starts a replenishment refresh so the
+        discovery pool is picked up without waiting for the next scheduler tick.
         """
         # Broadcast to extension
         with suppress(Exception):
@@ -2383,16 +2506,7 @@ def create_app(
                     "message": "初始化完成，画像与发现池已就绪。",
                 }
             )
-        # Kick refresh controller immediately. v0.3.63+: route through
-        # the registry so a hot-reload mid-init can cancel this task.
-        trigger = getattr(ctx.runtime_controller, "trigger_manual_refresh", None)
-        if callable(trigger):
-            with suppress(Exception):
-                registry = getattr(ctx, "task_registry", None)
-                if registry is not None:
-                    registry.track("init_completed_trigger", trigger())
-                else:
-                    asyncio.create_task(trigger())
+        await _request_runtime_replenishment(reason="init_completed", force=True)
         return {"ok": True}
 
     def _serialize_recommendation_items(items: list[Any]) -> list[RecommendationOut]:
@@ -2982,7 +3096,14 @@ def create_app(
                 ],
             )
 
+        latest_event_id_before_ingest = 0
+        get_latest_event_id = getattr(ctx.database, "get_latest_event_id", None)
+        if callable(get_latest_event_id):
+            with suppress(Exception):
+                latest_event_id_before_ingest = _event_cursor_value(get_latest_event_id())
+
         accepted = 0
+        accepted_events: list[dict[str, Any]] = []
         rejected: list[EventRejectedOut] = []
         for index, item in enumerate(payload.events):
             source_platform = (item.source_platform or "bilibili").strip() or "bilibili"
@@ -3042,12 +3163,14 @@ def create_app(
                 )
                 continue
             accepted += 1
-        refresh_after_event_ingest = getattr(
-            ctx.runtime_controller, "refresh_after_event_ingest", None
-        )
-        if callable(refresh_after_event_ingest):
-            with suppress(Exception):
-                await refresh_after_event_ingest()
+            accepted_events.append(event)
+        if accepted_events:
+            await _backfill_pending_discovery_events_to_profile_pipeline(
+                max_event_id=latest_event_id_before_ingest
+            )
+            await _ingest_profile_update_events(accepted_events)
+        if accepted > 0:
+            await _request_runtime_replenishment(reason="event_ingest")
         # Notify popup that the activity feed has new entries so it can
         # refresh its UI without polling. Throttled naturally to once per
         # ingest call (extension batches 10+ events into a single POST).
@@ -3373,11 +3496,43 @@ def create_app(
         except Exception:
             logger.exception("Automatic pool replenishment failed")
 
+    async def _request_runtime_replenishment(
+        *,
+        reason: str,
+        force: bool = False,
+    ) -> dict[str, object] | None:
+        request = getattr(ctx.runtime_controller, "request_replenishment", None)
+        if callable(request):
+            with suppress(Exception):
+                result = await request(reason=reason, force=force)
+                if isinstance(result, dict):
+                    return cast("dict[str, object]", result)
+            return None
+        if force:
+            trigger = getattr(ctx.runtime_controller, "trigger_manual_refresh", None)
+            if callable(trigger):
+                with suppress(Exception):
+                    result = await trigger()
+                    if isinstance(result, dict):
+                        return cast("dict[str, object]", result)
+            return None
+
+        legacy_name = {
+            "event_ingest": "refresh_after_event_ingest",
+            "feedback": "refresh_after_feedback",
+            "init_completed": "refresh_after_init",
+        }.get(reason)
+        if legacy_name:
+            legacy = getattr(ctx.runtime_controller, legacy_name, None)
+            if callable(legacy):
+                with suppress(Exception):
+                    result = await legacy()
+                    if isinstance(result, dict):
+                        return cast("dict[str, object]", result)
+        return None
+
     async def _trigger_replenishment_if_needed(*, force: bool = False) -> None:
         """Fire a background Discovery refresh when the pool runs low."""
-        trigger = getattr(ctx.runtime_controller, "trigger_manual_refresh", None)
-        if not callable(trigger):
-            return
         if not force:
             curator = getattr(ctx.recommendation_engine, "_curator", None)
             if curator is None or not hasattr(curator, "needs_replenishment"):
@@ -3396,7 +3551,12 @@ def create_app(
 
         auto_replenishment_started_at = now
         logger.info("Pool low - triggering automatic replenishment")
-        task = asyncio.create_task(_run_auto_replenishment(trigger))
+        reason = "pool_empty" if force else "pool_low_after_recommendation_refresh"
+        task = asyncio.create_task(
+            _run_auto_replenishment(
+                lambda: _request_runtime_replenishment(reason=reason, force=True)
+            )
+        )
         auto_replenishment_task = task
         _fire_and_forget_tasks.add(task)
         task.add_done_callback(_fire_and_forget_tasks.discard)
@@ -3439,16 +3599,14 @@ def create_app(
 
     @app.post("/api/recommendations/refresh", response_model=RecommendationRefreshResponse)
     async def refresh_recommendations() -> RecommendationRefreshResponse:
-        trigger_manual_refresh = getattr(ctx.runtime_controller, "trigger_manual_refresh", None)
-        if not callable(trigger_manual_refresh):
+        result = await _request_runtime_replenishment(reason="manual", force=True)
+        if not isinstance(result, dict):
             return RecommendationRefreshResponse(
                 ok=True,
                 accepted=False,
                 state="idle",
                 reason="runtime_unavailable",
             )
-
-        result = await trigger_manual_refresh()
         return RecommendationRefreshResponse(
             ok=True,
             accepted=bool(result.get("accepted", False)),

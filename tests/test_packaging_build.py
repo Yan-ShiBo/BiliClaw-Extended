@@ -179,9 +179,7 @@ def test_bundle_ollama_binary_targets_app_resources_on_macos(tmp_path: Path) -> 
     assert (dist / "OpenBiliClaw" / "ollama") in written
     assert (dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "ollama") in written
     assert (dist / "OpenBiliClaw" / "llama-server") in written
-    assert (
-        dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "llama-server"
-    ) in written
+    assert (dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "llama-server") in written
     assert (dist / "OpenBiliClaw" / "libllama-server-impl.dylib") in written
     assert (
         dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "libllama-server-impl.dylib"
@@ -191,9 +189,7 @@ def test_bundle_ollama_binary_targets_app_resources_on_macos(tmp_path: Path) -> 
     assert (dist / "OpenBiliClaw" / "llama-quantize").exists()
     assert (dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "llama-quantize").exists()
     assert (dist / "OpenBiliClaw" / "libggml.dylib").exists()
-    assert (
-        dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "libggml-cpu-x64.so"
-    ).exists()
+    assert (dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "libggml-cpu-x64.so").exists()
     assert (dist / "OpenBiliClaw" / "mlx_metal_v3" / "kernels.metallib").exists()
     assert (
         dist / "OpenBiliClaw.app" / "Contents" / "Resources" / "mlx_metal_v3" / "kernels.metallib"

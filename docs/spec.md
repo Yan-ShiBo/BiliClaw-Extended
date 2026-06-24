@@ -38,7 +38,7 @@ OpenBiliClaw 是一个**通用开源的 Bilibili 个性化内容推荐 AI Agent*
 - 记录行为发生时的**完整上下文**：对应的 DOM 页面快照、当前浏览路径、时间戳、平台内容 ID
 - 捕捉用户的**微行为**：鼠标悬停、视频进度条跳转、视频暂停 / 继续、页面导航等
 - 记录用户的**主动反馈**：`dislike` 类动作统一规范成 `feedback` 事件，避免各平台负反馈语义分叉
-- 本机调试可通过 `/api/extension/e2e/run` 驱动已安装插件在抖音 / 小红书 / X 真实页面执行白名单 DOM 操作，再由后端校验 `/api/events` 是否自然入库；runner 会把复用 tab 归位到平台入口并在回传结果前 flush 捕捉 buffer，该链路不伪造行为事件，用于验证捕捉层本身。`/api/events` 在画像明确未初始化时会拒收普通行为事件，首轮画像信号只由点击「开始初始化」后的 guided init 来源任务拉取。
+- 本机调试可通过 `/api/extension/e2e/run` 驱动已安装插件在抖音 / 小红书 / X 真实页面执行白名单 DOM 操作，再由后端校验 `/api/events` 是否自然入库；runner 会把复用 tab 归位到平台入口并在回传结果前 flush 捕捉 buffer，该链路不伪造行为事件，用于验证捕捉层本身。`/api/events` 在画像明确未初始化时会拒收普通行为事件，首轮画像信号只由点击「开始初始化」后的 guided init 来源任务拉取；初始化后 accepted 普通事件会先写入 memory，再进入 `ProfileUpdatePipeline`，随后通过 `request_replenishment(reason="event_ingest")` 排队补货需求。旧版本已经停在 discovery 水位后的普通行为事件由独立 `last_profile_pipeline_event_id` 补喂画像 pipeline，而 `pending_signal_events` 仍只是 search / related_chain refresh 的触发水位，不是画像待处理数。
 
 **B 站数据接口**：
 - 通过 B 站 API 获取结构化数据（历史记录、收藏夹、关注列表等）
@@ -223,6 +223,9 @@ Agent：那我理解了。这是一个很有意思的特质——你可能也会
 │  │ 扩展捕捉 E2E：run -> runtime-stream -> 入口归位 -> DOM 操作 -> /api/events │ │
 │  └──────────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────────┐   │
+│  │ 普通 /api/events：accepted -> memory -> ProfileUpdatePipeline -> request_replenishment │ │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
 │  │ delight / interest.probe / avoidance.probe 主动推送（含probe_mode）│ │
 │  └──────────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -270,7 +273,7 @@ Agent：那我理解了。这是一个很有意思的特质——你可能也会
 │  └──────────────┘ └──────────────┘ └────────────────┘      │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │     PoolCurator + 双轴 fatigue + per-group 窗口 + 新兴趣放大保护 │ │
-│  │     ContinuousRefreshController + B/XHS/DY/YT/X/Zhihu=5/1/1/1/1/1 │ │
+│  │     request_replenishment + 定时/手动补货 + B/XHS/DY/YT/X/Zhihu=5/1/1/1/1/1 │ │
 │  │     DiscoveryCandidatePipeline: raw candidates -> periodic/refresh eval -> pool │ │
 │  │     LLM gate: scheduler + extension presence          │   │
 │  │     Soul taxonomy: CATEGORY_VOCAB + category migration + homonym-aware consolidation │ │

@@ -7169,8 +7169,7 @@ def import_youtube(
 
     _print_section_title("2/2 更新偏好画像")
     console.print(
-        f"  分析 {stats.total} 条 YouTube 信号"
-        f"（分片 {DEFAULT_PREFERENCE_EVENT_CHUNK_SIZE} 条）…"
+        f"  分析 {stats.total} 条 YouTube 信号（分片 {DEFAULT_PREFERENCE_EVENT_CHUNK_SIZE} 条）…"
     )
     asyncio.run(
         _run_with_progress(

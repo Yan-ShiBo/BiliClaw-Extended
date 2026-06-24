@@ -3353,7 +3353,7 @@
       if (runtime.manual_refresh_state === "running") return runtime.pool_available_count > 0 ? "后台继续补货中" : "正在补货";
       if (runtime.manual_refresh_state === "success") return "刚同步完成";
       if (runtime.manual_refresh_state === "failed") return "刷新失败";
-      if (runtime.pending_signal_events > 0) return `待处理 ${runtime.pending_signal_events} 条行为信号`;
+      if (runtime.pending_signal_events > 0) return `已记下 ${runtime.pending_signal_events} 个新动作`;
       if (runtime.runtime_event_type === "refresh.pool_updated") return "刚同步推荐池";
       return runtime.pool_available_count > 0 ? "可直接换一批" : "等待后台补货";
     }

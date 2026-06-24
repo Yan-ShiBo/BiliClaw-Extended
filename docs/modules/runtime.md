@@ -8,6 +8,7 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
+| 统一补货请求入口 | ✅ | `ContinuousRefreshController.request_replenishment(reason, force=False)` 收束补货触发：普通事件和反馈只排队 reason；初始化完成、用户手动刷新或推荐刷新后低库存用 `force=True` 进入手动补货。 |
 | 后台刷新控制 | ✅ | `ContinuousRefreshController` 按 scheduler 配置补充候选池，并通过 source policy 计算各平台有效配比；注入 `DiscoveryCandidatePipeline` 后，B 站主补货先生产 raw candidates，再进入统一待评估池。 |
 | 统一候选待评估池调度 | ✅ | B 站、XHS、抖音、YouTube、X discovery raw candidates 先写入 `discovery_candidates`；runtime 既会在 refresh plan 发现新 raw 后即时调用共享 drain，也会由独立 `_loop_candidate_eval()` 周期性 drain 已有 pending raw 并在 admission 后触发 `precompute_pool_copy()`。controller 层 `_discovery_drain_lock` 与 `DiscoveryCandidatePipeline` 内部 lock 串行化所有入口，producer / refresh / periodic loop 不会并发 admission；正式可换池达到 `pool_target_count` 时不会继续 discovery / drain。 |
 | B 站扩展搜索兜底 producer | ✅ | `BilibiliExtensionSearchProducer` 在 B 站平台族低于 quota、`BilibiliAPIClient.search_cooldown_remaining()>0`、扩展 presence 在线且候选池未满时入队 `bili_tasks(type="search")`；扩展回传后仍进入 `DiscoveryCandidatePipeline` 统一评估。 |
@@ -21,7 +22,7 @@
 | 推荐反馈批学习调度 | ✅ | `FeedbackBatchScheduler` 挂在 FastAPI `app.state`，`/api/feedback` 每次只标记 dirty 并触发 5 秒 debounce；burst 内多条推荐反馈 coalesce 成一次 `SoulEngine.process_feedback_batch_if_needed()`，处理期间又有新反馈时会在本轮结束后再补跑一轮，避免每条反馈都启动画像重分析。 |
 | 浏览器 presence gate | ✅ | `background_llm_work_allowed()` 结合 `scheduler.enabled` 与 `pause_on_extension_disconnect` 控制 daemon-owned 后台 LLM / embedding 工作。 |
 | Runtime event stream | ✅ | `/api/runtime-stream` 向扩展推送状态、Cookie sync 请求、配置重载和 presence 事件；`RuntimeEventHub.publish()` 会返回是否至少有一个订阅者接收，供一次性事件判断是否真正投递。 |
-| Activity feed 状态摘要 | ✅ | `/api/activity-feed` 聚合认知更新、反馈、推荐池补货和 live summary；未初始化且还没有推荐 / 可换池 / 补货产物时，普通 `/api/events` 不会新写入 pending signals，旧的 `pending_signal_events` 也不会抢占初始化提示，避免首启 setup 保存配置后被“已记下 N 个信号”误导。 |
+| Activity feed 状态摘要 | ✅ | `/api/activity-feed` 聚合认知更新、反馈、推荐池补货和 live summary；未初始化且还没有推荐 / 可换池 / 补货产物时，普通 `/api/events` 不会新写入 pending signals，旧的 `pending_signal_events` 也不会抢占初始化提示。初始化后 pending 文案统一为“已记下 N 个新动作，下一轮补货会拿来参考”，表示 discovery refresh 水位，不表示画像待处理队列。 |
 | 扩展捕捉 E2E 控制事件 | ✅ | local-only `/api/extension/e2e/run` 会通过 runtime stream 投递 `extension_e2e_run`，要求已安装扩展在真实平台页执行白名单 DOM 操作；`/api/extension/e2e/result` 回收插件执行结果，后端再按运行窗口匹配 `/api/events` 中自然捕捉到的事件。 |
 | 兴趣探针投递保护 | ✅ | `interest.probe` 只有成功投递到 runtime stream 后才写入 `probed_domains` / `probed_axes` / `probed_distance_bands` 冷却状态；事件 payload 会带 `probe_mode` 与 `challenge`，前端离线时不会消耗 active probe。普通 `near` 探针与挑战探针使用独立 active 额度，运行时选择时仍统一仲裁。 |
 | 避雷探针投递与仲裁 | ✅ | `avoidance.probe` 与 `interest.probe` 共用 proactive push 循环；每轮最多投递一个 probe，并用 `last_probe_kind` 在正向/负向都有候选时轮流选择，避免探针频率翻倍。 |
@@ -66,6 +67,7 @@ result = await controller.drain_discovery_candidates_once(batch_size=30)
 
 核心调用：
 
+- `request_replenishment(reason=..., force=False)`：补货请求的统一入口。`force=False` 只记录触发原因，等待定时 `refresh_if_needed()` 统一检查池子缺口；`force=True` 用于初始化完成、用户手动刷新和推荐刷新后低库存路径，会启动手动补货并消费已排队的 reason。
 - `refresh_if_needed()` / `force_refresh()`：按 pool available 缺口、source share 和 raw-material headroom 构建补货计划；如果正式可换池已经达到 `pool_target_count`，返回 `pool_at_cap` 并跳过 discovery。
 - `drain_discovery_candidates_once(batch_size=..., reason="manual")`：由 XHS task-result / 被动采集等外部来源入队后触发；refresh path 和 `_loop_candidate_eval()` 走同一套 controller drain helper。它会先检查 `count_pool_candidates() >= pool_target_count`，池满时直接返回 `{"evaluated": 0, "cached": 0, "rejected": 0}`。profile 未就绪或已有 drain 在跑时同样 no-op，底层 `DiscoveryCandidatePipeline.drain_pending()` 也有同一共享锁，避免 refresh / XHS / Douyin / YouTube / periodic loop 多入口并发 admission。周期 loop 的 drain 如果缓存了新候选，会立即补调 `precompute_pool_copy()` 并发布补货后的池子状态。
 - `run_init_backfill(profile, target_pool_count, *, fully_parallel=True)`：图形化引导初始化（gui-init）stage 4 的发现补池。持 `_refresh_lock` 与连续 refresh 串行，绝不与之争 `content_cache`；`async with` 在 `CancelledError` 时释放锁。不查 `_llm_work_allowed()`，因此 init 期间后台门控暂停不会自锁 init 自己的补池。
@@ -119,6 +121,7 @@ scheduler.schedule()
 - `pool_pending_eval_count`：`discovery_candidates.status IN ('pending_eval', 'evaluating')` 的数量，表示已经找到但还没完成统一 LLM 评估的内容。
 - `pool_evaluated_pending_count`：`discovery_candidates.status='evaluated'` 的数量，表示已经完成评估但尚未 admission 到 `content_cache` 的内容。
 - `last_discovered_count`：最近一轮 refresh 新入队的 raw candidates 数；已评估待入池候选的 retry / admission 不会冒充“新发现”。
+- `pending_signal_events`：`discovery_runtime.last_processed_event_id` 之后新增的 discovery-trigger 行为事件数，只用于判断是否触发 `search + related_chain`，不表示画像 pipeline backlog。普通 `/api/events` 会用独立 `last_profile_pipeline_event_id` 把旧 pending 行为事件补喂给画像 pipeline，但不会推进 discovery 水位；补货执行由已排队的 replenishment reason、定时 tick 或用户刷新后的低库存检查统一触发。
 - `recent_pool_topics`：最近一轮实际 admission 到推荐池的内容主题；retry-only admission 可以更新该字段，但不会增加 `last_discovered_count`。
 
 前端凡是显示“可换”都必须只读取 `pool_available_count`。`pool_pending_count` / `pool_pending_eval_count` / `pool_evaluated_pending_count` 只能用于“正在整理成可换内容”等辅助文案和诊断。
@@ -127,11 +130,11 @@ scheduler.schedule()
 
 `GET /api/activity-feed` 返回 popup、移动 Web 和桌面 Web 共用的轻量动态摘要：
 
-- `live_summary`：当前 runtime 摘要；优先显示手动补货中的 `manual_refresh_message`，否则根据待处理行为信号或可换池库存生成短文案。
+- `live_summary`：当前 runtime 摘要；优先显示手动补货中的 `manual_refresh_message`，否则根据 discovery signal 水位或可换池库存生成短文案。
 - `headline`：最新动态条目的摘要；没有动态条目时回退到 `live_summary`。
 - `items`：认知更新、反馈记录和推荐池补货等最近动态。
 
-首启 / setup 阶段要优先保护初始化入口：当 `initialized=false`，且 `recommendation_count`、`pool_available_count`、`pool_pending_count`、`last_replenished_count`、`last_discovered_count` 都为 0 时，普通 `/api/events` 会以 `not_initialized` 拒收，不会写入 memory 或制造新的 `pending_signal_events`；`live_summary` 也会提示用户点击「开始初始化」，不会因为历史残留 pending signal 显示“已记下 N 个信号”。一旦已有推荐或候选池产物，上述 pending signal 文案会按初始化后的正常运行状态展示。
+首启 / setup 阶段要优先保护初始化入口：当 `initialized=false`，且 `recommendation_count`、`pool_available_count`、`pool_pending_count`、`last_replenished_count`、`last_discovered_count` 都为 0 时，普通 `/api/events` 会以 `not_initialized` 拒收，不会写入 memory 或制造新的 `pending_signal_events`；`live_summary` 也会提示用户点击「开始初始化」，不会因为历史残留 pending signal 显示“已记下 N 个新动作”。一旦已有推荐或候选池产物，上述 pending signal 文案会按初始化后的正常运行状态展示。这里的 `pending_signal_events` 是 discovery refresh 触发水位，不是画像待处理队列；画像增量由 `/api/events` accepted 事件进入 `ProfileUpdatePipeline`，同时用 `last_profile_pipeline_event_id` 兜底补喂旧 pending 行为事件，再由 pipeline / cognition cycle 按各自节奏更新。事件入口不会同步执行补货，只通过 `request_replenishment(reason="event_ingest")` 排队，交给定时 tick 或用户刷新后的低库存检查统一处理。
 
 ### Runtime Status Update Fields
 
@@ -280,7 +283,7 @@ X (Twitter) 的 steady-state discovery 走服务端 cookie 重放（对标抖音
 
 每条推文经 `discovery.x_normalize.normalize_tweet()` 映射为 `DiscoveredContent`（`content_type ∈ {tweet, thread}`、`body_text` 带全文），enqueue 进 `discovery_candidates` 待评估池——producer **只 fetch，不写 `content_cache`、不调评估器**，由共享混源 evaluator 完成 admission。runtime 的平台族统计会把 `x` / `x-*` / `twitter` 归一到 `twitter`，避免 X 配额、过滤 tab 和 pool 状态被拆成不同来源。每个策略 run 都把成功 / 失败结果回写 `XSourceHealthStore`（成功 `record_success()`，失败 `record_error(exc)` 按 401/403/429 落对应健康态）。预算护栏：`daily_search_budget` / `daily_feed_budget` / `daily_creator_budget`（`0` = 不设上限）+ 两次请求间 `request_interval_seconds` 间隔。`enabled=false` 时整条路径 no-op，绝不 import `twitter_cli` / `curl_cffi`。
 
-X 客户端 `XClient`（`sources/x_client.py`）封装可选 extra `openbiliclaw[x]` 的 `twitter-cli`，全程只读，方法用 `asyncio.to_thread` 包成 async；底层 `TwitterAPIError` / `AuthenticationError` 映射为 `XMissingCookieError` / `XAuthError`(401) / `XBlockedError`(403) / `XRateLimitError`(429)，供源健康状态机分流退避。
+X 客户端 `XClient`（`sources/x_client.py`）封装默认运行时依赖 `twitter-cli`，全程只读，方法用 `asyncio.to_thread` 包成 async；底层 `TwitterAPIError` / `AuthenticationError` 映射为 `XMissingCookieError` / `XAuthError`(401) / `XBlockedError`(403) / `XRateLimitError`(429)，供源健康状态机分流退避。`openbiliclaw[x]` 仍保留为兼容旧脚本的安装别名。
 
 ### BilibiliExtensionSearchProducer
 
@@ -319,7 +322,7 @@ XHS / 抖音 / YouTube 的插件任务桥保留两层去重：
 | `scheduler.pause_on_extension_disconnect` | `false` | 浏览器插件断开后是否暂停后台 LLM / embedding 工作。 |
 | `scheduler.extension_disconnect_grace_seconds` | `90` | 插件断开后的宽限秒数。 |
 | `scheduler.refresh_check_interval_seconds` | `60` | `ContinuousRefreshController` 主循环轮询间隔。 |
-| `scheduler.signal_event_threshold` | `6` | 累计多少条新行为事件后触发 `search + related_chain`。 |
+| `scheduler.signal_event_threshold` | `6` | 累计多少条 discovery-trigger 新行为事件后触发 `search + related_chain`；该计数只表示 discovery refresh 水位，不表示画像待处理队列。 |
 | `scheduler.trending_refresh_hours` | `3` | `trending` 策略最小刷新间隔。 |
 | `scheduler.explore_refresh_hours` | `12` | `explore` 策略最小刷新间隔。 |
 | `scheduler.discovery_limit` | `30` | 单轮 discovery wave 候选上限，最大 `60`。 |

@@ -41,6 +41,17 @@ def test_desktop_pool_status_shows_available_count() -> None:
     assert "暂无可换库存" in app_js
 
 
+def test_desktop_pool_status_labels_pending_signals_as_discovery_context() -> None:
+    """Pending runtime signals are discovery context, not unprocessed profile events."""
+    app_js = Path("src/openbiliclaw/web/desktop/assets/js/app.js").read_text(encoding="utf-8")
+    index_html = Path("src/openbiliclaw/web/desktop/index.html").read_text(encoding="utf-8")
+
+    assert "待处理 ${runtime.pending_signal_events} 条行为信号" not in app_js
+    assert "已记下 ${runtime.pending_signal_events} 个新动作" in app_js
+    assert "待处理行为信号" not in index_html
+    assert "新动作" in index_html
+
+
 def test_desktop_source_metric_uses_configured_source_count() -> None:
     """Desktop web UI should use configured sources, not visible cards."""
     app_js = Path("src/openbiliclaw/web/desktop/assets/js/app.js").read_text(encoding="utf-8")

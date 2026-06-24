@@ -2310,6 +2310,281 @@ class TestBackendAPI:
         ]
         assert [event["event_type"] for event in memory.events] == ["click"]
 
+    def test_events_endpoint_feeds_accepted_events_to_profile_pipeline_before_replenishment_request(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.soul.pipeline import SignalType
+
+        calls: list[str] = []
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+
+            async def propagate_event(self, event: dict[str, object]) -> None:
+                if event["event_type"] == "unsupported":
+                    raise ValueError("Unsupported event type: unsupported")
+                self.events.append(event)
+
+        class SpyPipeline:
+            def __init__(self) -> None:
+                self.batches: list[list[object]] = []
+
+            async def ingest_batch(self, signals: list[object]) -> object:
+                calls.append("pipeline")
+                self.batches.append(signals)
+                return object()
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self.pipeline = SpyPipeline()
+
+            def is_profile_ready(self) -> bool:
+                return True
+
+        class FakeRuntimeController:
+            async def request_replenishment(
+                self,
+                *,
+                reason: str,
+                force: bool = False,
+            ) -> dict[str, object]:
+                calls.append(f"request:{reason}:{force}")
+                return {"accepted": True, "state": "queued", "reason": reason}
+
+            async def refresh_after_event_ingest(self) -> dict[str, object]:
+                raise AssertionError("/api/events should not directly refresh after ingest")
+
+        memory = FakeMemoryManager()
+        soul_engine = FakeSoulEngine()
+        runtime = FakeRuntimeController()
+        app = create_app(
+            memory_manager=memory,
+            soul_engine=soul_engine,
+            runtime_controller=runtime,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/events",
+            json={
+                "events": [
+                    {
+                        "type": "click",
+                        "url": "https://www.bilibili.com/video/BV1OK",
+                        "title": "正常事件",
+                        "timestamp": 1710000000000,
+                    },
+                    {
+                        "type": "unsupported",
+                        "url": "https://www.bilibili.com/video/BV1BAD",
+                        "title": "未知事件",
+                        "timestamp": 1710000000001,
+                    },
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["accepted"] == 1
+        assert calls == ["pipeline", "request:event_ingest:False"]
+        assert len(soul_engine.pipeline.batches) == 1
+        [signal] = soul_engine.pipeline.batches[0]
+        assert signal.signal_type == SignalType.BEHAVIOR_EVENT
+        assert signal.payload["event_type"] == "click"
+        assert signal.payload["title"] == "正常事件"
+
+    def test_events_endpoint_backfills_pending_discovery_events_to_profile_pipeline(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        calls: list[str] = []
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+                self.runtime_state: dict[str, object] = {"last_processed_event_id": 10}
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def update_discovery_runtime_state(self, mutator: object) -> dict[str, object]:
+                result = mutator(self.runtime_state)  # type: ignore[operator]
+                if isinstance(result, dict):
+                    self.runtime_state = result
+                return dict(self.runtime_state)
+
+            async def propagate_event(self, event: dict[str, object]) -> None:
+                self.events.append(event)
+
+        class FakeDatabase:
+            def get_latest_event_id(self) -> int:
+                return 11
+
+            def query_events_since(
+                self,
+                *,
+                after_event_id: int,
+                event_types: list[str],
+            ) -> list[dict[str, object]]:
+                assert after_event_id == 10
+                assert "favorite" in event_types
+                return [
+                    {
+                        "id": 11,
+                        "event_type": "favorite",
+                        "title": "旧 pending 收藏",
+                        "metadata": "{}",
+                    }
+                ]
+
+        class SpyPipeline:
+            def __init__(self) -> None:
+                self.titles_by_batch: list[list[object]] = []
+
+            async def ingest_batch(self, signals: list[object]) -> object:
+                calls.append("pipeline")
+                self.titles_by_batch.append([signal.payload["title"] for signal in signals])
+                return object()
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self.pipeline = SpyPipeline()
+
+            def is_profile_ready(self) -> bool:
+                return True
+
+        class FakeRuntimeController:
+            async def refresh_after_event_ingest(self) -> dict[str, object]:
+                calls.append("refresh")
+                return {"refreshed": False}
+
+        memory = FakeMemoryManager()
+        soul_engine = FakeSoulEngine()
+        app = create_app(
+            memory_manager=memory,
+            database=FakeDatabase(),
+            soul_engine=soul_engine,
+            runtime_controller=FakeRuntimeController(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/events",
+            json={
+                "events": [
+                    {
+                        "type": "click",
+                        "url": "https://www.bilibili.com/video/BV1NOW",
+                        "title": "当前点击",
+                        "timestamp": 1710000000000,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["accepted"] == 1
+        assert calls == ["pipeline", "pipeline", "refresh"]
+        assert soul_engine.pipeline.titles_by_batch == [["旧 pending 收藏"], ["当前点击"]]
+        assert memory.runtime_state["last_profile_pipeline_event_id"] == 11
+
+    def test_events_endpoint_backfill_uses_profile_cursor_when_discovery_advanced(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        queried_after: list[int] = []
+
+        class FakeMemoryManager:
+            def __init__(self) -> None:
+                self.runtime_state: dict[str, object] = {
+                    "last_processed_event_id": 15,
+                    "last_profile_pipeline_event_id": 10,
+                }
+
+            def load_discovery_runtime_state(self) -> dict[str, object]:
+                return dict(self.runtime_state)
+
+            def update_discovery_runtime_state(self, mutator: object) -> dict[str, object]:
+                result = mutator(self.runtime_state)  # type: ignore[operator]
+                if isinstance(result, dict):
+                    self.runtime_state = result
+                return dict(self.runtime_state)
+
+            async def propagate_event(self, event: dict[str, object]) -> None:
+                return None
+
+        class FakeDatabase:
+            def get_latest_event_id(self) -> int:
+                return 15
+
+            def query_events_since(
+                self,
+                *,
+                after_event_id: int,
+                event_types: list[str],
+            ) -> list[dict[str, object]]:
+                queried_after.append(after_event_id)
+                return [
+                    {
+                        "id": 11,
+                        "event_type": "like",
+                        "title": "discovery 已推进但画像未补",
+                    }
+                ]
+
+        class SpyPipeline:
+            def __init__(self) -> None:
+                self.titles: list[object] = []
+
+            async def ingest_batch(self, signals: list[object]) -> object:
+                self.titles.extend(signal.payload["title"] for signal in signals)
+                return object()
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self.pipeline = SpyPipeline()
+
+            def is_profile_ready(self) -> bool:
+                return True
+
+        class FakeRuntimeController:
+            async def refresh_after_event_ingest(self) -> dict[str, object]:
+                return {"refreshed": False}
+
+        memory = FakeMemoryManager()
+        soul_engine = FakeSoulEngine()
+        app = create_app(
+            memory_manager=memory,
+            database=FakeDatabase(),
+            soul_engine=soul_engine,
+            runtime_controller=FakeRuntimeController(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/events",
+            json={
+                "events": [
+                    {
+                        "type": "click",
+                        "url": "https://www.bilibili.com/video/BV1NOW",
+                        "title": "当前点击",
+                        "timestamp": 1710000000000,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        assert queried_after == [10]
+        assert "discovery 已推进但画像未补" in soul_engine.pipeline.titles
+        assert memory.runtime_state["last_profile_pipeline_event_id"] == 11
+
     def test_extension_e2e_rejects_state_changing_action_without_opt_in(self) -> None:
         from fastapi.testclient import TestClient
 
@@ -3336,6 +3611,48 @@ class TestBackendAPI:
         assert "219" not in data["live_summary"]
         assert "记下" not in data["live_summary"]
 
+    def test_activity_feed_pending_signals_are_described_as_discovery_context(self) -> None:
+        from fastapi.testclient import TestClient
+
+        class FakeDatabase:
+            def get_recommendations(
+                self, limit: int = 20, *, exclude_processed: bool = False
+            ) -> list[dict[str, object]]:
+                return []
+
+        class FakeMemoryManager:
+            def load_cognition_updates(self) -> list[dict[str, object]]:
+                return []
+
+        class FakeRuntimeController:
+            def get_runtime_status(self) -> dict[str, object]:
+                return {
+                    "initialized": True,
+                    "recommendation_count": 5,
+                    "pending_signal_events": 7,
+                    "pool_available_count": 42,
+                    "pool_pending_count": 0,
+                    "last_replenished_count": 0,
+                    "last_discovered_count": 0,
+                    "manual_refresh_state": "idle",
+                    "manual_refresh_message": "",
+                }
+
+        app = create_app(
+            memory_manager=FakeMemoryManager(),
+            database=FakeDatabase(),
+            soul_engine=object(),
+            runtime_controller=FakeRuntimeController(),
+        )
+        client = TestClient(app)
+
+        response = client.get("/api/activity-feed")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["live_summary"] == "阿B 已记下 7 个新动作，下一轮补货会拿来参考。"
+        assert "待处理" not in data["live_summary"]
+
     def test_refresh_recommendations_endpoint_triggers_runtime_refresh(self) -> None:
         from fastapi.testclient import TestClient
 
@@ -3394,7 +3711,7 @@ class TestBackendAPI:
             "reason": "not_initialized",
         }
 
-    def test_refresh_recommendations_endpoint_uses_force_refresh(self) -> None:
+    def test_refresh_recommendations_endpoint_uses_force_replenishment_request(self) -> None:
         from fastapi.testclient import TestClient
 
         class FakeRuntimeController:
@@ -3410,13 +3727,21 @@ class TestBackendAPI:
                     "recommendation_count": 0,
                 }
 
-            async def trigger_manual_refresh(self) -> dict[str, object]:
-                self.called.append("trigger")
+            async def request_replenishment(
+                self,
+                *,
+                reason: str,
+                force: bool = False,
+            ) -> dict[str, object]:
+                self.called.append(f"request:{reason}:{force}")
                 return {
                     "accepted": True,
                     "state": "running",
-                    "reason": "started",
+                    "reason": reason,
                 }
+
+            async def trigger_manual_refresh(self) -> dict[str, object]:
+                raise AssertionError("new runtimes should use request_replenishment")
 
         runtime = FakeRuntimeController()
         app = create_app(
@@ -3434,9 +3759,43 @@ class TestBackendAPI:
             "ok": True,
             "accepted": True,
             "state": "running",
-            "reason": "started",
+            "reason": "manual",
         }
-        assert runtime.called == ["trigger"]
+        assert runtime.called == ["request:manual:True"]
+
+    def test_init_completed_runs_forced_replenishment(self) -> None:
+        from fastapi.testclient import TestClient
+
+        class FakeRuntimeController:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, bool]] = []
+
+            async def request_replenishment(
+                self,
+                *,
+                reason: str,
+                force: bool = False,
+            ) -> dict[str, object]:
+                self.calls.append((reason, force))
+                return {"accepted": True, "state": "running", "reason": reason}
+
+            async def trigger_manual_refresh(self) -> dict[str, object]:
+                raise AssertionError("new runtimes should use request_replenishment")
+
+        runtime = FakeRuntimeController()
+        app = create_app(
+            memory_manager=object(),
+            database=object(),
+            soul_engine=object(),
+            runtime_controller=runtime,
+        )
+        client = TestClient(app)
+
+        response = client.post("/api/init-completed", json={})
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert runtime.calls == [("init_completed", True)]
 
     def test_reshuffle_recommendations_endpoint_returns_immediate_items(self) -> None:
         from fastapi.testclient import TestClient
@@ -3619,14 +3978,22 @@ class TestBackendAPI:
 
         class FakeRuntimeController:
             def __init__(self) -> None:
-                self.trigger_calls = 0
+                self.requests: list[tuple[str, bool]] = []
 
             def get_runtime_status(self) -> dict[str, object]:
                 return {"pool_available_count": 0}
 
+            async def request_replenishment(
+                self,
+                *,
+                reason: str,
+                force: bool = False,
+            ) -> dict[str, object]:
+                self.requests.append((reason, force))
+                return {"accepted": True, "state": "running", "reason": reason}
+
             async def trigger_manual_refresh(self) -> dict[str, object]:
-                self.trigger_calls += 1
-                return {"accepted": True, "state": "running", "reason": "started"}
+                raise AssertionError("new runtimes should use request_replenishment")
 
         soul = FakeSoulEngine()
         rec = FakeRecommendationEngine()
@@ -3652,7 +4019,7 @@ class TestBackendAPI:
         assert append.json() == {"items": []}
         assert soul.profile_calls == 0
         assert rec.calls == 0
-        assert runtime.trigger_calls == 1
+        assert runtime.requests == [("pool_empty", True)]
 
     def test_pending_notification_endpoint_returns_single_candidate(self) -> None:
         from fastapi.testclient import TestClient

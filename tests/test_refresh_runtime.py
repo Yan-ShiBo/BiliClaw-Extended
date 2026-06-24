@@ -3525,7 +3525,31 @@ async def test_refresh_after_event_ingest_skips_when_scheduler_disabled() -> Non
     result = await controller.refresh_after_event_ingest()
 
     assert result["refreshed"] is False
-    assert result["reason"] == "llm_paused"
+    assert result["reason"] == "queued"
+    assert result["queued_reason"] == "event_ingest"
+
+
+async def test_refresh_after_event_ingest_queues_without_running_discovery() -> None:
+    discovery = _FakeDiscoveryEngine()
+    controller = ContinuousRefreshController(
+        memory_manager=_FakeMemoryManager(),
+        database=_FakeDatabase([{"id": 1, "event_type": "view"}], pool_count=0),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=discovery,
+        recommendation_engine=_FakeRecommendationEngine(),
+        pool_target_count=30,
+        signal_event_threshold=1,
+    )
+
+    result = await controller.refresh_after_event_ingest()
+
+    assert result == {
+        "refreshed": False,
+        "strategies": [],
+        "reason": "queued",
+        "queued_reason": "event_ingest",
+    }
+    assert discovery.calls == []
 
 
 async def test_refresh_after_feedback_skips_when_scheduler_disabled() -> None:
@@ -3536,7 +3560,50 @@ async def test_refresh_after_feedback_skips_when_scheduler_disabled() -> None:
     result = await controller.refresh_after_feedback()
 
     assert result["refreshed"] is False
-    assert result["reason"] == "llm_paused"
+    assert result["reason"] == "queued"
+    assert result["queued_reason"] == "feedback"
+
+
+async def test_force_refresh_consumes_queued_replenishment_reasons() -> None:
+    controller = ContinuousRefreshController(
+        memory_manager=_FakeMemoryManager(),
+        database=_FakeDatabase([{"id": 1, "event_type": "view"}], pool_count=20),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=_FakeDiscoveryEngine(),
+        recommendation_engine=_FakeRecommendationEngine(),
+        pool_target_count=30,
+        trending_refresh_hours=999,
+        explore_refresh_hours=999,
+    )
+
+    await controller.refresh_after_event_ingest()
+    await controller.refresh_after_feedback()
+
+    result = await controller.force_refresh()
+
+    assert result["refreshed"] is True
+    assert result["queued_reasons"] == ["event_ingest", "feedback"]
+    assert controller._pending_replenishment_reasons == set()
+
+
+async def test_refresh_after_init_triggers_replenishment_now() -> None:
+    controller = ContinuousRefreshController(
+        memory_manager=_FakeMemoryManager(),
+        database=_FakeDatabase([{"id": 1, "event_type": "view"}], pool_count=20),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=_FakeDiscoveryEngine(),
+        recommendation_engine=_FakeRecommendationEngine(),
+        pool_target_count=30,
+        trending_refresh_hours=999,
+        explore_refresh_hours=999,
+    )
+
+    result = await controller.refresh_after_init()
+
+    assert result["accepted"] is True
+    assert result["state"] == "running"
+    await asyncio.sleep(0.05)
+    assert controller.get_runtime_status()["manual_refresh_state"] == "success"
 
 
 # ── P1.7 B站 search inline-admit keyword lifecycle ───────────────────────

@@ -670,9 +670,7 @@ class AutoUpdateService:
                             channel=channel,
                         )
                         if not atom_selection.error_reason:
-                            logger.info(
-                                "Auto-update tag check recovered via GitHub tags Atom feed"
-                            )
+                            logger.info("Auto-update tag check recovered via GitHub tags Atom feed")
                             return atom_selection
                     return _BackendTagSelection(error_reason=reason)
                 tags = resp.json()

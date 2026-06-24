@@ -32,6 +32,10 @@
 - **推荐反馈画像学习防并发重放**：`/api/feedback` 现在通过 `FeedbackBatchScheduler` 做 5 秒 debounce / coalesce，burst 内多条反馈只触发一次画像批学习；`SoulEngine.process_feedback_batch_if_needed()` 增加 single-flight 锁，已有批处理运行时不再用旧 cursor 并发重复分析当前全部未处理反馈。反馈批处理改用 `query_events_since()` 按 `id ASC` 读取 cursor 后的全部新增 feedback，避免大积压时 newest-first `limit=500` 跳过较早未处理事件。传给 `PreferenceAnalyzer` 前还会瘦身 feedback 事件 metadata，避免扩展原始 `targetText/raw_context` 等大字段进入 LLM prompt。
 - **偏好分析 chunk 调度分批推进**：`PreferenceAnalyzer` 初始化大批量事件时不再一次性 fan-out 全部 chunk，而是每批最多推进 16 个 chunk，处理完再进入下一批；默认粗分片大小收口为 `DEFAULT_PREFERENCE_EVENT_CHUNK_SIZE=200`，即本地批次最多推进约 3200 条事件后再进入下一批。`LLMService` 默认并发保持不变，避免拉全量历史时产生无界 prompt 任务和等待队列。
 - **补充 PR #69 贡献者致谢**：README 中英文致谢列表新增 [@tangle111-design](https://github.com/tangle111-design)，记录其在 `style_key` 观看模式、推荐语气、B 站初始化和 LLM / 画像流程方面的探索贡献。
+- **X 发现依赖纳入默认安装**：`twitter-cli>=0.8.5` 从可选 extra 提升为默认运行时依赖，普通包安装、AI 默认安装和开发安装都会带上 `twitter_cli` import 包，避免启用 `[sources.twitter]` 后后台 producer 才报 `No module named 'twitter_cli'`。`openbiliclaw[x]` 仍保留为兼容旧脚本的别名。
+- **普通行为事件接入增量画像 pipeline**：`POST /api/events` 现在只把 accepted 的普通浏览器行为事件喂给 `ProfileUpdatePipeline.ingest_batch()`，并在 pipeline ingestion 后通过 `request_replenishment(reason="event_ingest")` 排队补货需求；rejected / not_initialized 事件不进入画像 pipeline。为覆盖旧版本已经落库但停在 discovery 水位后的行为，API 会用独立 `last_profile_pipeline_event_id` 先补喂这批 pending 事件，且不推进 discovery 的 `last_processed_event_id`。这样插件日常捕捉的点击、搜索、收藏等行为不再只落 memory 和 discovery 水位。
+- **补货入口收束到定时 / 手动两类执行路径**：新增 `ContinuousRefreshController.request_replenishment(reason, force=False)` 作为统一入口；普通事件和反馈只记录 reason，等待定时 `refresh_if_needed()` 或用户刷新后的低库存检查统一补货。init-completed、用户手动刷新和推荐刷新后低库存路径使用 `force=True` 触发手动补货，并会消费之前排队的 reason，避免普通事件入口分散直接执行 discovery refresh。
+- **pending 行为信号文案收口**：桌面 Web 和 `/api/activity-feed` 不再把 `pending_signal_events` 显示为“待处理行为信号”，统一改成“已记下 N 个新动作，下一轮补货会拿来参考”。该字段语义明确为 discovery refresh 游标后的新动作数量，不代表画像 pipeline backlog。
 
 ## v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama 动态库补齐（2026-06-23）
 

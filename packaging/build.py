@@ -47,14 +47,13 @@ def clean() -> None:
 
 
 def build_x_extra_install_command(*, pip_available: bool | None = None) -> list[str]:
-    """Return the command that installs the ``openbiliclaw[x]`` extra.
+    """Return the command that ensures the X bundle dependency is installed.
 
     Desktop bundles ship X (Twitter) discovery by default (spec §8 = always
     bundle), so ``twitter-cli`` + its ``curl_cffi`` native binaries must be
     present in the build interpreter for PyInstaller to collect them. We install
-    the project's own ``x`` extra (``twitter-cli>=0.8.5``, pinned in
-    ``pyproject.toml``) rather than naming the dependency here, so there is a
-    single source of truth for the pin.
+    the project's own backwards-compatible ``x`` extra rather than naming the
+    dependency here, so there is a single source of truth for the pin.
     """
     resolved_pip_available = (
         pip_available if pip_available is not None else importlib.util.find_spec("pip") is not None
@@ -73,7 +72,7 @@ def ensure_x_extra() -> bool:
 
     Returns ``True`` once the X discovery dependency is available in the build
     interpreter — either because it was already installed or because we just
-    installed the ``openbiliclaw[x]`` extra. The PyInstaller spec only collects
+    installed the backwards-compatible ``openbiliclaw[x]`` extra. The PyInstaller spec only collects
     ``twitter_cli`` / ``curl_cffi`` when ``OPENBILICLAW_BUNDLE_X=1`` (set by
     :func:`build`), so a failed install degrades to an X-free bundle instead of
     breaking the whole build.
@@ -81,12 +80,12 @@ def ensure_x_extra() -> bool:
     if importlib.util.find_spec("twitter_cli") is not None:
         return True
     install_cmd = build_x_extra_install_command()
-    print("[build] Installing openbiliclaw[x] (twitter-cli) for desktop bundle ...")
+    print("[build] Installing default X dependency (twitter-cli) for desktop bundle ...")
     try:
         subprocess.check_call(install_cmd)
     except subprocess.CalledProcessError as exc:
         print(
-            f"[build] WARNING: could not install the X extra ({exc}); "
+            f"[build] WARNING: could not install the X dependency ({exc}); "
             "the bundle will ship without X (Twitter) discovery"
         )
         return False
@@ -514,7 +513,7 @@ def build(
     bundle_version = make_bundle_version(archive_version or read_project_version())
 
     # X (Twitter) discovery is bundled by default (spec §8 = always-bundle).
-    # Install the optional extra so PyInstaller can statically see twitter_cli,
+    # Install the X dependency alias so PyInstaller can statically see twitter_cli,
     # then tell the spec (via OPENBILICLAW_BUNDLE_X) to collect twitter_cli +
     # curl_cffi — including curl_cffi's per-OS·arch native binaries (libcurl /
     # the _wrapper extension) which the lazy `import twitter_cli` path would
@@ -639,7 +638,7 @@ def main() -> None:
     parser.add_argument(
         "--no-bundle-x",
         action="store_true",
-        help="Do not bundle the X (Twitter) discovery extra (twitter-cli + curl_cffi)",
+        help="Do not bundle the X (Twitter) discovery dependency (twitter-cli + curl_cffi)",
     )
     args = parser.parse_args()
 
