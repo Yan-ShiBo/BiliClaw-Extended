@@ -2888,11 +2888,12 @@ def test_init_caps_bilibili_history_and_favorites_at_500_and_following_at_100(
     assert str(built_history[2]["_following_summary"]).startswith("共关注 100 人")
 
 
-def test_init_accepts_custom_bilibili_favorites_and_following_limits(
+def test_init_accepts_custom_bilibili_history_favorites_and_following_limits(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
 ) -> None:
     class FakeBilibiliClient:
         async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
+            assert max_items == 7
             return [
                 {
                     "history": {"bvid": "BV1A", "view_at": 1710000000},
@@ -2988,6 +2989,8 @@ def test_init_accepts_custom_bilibili_favorites_and_following_limits(
             "--no-xhs",
             "--no-douyin",
             "--no-youtube",
+            "--bilibili-history-limit",
+            "7",
             "--bilibili-favorite-limit",
             "2",
             "--bilibili-follow-limit",

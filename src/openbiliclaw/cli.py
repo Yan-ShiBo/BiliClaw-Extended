@@ -4875,7 +4875,11 @@ def _format_source_shares(shares: Mapping[str, int]) -> str:
 
 
 def _normalize_init_bilibili_limit(value: int | None, *, default: int) -> int:
-    """Normalize user-facing init signal limits; 0 means skip that signal."""
+    """Normalize user-facing init signal limits.
+
+    Callers own the meaning of 0: history treats it as "fetch all",
+    while favorite/follow keep the existing "skip this signal" meaning.
+    """
     if value is None:
         return default
     return max(0, int(value))
@@ -4883,10 +4887,15 @@ def _normalize_init_bilibili_limit(value: int | None, *, default: int) -> int:
 
 def _ask_init_bilibili_limits(
     *,
+    history_limit: int | None,
     favorite_limit: int | None,
     follow_limit: int | None,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Ask interactive users to confirm Bilibili init signal caps."""
+    history = _normalize_init_bilibili_limit(
+        history_limit,
+        default=_INIT_BILIBILI_HISTORY_LIMIT,
+    )
     favorite = _normalize_init_bilibili_limit(
         favorite_limit,
         default=_INIT_BILIBILI_FAVORITE_LIMIT,
@@ -4896,13 +4905,23 @@ def _ask_init_bilibili_limits(
         default=_INIT_BILIBILI_FOLLOW_LIMIT,
     )
     if not _is_interactive_terminal():
-        return favorite, follow
-    if favorite_limit is not None and follow_limit is not None:
-        return favorite, follow
+        return history, favorite, follow
+    if history_limit is not None and favorite_limit is not None and follow_limit is not None:
+        return history, favorite, follow
 
     console.print(
-        "\n[bold]B 站初始化信号上限[/bold]\n[dim]回车使用默认值；输入 0 可跳过对应信号。[/dim]"
+        "\n[bold]B 站初始化信号上限[/bold]\n"
+        "[dim]回车使用默认值；历史输入 0 表示拉全部，收藏 / 关注输入 0 表示跳过。[/dim]"
     )
+    if history_limit is None:
+        raw = typer.prompt(
+            "B 站历史最多导入多少条",
+            default=str(_INIT_BILIBILI_HISTORY_LIMIT),
+        )
+        try:
+            history = max(0, int(str(raw).strip()))
+        except ValueError:
+            history = _INIT_BILIBILI_HISTORY_LIMIT
     if favorite_limit is None:
         raw = typer.prompt(
             "B 站收藏最多导入多少条",
@@ -4921,7 +4940,7 @@ def _ask_init_bilibili_limits(
             follow = max(0, int(str(raw).strip()))
         except ValueError:
             follow = _INIT_BILIBILI_FOLLOW_LIMIT
-    return favorite, follow
+    return history, favorite, follow
 
 
 @dataclass
@@ -4969,17 +4988,18 @@ class GuidedInitError(Exception):
 async def _fetch_bilibili_init_data(
     client: Any,
     *,
+    history_limit: int = _INIT_BILIBILI_HISTORY_LIMIT,
     favorite_limit: int,
     follow_limit: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Fetch B站 history / favorites / following in one event loop.
 
     Extracted from the old ``init`` closure so the CLI and the API
-    guided-init paths share a single B站 fetch (gui-init spec §1). Uses
-    ``_INIT_BILIBILI_HISTORY_LIMIT`` for history; favorites/following
-    limits are resolved by the caller.
+    guided-init paths share a single B站 fetch (gui-init spec §1).
+    Favorites/following limits are resolved by the caller; history uses
+    ``_INIT_BILIBILI_HISTORY_LIMIT`` unless a caller passes an override.
     """
-    hist = await client.get_user_history(max_items=_INIT_BILIBILI_HISTORY_LIMIT)
+    hist = await client.get_user_history(max_items=history_limit)
 
     favs: list[dict[str, Any]] = []
     try:
@@ -5094,6 +5114,7 @@ async def run_guided_init(
     soul_engine: Any,
     favorite_limit: int,
     follow_limit: int,
+    history_limit: int = _INIT_BILIBILI_HISTORY_LIMIT,
     include_bili: bool = True,
     include_xhs: bool,
     include_dy: bool,
@@ -5179,7 +5200,10 @@ async def run_guided_init(
     following_data: list[dict[str, Any]] = []
     if include_bili:
         history, favorites_data, following_data = await _fetch_bilibili_init_data(
-            client, favorite_limit=favorite_limit, follow_limit=follow_limit
+            client,
+            history_limit=history_limit,
+            favorite_limit=favorite_limit,
+            follow_limit=follow_limit,
         )
         if not history:
             raise GuidedInitError("empty_history", "当前无法从 B 站历史中生成初始画像。")
@@ -5635,7 +5659,7 @@ def init(
         None,
         "--bilibili-favorite-limit",
         min=0,
-        help="B 站收藏初始化信号上限；默认 300，0 表示跳过收藏。",
+        help="B 站收藏初始化信号上限；默认 500，0 表示跳过收藏。",
     ),
     bilibili_follow_limit: int | None = typer.Option(
         None,
@@ -5696,14 +5720,19 @@ def init(
     _maybe_setup_password_in_init(allow_lan=allow_lan)
 
     if include_bili:
-        resolved_bilibili_favorite_limit, resolved_bilibili_follow_limit = (
-            _ask_init_bilibili_limits(
-                favorite_limit=bilibili_favorite_limit,
-                follow_limit=bilibili_follow_limit,
-            )
+        (
+            resolved_bilibili_history_limit,
+            resolved_bilibili_favorite_limit,
+            resolved_bilibili_follow_limit,
+        ) = _ask_init_bilibili_limits(
+            history_limit=bilibili_history_limit,
+            favorite_limit=bilibili_favorite_limit,
+            follow_limit=bilibili_follow_limit,
         )
     else:
-        resolved_bilibili_favorite_limit, resolved_bilibili_follow_limit = 0, 0
+        resolved_bilibili_history_limit = 0
+        resolved_bilibili_favorite_limit = 0
+        resolved_bilibili_follow_limit = 0
 
     # v0.3.27+: ask the user whether to include xhs data, with a prep
     # checklist when they opt in. Defaults stay off unless the user
@@ -5796,6 +5825,7 @@ def init(
                 client=client,
                 memory=memory,
                 soul_engine=soul_engine,
+                history_limit=resolved_bilibili_history_limit,
                 favorite_limit=resolved_bilibili_favorite_limit,
                 follow_limit=resolved_bilibili_follow_limit,
                 include_bili=include_bili,

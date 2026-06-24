@@ -43,6 +43,7 @@ _COMPACT_METADATA_KEYS = frozenset(
         "video_duration_seconds",
         "feedback_type",
         "reaction",
+        "signal_strength",
     }
 )
 

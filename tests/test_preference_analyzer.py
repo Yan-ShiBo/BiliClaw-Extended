@@ -8,6 +8,7 @@ import pytest
 from openbiliclaw.llm.base import LLMProviderError, LLMResponse
 from openbiliclaw.llm.prompts import build_preference_analysis_prompt
 from openbiliclaw.llm.service import LLMServiceError
+from openbiliclaw.soul.preference_analyzer import PreferenceAnalyzer
 
 
 class FakeRegistry:
@@ -111,6 +112,41 @@ def test_preference_prompt_treats_comment_feedback_as_direct_neutral_feedback() 
     assert "根据备注" in system_prompt
     assert "喜欢" in system_prompt
     assert "不喜欢" in system_prompt
+
+
+def test_preference_prompt_explains_cross_platform_signal_strength() -> None:
+    messages = build_preference_analysis_prompt(events=[], existing_preference={})
+    system_prompt = messages[0]["content"]
+
+    assert "metadata.signal_strength" in system_prompt
+    assert "不是最终 interest.weight" in system_prompt
+    assert "favorite / bookmark / save / collect" in system_prompt
+    assert "follow / subscription" in system_prompt
+    assert "view / history" in system_prompt
+    assert "hover / scroll / snapshot" in system_prompt
+    assert "负向反馈" in system_prompt
+    assert "不能被 signal_strength 抵消" in system_prompt
+
+
+def test_compact_event_for_prompt_preserves_signal_strength() -> None:
+    analyzer = PreferenceAnalyzer(registry=ContextOverflowOnceStructuredService())
+
+    compact = analyzer._compact_event_for_prompt(
+        {
+            "event_type": "view",
+            "title": "浏览历史",
+            "metadata": {
+                "source_platform": "bilibili",
+                "signal_strength": 0.35,
+                "unused": "drop me",
+            },
+        }
+    )
+
+    assert compact["metadata"] == {
+        "signal_strength": 0.35,
+        "source_platform": "bilibili",
+    }
 
 
 class ServiceContextOverflowOnceStructuredService(ContextOverflowOnceStructuredService):

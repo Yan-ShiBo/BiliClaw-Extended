@@ -4259,6 +4259,7 @@
       untrusted_remote: "git 远端不在允许列表，更新被阻止",
       branch_not_fast_forwardable: "本地代码与发布版本分叉，无法快进更新",
       merge_or_rebase_in_progress: "代码目录正在合并 / 变基，更新暂缓",
+      github_rate_limited: "GitHub API 限流，请稍后再试",
       github_unreachable: "无法访问 GitHub 检查更新",
       missing_target_tag: "远端未找到目标版本标签",
       dependency_sync_failed: "更新后依赖安装失败",
