@@ -2489,7 +2489,8 @@ def test_init_guides_missing_runtime_config_interactively(
     #   5. "n" — skip module overrides
     #   6. "y" — allow LAN access
     #   7-8. "" — accept Bili favorite/follow init limits
-    #   9+. "n" — skip optional source prompts (xhs / douyin / youtube / X)
+    #   9+. "n" — skip optional source prompts (xhs / douyin / youtube / X);
+    #        Douyin / YouTube default to Y, so each needs an explicit "n".
     wizard_input = (
         "\n".join(
             [
@@ -2501,6 +2502,8 @@ def test_init_guides_missing_runtime_config_interactively(
                 "y",
                 "",
                 "",
+                "n",
+                "n",
                 "n",
                 "n",
                 "n",
@@ -2575,10 +2578,10 @@ def test_init_guides_missing_auth_interactively(
     # (1=install extension and skip / 2=paste cookie now). To keep this
     # test exercising the manual-paste path, send "2" first.
     # v0.3.89+: init asks whether to allow LAN access before the source
-    # prompts. Answer yes, accept Bili signal-limit defaults, then send "n"
-    # to XHS / Douyin / YouTube / X so this test stays focused on the
+    # prompts. Answer yes, accept Bili signal-limit defaults, then explicitly
+    # decline XHS / Douyin / YouTube / X so this test stays focused on the
     # cookie-prompt path.
-    result = runner.invoke(app, ["init"], input="2\nSESSDATA=valid\ny\n\n\nn\nn\nn\nn\n")
+    result = runner.invoke(app, ["init"], input="2\nSESSDATA=valid\ny\n\n\nn\nn\nn\nn\nn\nn\n")
 
     assert result.exit_code == 1
     assert fake_auth.saved_cookie == "SESSDATA=valid"
@@ -2886,11 +2889,12 @@ def test_init_caps_bilibili_history_and_favorites_at_500_and_following_at_100(
     assert str(built_history[2]["_following_summary"]).startswith("共关注 100 人")
 
 
-def test_init_accepts_custom_bilibili_favorites_and_following_limits(
+def test_init_accepts_custom_bilibili_history_favorites_and_following_limits(
     monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_path: Path
 ) -> None:
     class FakeBilibiliClient:
         async def get_user_history(self, max_items: int = 100) -> list[dict[str, object]]:
+            assert max_items == 7
             return [
                 {
                     "history": {"bvid": "BV1A", "view_at": 1710000000},
@@ -2986,6 +2990,8 @@ def test_init_accepts_custom_bilibili_favorites_and_following_limits(
             "--no-xhs",
             "--no-douyin",
             "--no-youtube",
+            "--bilibili-history-limit",
+            "7",
             "--bilibili-favorite-limit",
             "2",
             "--bilibili-follow-limit",
@@ -5061,6 +5067,53 @@ def test_fetch_douyin_does_not_propagate_events_cli_side(
     assert propagated == [], (
         "fetch-douyin should not propagate events CLI-side; daemon already does it"
     )
+
+
+def test_fetch_zhihu_command_renders_event_counts_without_init(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CliRunner()
+    prepared = {"called": False}
+    propagated: list[dict[str, object]] = []
+
+    def _trip() -> None:
+        prepared["called"] = True
+
+    class FakeMemoryManager:
+        async def propagate_event(self, event: dict[str, object]) -> None:
+            propagated.append(event)
+
+    monkeypatch.setattr(cli_module, "_prepare_init_runtime", _trip)
+    monkeypatch.setattr(cli_module, "_build_memory_manager", lambda: FakeMemoryManager())
+    monkeypatch.setattr(cli_module, "_enqueue_zhihu_bootstrap_task", lambda **_: "zhihu-task")
+    monkeypatch.setattr(
+        cli_module,
+        "_collect_zhihu_bootstrap_events",
+        lambda task_id, *, max_wait_seconds: (
+            [
+                {"event_type": "view", "title": "浏览", "metadata": {}},
+                {"event_type": "favorite", "title": "收藏", "metadata": {}},
+                {"event_type": "like", "title": "点赞", "metadata": {}},
+            ],
+            {
+                "zhihu_read_history": 1,
+                "zhihu_collection": 1,
+                "zhihu_activity_like": 1,
+                "zhihu_activity_favorite": 0,
+            },
+            "ok",
+        ),
+    )
+
+    result = runner.invoke(app, ["fetch-zhihu", "--profile-slug", "demo", "-w", "5"])
+
+    assert result.exit_code == 0, result.output
+    assert prepared["called"] is False
+    assert propagated == []
+    assert "知乎" in result.output
+    assert "浏览" in result.output
+    assert "收藏" in result.output
+    assert "点赞" in result.output
 
 
 def test_fetch_douyin_does_not_rebuild_profile_cli_side(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,37 @@ async def test_propagate_event_persists_to_sqlite(tmp_path: Path) -> None:
     assert len(events) == 1
     assert events[0]["title"] == "测试视频"
     assert "BV1xx411c7mD" in events[0]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_propagate_event_adds_default_signal_strength_without_overriding(
+    tmp_path: Path,
+) -> None:
+    memory = MemoryManager(tmp_path)
+    memory.initialize()
+
+    await memory.propagate_event(
+        {
+            "event_type": "view",
+            "title": "直接写入的浏览事件",
+            "metadata": {"source_platform": "web"},
+        }
+    )
+    await memory.propagate_event(
+        {
+            "event_type": "follow",
+            "title": "平台自定义订阅强度",
+            "metadata": {"source_platform": "youtube", "signal_strength": 1.0},
+        }
+    )
+
+    events = memory.query_events(limit=10)
+    by_title = {event["title"]: event for event in events}
+
+    direct_metadata = json.loads(str(by_title["直接写入的浏览事件"]["metadata"]))
+    platform_metadata = json.loads(str(by_title["平台自定义订阅强度"]["metadata"]))
+    assert direct_metadata["signal_strength"] == 0.35
+    assert platform_metadata["signal_strength"] == 1.0
 
 
 @pytest.mark.asyncio

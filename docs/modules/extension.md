@@ -4,7 +4,7 @@
 
 `extension/` 是浏览器插件子项目（Chrome / Edge / Brave 主构建，Firefox 独立构建），负责：
 
-- 在 B 站 / 小红书 / 抖音 / YouTube 等支持的站点采集行为事件（平台无关内核 + 平台适配器）
+- 在 B 站 / 小红书 / 抖音 / YouTube / X / 知乎等支持站点采集行为事件（平台无关内核 + 平台适配器）
 - 通过 background service worker 缓冲并上报到本地后端
 - 在 side panel 中展示连接状态、推荐结果、画像和聊天入口
 
@@ -12,7 +12,7 @@
 
 | 子模块 | 状态 | 说明 |
 |------|------|------|
-| 8.1 行为采集 | ✅ | `content/kernel.ts` + `shared/platforms/*` + `service-worker.ts` 已接通统一事件链；B 站 / 小红书 / 抖音 / YouTube / X 都通过 `PlatformAdapter` 产出同一 `BehaviorEvent` 形态，平台差异只保留在 selector、内容 ID 和 action 识别中；click 监听在 capture 阶段执行，scroll 同时覆盖页面和内部滚动容器 |
+| 8.1 行为采集 | ✅ | `content/kernel.ts` + `shared/platforms/*` + `service-worker.ts` 已接通统一事件链；B 站 / 小红书 / 抖音 / YouTube / X / 知乎都通过 `PlatformAdapter` 产出同一 `BehaviorEvent` 形态，平台差异只保留在 selector、内容 ID 和 action 识别中；click 监听在 capture 阶段执行，scroll 同时覆盖页面和内部滚动容器 |
 | 8.2 后端 API | ✅ | Python 侧 `/api/events`、`/api/health`、`/api/recommendations` 已可联调；`/api/events` 在 soul 画像明确未初始化时只返回 `not_initialized` 拒收结果，不写 memory，首轮画像信号由 guided init 的来源任务拉取 |
 | 8.3 Side Panel | ✅ | 已切到 side panel 主入口，继续复用 `popup/` 页面承载推荐 / 稍后 / 收藏 / 画像 / 对话五个 tab；顶部功能区提供移动端二维码入口，按当前插件后端地址生成 `/m/` 扫码链接；460px 以下窄宽度会把 Web、二维码、消息、设置按钮换到品牌区下一行靠右排列，避免和标题 / 状态徽标重叠；如果当前后端地址仍是 `127.0.0.1` / `localhost`，会先读 `/api/health.lan_ip` 并用局域网 IP 生成二维码，提示为 info 状态；后端会优先返回 `192.168.x.x` / `10.x.x.x` / `172.16-31.x.x` 这类真实局域网地址，排除 `198.18.x.x` 等 VPN/TUN 地址；移动 Web 推荐页首屏先渲染 `/api/recommendations`，再异步补 runtime status / activity / delight，慢请求不会让页面无限停在 loading；聊天改走后端 durable turn，Chrome 丢弃或切 tab 后可恢复；惊喜推荐、兴趣猜测和避雷探针的内联聊天也会按 `scope=delight/probe/avoidance_probe` 恢复 pending/completed/failed turn；聊天 tab 激活时隐藏底部活动栏，聊天记录区独立滚动并占满上方空间，输入框固定在底部且会轮播想法、口味、自我描述、近期状态等多场景提示语 |
 | Runtime stream 合并刷新 | ✅ | 插件 side panel、桌面 Web 和移动 Web 对 `activity.added` / `profile_updated` 等运行时事件做 debounce 与 single-flight；`refresh.pool_updated` 只合并池子状态并刷新 header / pool chips，不再重拉推荐列表，避免覆盖用户已经 append 出来的历史卡片。 |
@@ -52,12 +52,13 @@
 | 抖音热点任务 | ✅ | 后端可派发 `hot` 任务；hot board 的 `group_id` 会作为 `seed_aweme_id` 透传，插件优先执行带 seed 的热词；后台 tab 仍从抖音首页出发模拟热榜点击并被动收集响应 / DOM，不足时用已登录页面的 related API bridge 拉取 `dy_hot` 候选供 `dy-plugin-hot-related` discovery 使用；runtime 会把候选写入统一待评估池 |
 | 抖音首页推荐流任务 | ✅ | 后端可派发 `feed` 任务；插件用后台 tab 打开已登录抖音首页，滚动推荐流触发页面加载，再被动收集 feed 响应和渲染 DOM，回传 `dy_feed` 候选供 `dy-plugin-feed` discovery 使用；runtime 会把候选写入统一待评估池 |
 | YouTube 初始化画像任务 | ✅ | 后端可派发 `bootstrap_profile` 任务；插件依次访问 `/feed/history`、`/feed/channels`、`/playlist?list=LL`，从 DOM 读取观看历史 / 订阅 / 点赞并用 `partial` 分批回传给 `/api/sources/yt/task-result` |
+| 知乎事件拉取任务 | ✅ | 后端可派发 `bootstrap_events` 任务；插件在已登录知乎页面内读取最近浏览记录、收藏夹条目和可选个人动态点赞 / 收藏，回传 `/api/sources/zhihu/task-result`。该链路只服务 `openbiliclaw fetch-zhihu` 事件爬取 smoke，不写 memory，也不触发画像初始化 |
 | 后端地址与端口可配置 | ✅ | 设置页「后端地址」接受裸 IPv4 / 主机名，「后端端口」仅接受 `1-65535` 的完整十进制整数；二者一起保存到 `chrome.storage.local`，popup / service worker / 任务派发 / cookie 同步 / 调试中继全部经 `apiUrl()`/`wsUrl()` 解析当前 origin；endpoint 变更后 service worker 通过 `chrome.storage.onChanged` 立即重连 `runtime-stream`，无需重载插件；Chrome Web Store / AMO 发布包默认只声明 `127.0.0.1` / `localhost` 后端 host 权限，局域网 / 远程后端需要带对应 host 权限的开发者构建或后续可选授权 |
 | 后台 LLM 暂停配置 | ✅ | 设置页调度区提供「停止后台 LLM 请求」「关闭浏览器后停止后台」和断开宽限秒数，推荐页不再放运行时开关；后端通过 `/api/runtime-stream` presence 判断插件是否在线，浏览器 idle disconnect 会被 receive-side detector 及时清掉 |
 | 配置恢复与降级模式 UI | ✅ | popup API 会缓存最近一次成功的 `/api/config` 快照；设置页打开时如果后端离线但有缓存，会用缓存填表并显示离线时间；如果后端以 `degraded=true` 返回配置，会展示 blocking issues，保存按钮切到“保存并提示重启”，配合后端降级模式修复错误配置 |
 | 配置保存超时提示 | ✅ | `popup-api.requestJson()` 支持 AbortController timeout，`updateConfig()` 对 `PUT /api/config` 使用 60s 上限；超时时设置页显示 amber toast，文案只提示“保存请求可能已写入、热重载可能仍在后台进行”，不会断言配置一定已落盘 |
 | OpenAI 认证方式配置 | ✅ | 设置页 OpenAI provider 区域可选择 `API Key` 或 `Codex OAuth`，保存时把 `[llm.openai].auth_mode` 纳入 `/api/config` payload；后端仍负责 Codex token 导入、域名限制和配置校验 |
-| 版本与更新面板 | ✅ | 设置页调度 tab 的“版本与更新”读取 `/api/update-status` 展示后端当前 / 最新版本、状态、上次检查和错误；`popup-helpers.normalizeRuntimeStatus()` 同时保留 `/api/runtime-status` 中的 `current_version`、`latest_remote_version`、`backend_update_state` 等自动更新摘要字段，避免 runtime 状态归一化时丢失后端版本信息。 |
+| 版本与更新面板 | ✅ | 设置页调度 tab 的“版本与更新”读取 `/api/update-status` 展示后端当前 / 最新版本、状态、上次检查和错误；`github_rate_limited` / `github_unreachable` / `no_backend_tag_yet` 等稳定 reason 会映射成本地化提示，避免把后端错误 key 直接露给用户。`install_mode="git"` 且发现 `backend-v*` 更新时才显示“立即应用”；`install_mode="frozen"` 只跟踪 `desktop-v*` 安装包并显示“前往下载新安装包”，不会让安装包用户误触源码快进。`popup-helpers.normalizeRuntimeStatus()` 同时保留 `/api/runtime-status` 中的 `current_version`、`latest_remote_version`、`backend_update_state` 等自动更新摘要字段，避免 runtime 状态归一化时丢失后端版本信息。 |
 | 语义去重未启用提示 | ✅ | v0.3.54+ 推荐页启动时读 `/api/health.embedding_ready`，为 `false` 时在推荐列表上方显示可关闭横幅（`maybeShowEmbeddingBanner`）；「一键启用本地 Ollama」按钮 PUT `/api/config` 写入 `embedding.provider=ollama, model=bge-m3` 热加载，再复检 health，仅当 `embedding_ready` 翻 `true` 才收起横幅，否则提示去跑 `ollama serve` / `ollama pull bge-m3`。本会话内关闭后不再打扰（`sessionStorage`）。v0.3.97+ 横幅决策抽到 `popup-embedding-banner.js`（`shouldShowEmbeddingBanner`），并在面板重新可见 / 获焦时复检（`installEmbeddingBannerAutoRefresh`）——配合后端实时探活，embedding 修好后无需重开面板横幅即自动消失（此前 `maybeShowEmbeddingBanner` 仅面板打开时跑一次，常驻 side panel 会长期残留旧横幅）。v0.3.97+ 同时修复横幅**根本无法隐藏**的 CSS bug：`.embedding-banner { display: flex }` 盖过 UA `[hidden] { display: none }`（同优先级，author > UA），`banner.hidden = true` 形同虚设、横幅无视 `embedding_ready` 常驻——新增 `.embedding-banner[hidden] { display: none }` 守卫修复 |
 | 跨平台行为动作采集 | ✅ | B 站、小红书、抖音、YouTube 和 X 均通过 `PlatformAdapter` 识别统一动作：`like/favorite/comment/share/follow` 等按平台能力映射；`dislike` 永远经 `normalizeActionSignal()` 规范为 `feedback` 事件，metadata 带 `feedback_type=dislike` 与 `reaction=thumbs_down`。真实 DOM 点击会从内部 `span/svg` 向上归因到最近的按钮 / 链接 / 带 `aria-label` 的动作元素，避免真实站点嵌套按钮漏识别分享、关注等强信号。后台 buffer 把 `feedback/follow/share/view` 和带 dwell metadata 的 `click` 视为即时 flush 信号，高频 `scroll/hover/snapshot` 仍缓冲去重 |
 | 扩展捕捉 E2E 自检 | ✅ | 本机后端可通过 `/api/extension/e2e/run` 向已安装插件投递 `extension_e2e_run`，插件打开 / 复用抖音、小红书、X 标签页并执行白名单 DOM 操作，再由后端按运行窗口校验真实 `/api/events` 入库结果。复用同域 tab 时会先归位到平台入口，避免旧 404 / modal / 图片预览页污染测试；content executor 不直接发送 `BEHAVIOR_EVENT`，确保测到的是真实捕捉链路；会改变状态的动作需要显式 `allow_state_changing=true` |
@@ -88,6 +89,7 @@ extension/
 │   │   ├── cookie-sync.ts     # B 站 / 抖音 / X Cookie 自动同步到已配置后端（重试 alarm 按平台隔离）
 │   │   ├── e2e-runner.ts      # 后端驱动的真实标签页 E2E 捕捉自检 runner
 │   │   ├── bili-task-dispatcher.ts # B 站搜索兜底任务轮询 / 后台 tab / 结果回传
+│   │   ├── zhihu-task-dispatcher.ts # 知乎事件拉取任务轮询 / 前台 tab / 结果回传
 │   │   └── service-worker.ts
 │   ├── content/
 │   │   ├── e2e-executor.ts    # 只执行白名单 DOM 操作，不直接伪造行为事件
@@ -103,8 +105,11 @@ extension/
 │   │   │   └── task-executor.ts # 抖音后台任务在页面内的执行入口
 │   │   ├── xiaohongshu.ts     # 小红书 entry point，挂载 xiaohongshuAdapter
 │   │   ├── youtube.ts         # YouTube entry point，挂载 youtubeAdapter 与任务 executor
+│   │   ├── zhihu.ts           # 知乎 entry point，挂载 zhihuAdapter 与事件拉取 executor
 │   │   ├── yt/
 │   │   │   └── task-executor.ts # YouTube bootstrap scope DOM 解析与回传
+│   │   ├── zhihu/
+│   │   │   └── task-executor.ts # 知乎浏览记录 / 收藏夹 / 动态条目读取与回传
 │   │   └── xhs/
 │   │       ├── bootstrap.ts   # 初始化画像任务的 state / DOM 解析 helper
 │   │       ├── passive.ts     # 小红书被动 URL / note metadata 采集
@@ -122,7 +127,8 @@ extension/
 │           ├── douyin.ts      # aweme_id 提取、卡片选择器、动作关键字
 │           ├── twitter.ts     # tweet_id 提取、卡片选择器、动作关键字
 │           ├── xiaohongshu.ts # note_id 提取、卡片选择器
-│           └── youtube.ts     # video_id 提取、卡片选择器、动作关键字
+│           ├── youtube.ts     # video_id 提取、卡片选择器、动作关键字
+│           └── zhihu.ts       # question / answer / article ID 提取与动作关键字
 └── tests/
     ├── collector-helpers.test.ts
     ├── dist-module-specifiers.test.ts
@@ -159,6 +165,7 @@ extension/
 - flush 成功后检查一次待发通知
 - 缓冲为空时也会周期轮询高置信通知
 - 每次 service worker 冷启动都会启动 B 站和抖音 Cookie 同步；如果已配置后端暂时不可用，会通过 `chrome.alarms` 以 1 分钟间隔重试，成功同步后恢复为 60 分钟刷新
+- 会启动知乎 `bootstrap_events` 任务轮询；收到 runtime stream 的 `zhihu_task_available` 后立即打开 / 复用知乎前台 tab，把浏览记录、收藏夹和可选个人动态条目回传到 `/api/sources/zhihu/task-result`
 - 以 `client=background` 连接 `/api/runtime-stream` 后，如果后端发现本地缺少 B 站 Cookie，会收到 `bilibili_cookie_sync_requested`；如果 `[sources.douyin].enabled=true` 且缺少抖音 Cookie，会收到 `douyin_cookie_sync_requested`。扩展收到后会立即执行对应 Cookie POST。后端也把这条 WebSocket 作为 extension presence 信号：连接建立时允许后台 LLM 工作，最后一个连接断开后进入 `extension_disconnect_grace_seconds` 宽限；服务端 reader 会主动 `receive()` 检测 idle disconnect，避免浏览器断开后 presence 卡住
 - 收到 `extension_e2e_run` 后会调用 `background/e2e-runner.ts`：按目标平台打开或复用标签页，复用时也会导航到平台稳定入口，等待页面 ready，再向 content script 发送 `OBC_E2E_EXECUTE`；runner 会先等待捕捉 buffer settle 并 flush，再把执行结果 POST 到 `/api/extension/e2e/result`，sendMessage / tab load / 整体运行都有独立超时，避免单个平台页面卡住整个后端请求
 - 连接 `/api/runtime-stream` 之前会先 HTTP `GET /api/ping`（2 秒超时）做一次活性探针，仅在后端可达时再 `new WebSocket(...)`。这样 fresh-install 用户先装扩展、后启动后端时，`chrome://extensions` 不会被浏览器层 WebSocket 失败计入「错误」徽标；探针失败仍走原有的 5s → 60s 指数退避兜底重连。探活不再打 `/api/health`：health 会同步等一次 embedding 实探（冷缓存可达数秒），2 秒预算下会把健康但冷启动的后端误判为掉线；`/api/ping` 返回 404（旧后端）时回退 `/api/health`（12 秒预算）

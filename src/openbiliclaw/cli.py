@@ -177,9 +177,11 @@ _INIT_BOOTSTRAP_MAX_ITEMS_PER_SCOPE = 300
 _DEFAULT_XHS_BOOTSTRAP_WAIT_SECONDS = 180.0
 _DEFAULT_DY_BOOTSTRAP_WAIT_SECONDS = 180.0
 _DEFAULT_YT_BOOTSTRAP_WAIT_SECONDS = 240.0
+_DEFAULT_ZHIHU_BOOTSTRAP_WAIT_SECONDS = 180.0
 _DEFAULT_XHS_BOOTSTRAP_DEDUPE_HOURS = 6.0
 _DEFAULT_DY_BOOTSTRAP_DEDUPE_HOURS = 6.0
 _DEFAULT_YT_BOOTSTRAP_DEDUPE_HOURS = 6.0
+_DEFAULT_ZHIHU_BOOTSTRAP_DEDUPE_HOURS = 6.0
 _EXTENSION_PRESENCE_REQUIRED_WARNING = (
     "WARN extension presence required; backend will pause background LLM work "
     "after grace period if no extension client connects"
@@ -2226,6 +2228,17 @@ def _yt_bootstrap_dedupe_hours() -> float:
         return _DEFAULT_YT_BOOTSTRAP_DEDUPE_HOURS
 
 
+def _zhihu_bootstrap_dedupe_hours() -> float:
+    raw = os.environ.get(
+        "OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS",
+        str(_DEFAULT_ZHIHU_BOOTSTRAP_DEDUPE_HOURS),
+    )
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _DEFAULT_ZHIHU_BOOTSTRAP_DEDUPE_HOURS
+
+
 def _enqueue_xhs_bootstrap_task(*, force: bool = False, kick: bool = True) -> str | None:
     """Fire-and-forget enqueue of the bootstrap_profile task.
 
@@ -2313,7 +2326,7 @@ def _kick_task_dispatcher(source: str) -> None:
     Failures are silent: if the daemon isn't running the existing
     chrome.alarms 60s poll fallback still picks the task up.
     """
-    if source not in {"xhs", "dy", "yt"}:
+    if source not in {"xhs", "dy", "yt", "zhihu"}:
         return
     import urllib.error
     import urllib.request
@@ -2743,6 +2756,174 @@ def _collect_yt_bootstrap_events(
                 short = key.removeprefix("yt_") if key.startswith("yt_") else key
                 if source == f"yt_bootstrap_{short}":
                     scope_counts[key] += 1
+    status_label = "ok" if events else "empty"
+    return events, scope_counts, status_label
+
+
+def _enqueue_zhihu_bootstrap_task(
+    *,
+    profile_slug: str = "",
+    kick: bool = True,
+) -> str | None:
+    """Enqueue a Zhihu bootstrap_events task for the browser extension.
+
+    The extension executes same-origin Zhihu session fetches in the logged-in
+    browser. This command is fetch-only; it does not trigger profile generation.
+    """
+    from openbiliclaw.sources.zhihu_tasks import ZhihuTaskQueue
+
+    try:
+        database = _get_runtime_database()
+    except Exception as exc:
+        console.print(f"  [yellow]知乎事件未拉取: 数据库不可用: {exc}[/yellow]")
+        return None
+    if not hasattr(database, "conn"):
+        return None
+
+    max_items = int(
+        os.environ.get(
+            "OPENBILICLAW_ZHIHU_BOOTSTRAP_MAX_ITEMS",
+            str(_INIT_BOOTSTRAP_MAX_ITEMS_PER_SCOPE),
+        )
+    )
+    max_collections = int(os.environ.get("OPENBILICLAW_ZHIHU_BOOTSTRAP_MAX_COLLECTIONS", "20"))
+    task_id: str | None = None
+
+    try:
+        queue = ZhihuTaskQueue(database)
+        dedupe_hours = _zhihu_bootstrap_dedupe_hours()
+        find_recent = getattr(queue, "find_recent_task", None)
+        if dedupe_hours > 0 and callable(find_recent):
+            recent = find_recent(
+                "bootstrap_events",
+                recent_hours=dedupe_hours,
+                statuses=("pending", "in_progress", "completed", "failed"),
+            )
+            if recent is not None:
+                task_id = str(recent.get("id", "")).strip()
+                if task_id:
+                    status = str(recent.get("status", "unknown"))
+                    console.print(
+                        "  [dim]复用最近的知乎 bootstrap 任务"
+                        f"({status})；需要重新拉取可设 "
+                        "OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS=0。[/dim]"
+                    )
+                    return task_id
+
+        scopes = ["zhihu_read_history", "zhihu_collection"]
+        if profile_slug.strip():
+            scopes.append("zhihu_activity")
+        else:
+            console.print(
+                "  [dim]未传 --profile-slug，跳过知乎个人动态里的点赞/收藏；"
+                "浏览记录和收藏夹仍会拉取。[/dim]"
+            )
+        task_id = queue.enqueue_with_id(
+            "bootstrap_events",
+            {
+                "scopes": scopes,
+                "profile_slug": profile_slug.strip(),
+                "max_items_per_scope": max(1, max_items),
+                "max_collections": max(1, max_collections),
+            },
+            daily_budget=10,
+        )
+    except Exception as exc:
+        console.print(f"  [yellow]知乎事件未拉取: {exc}[/yellow]")
+        return None
+    if not task_id:
+        console.print("  [yellow]知乎事件未拉取: 今日任务预算已用完。[/yellow]")
+        return None
+    if kick:
+        _kick_task_dispatcher("zhihu")
+    return task_id
+
+
+def _collect_zhihu_bootstrap_events(
+    task_id: str | None,
+    *,
+    max_wait_seconds: float | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], str]:
+    """Wait for and harvest a previously-enqueued Zhihu bootstrap task."""
+    import json
+    import time
+
+    from openbiliclaw.sources.zhihu_tasks import (
+        ZhihuTaskQueue,
+        zhihu_bootstrap_items_to_events,
+    )
+
+    empty_counts = {
+        "zhihu_read_history": 0,
+        "zhihu_collection": 0,
+        "zhihu_activity_like": 0,
+        "zhihu_activity_favorite": 0,
+    }
+    if not task_id:
+        return [], empty_counts, "skipped"
+
+    if max_wait_seconds is None:
+        max_wait_seconds = float(
+            os.environ.get(
+                "OPENBILICLAW_ZHIHU_BOOTSTRAP_WAIT_SECONDS",
+                str(_DEFAULT_ZHIHU_BOOTSTRAP_WAIT_SECONDS),
+            )
+        )
+
+    try:
+        database = _get_runtime_database()
+    except Exception:
+        return [], empty_counts, "skipped"
+    if not hasattr(database, "conn"):
+        return [], empty_counts, "skipped"
+
+    queue = ZhihuTaskQueue(database)
+    deadline = time.monotonic() + max(0.0, max_wait_seconds)
+    task: dict[str, Any] | None = None
+    while True:
+        task = queue.get(task_id)
+        status = str((task or {}).get("status", "")).strip()
+        if status in {"completed", "failed"}:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.5)
+
+    if not task:
+        return [], empty_counts, "timeout"
+    if task.get("status") == "failed":
+        return [], empty_counts, "failed"
+    if task.get("status") != "completed":
+        return [], empty_counts, "timeout"
+
+    try:
+        result = json.loads(str(task.get("result_json") or "{}"))
+    except json.JSONDecodeError:
+        return [], empty_counts, "failed"
+
+    items = [v for v in result.get("items", []) if isinstance(v, dict)]
+    events = zhihu_bootstrap_items_to_events(items)
+    scope_counts = dict(empty_counts)
+    raw_counts = result.get("scope_counts", {})
+    if isinstance(raw_counts, dict):
+        for key in scope_counts:
+            with suppress(Exception):
+                scope_counts[key] = int(raw_counts.get(key, 0) or 0)
+    if not any(scope_counts.values()):
+        for event in events:
+            event_type = str(event.get("event_type", ""))
+            metadata = event.get("metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            source = str(metadata.get("import_source", ""))
+            if source == "zhihu_bootstrap_read_history":
+                scope_counts["zhihu_read_history"] += 1
+            elif source == "zhihu_bootstrap_collection":
+                scope_counts["zhihu_collection"] += 1
+            elif event_type == "like":
+                scope_counts["zhihu_activity_like"] += 1
+            elif event_type == "favorite":
+                scope_counts["zhihu_activity_favorite"] += 1
     status_label = "ok" if events else "empty"
     return events, scope_counts, status_label
 
@@ -4281,7 +4462,11 @@ def _format_source_shares(shares: Mapping[str, int]) -> str:
 
 
 def _normalize_init_bilibili_limit(value: int | None, *, default: int) -> int:
-    """Normalize user-facing init signal limits; 0 means skip that signal."""
+    """Normalize user-facing init signal limits.
+
+    Callers own the meaning of 0: history treats it as "fetch all",
+    while favorite/follow keep the existing "skip this signal" meaning.
+    """
     if value is None:
         return default
     return max(0, int(value))
@@ -4289,10 +4474,15 @@ def _normalize_init_bilibili_limit(value: int | None, *, default: int) -> int:
 
 def _ask_init_bilibili_limits(
     *,
+    history_limit: int | None,
     favorite_limit: int | None,
     follow_limit: int | None,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Ask interactive users to confirm Bilibili init signal caps."""
+    history = _normalize_init_bilibili_limit(
+        history_limit,
+        default=_INIT_BILIBILI_HISTORY_LIMIT,
+    )
     favorite = _normalize_init_bilibili_limit(
         favorite_limit,
         default=_INIT_BILIBILI_FAVORITE_LIMIT,
@@ -4302,13 +4492,23 @@ def _ask_init_bilibili_limits(
         default=_INIT_BILIBILI_FOLLOW_LIMIT,
     )
     if not _is_interactive_terminal():
-        return favorite, follow
-    if favorite_limit is not None and follow_limit is not None:
-        return favorite, follow
+        return history, favorite, follow
+    if history_limit is not None and favorite_limit is not None and follow_limit is not None:
+        return history, favorite, follow
 
     console.print(
-        "\n[bold]B 站初始化信号上限[/bold]\n[dim]回车使用默认值；输入 0 可跳过对应信号。[/dim]"
+        "\n[bold]B 站初始化信号上限[/bold]\n"
+        "[dim]回车使用默认值；历史输入 0 表示拉全部，收藏 / 关注输入 0 表示跳过。[/dim]"
     )
+    if history_limit is None:
+        raw = typer.prompt(
+            "B 站历史最多导入多少条",
+            default=str(_INIT_BILIBILI_HISTORY_LIMIT),
+        )
+        try:
+            history = max(0, int(str(raw).strip()))
+        except ValueError:
+            history = _INIT_BILIBILI_HISTORY_LIMIT
     if favorite_limit is None:
         raw = typer.prompt(
             "B 站收藏最多导入多少条",
@@ -4327,7 +4527,7 @@ def _ask_init_bilibili_limits(
             follow = max(0, int(str(raw).strip()))
         except ValueError:
             follow = _INIT_BILIBILI_FOLLOW_LIMIT
-    return favorite, follow
+    return history, favorite, follow
 
 
 @dataclass
@@ -4372,17 +4572,18 @@ class GuidedInitError(Exception):
 async def _fetch_bilibili_init_data(
     client: Any,
     *,
+    history_limit: int = _INIT_BILIBILI_HISTORY_LIMIT,
     favorite_limit: int,
     follow_limit: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Fetch B站 history / favorites / following in one event loop.
 
     Extracted from the old ``init`` closure so the CLI and the API
-    guided-init paths share a single B站 fetch (gui-init spec §1). Uses
-    ``_INIT_BILIBILI_HISTORY_LIMIT`` for history; favorites/following
-    limits are resolved by the caller.
+    guided-init paths share a single B站 fetch (gui-init spec §1).
+    Favorites/following limits are resolved by the caller; history uses
+    ``_INIT_BILIBILI_HISTORY_LIMIT`` unless a caller passes an override.
     """
-    hist = await client.get_user_history(max_items=_INIT_BILIBILI_HISTORY_LIMIT)
+    hist = await client.get_user_history(max_items=history_limit)
 
     favs: list[dict[str, Any]] = []
     try:
@@ -4497,6 +4698,7 @@ async def run_guided_init(
     soul_engine: Any,
     favorite_limit: int,
     follow_limit: int,
+    history_limit: int = _INIT_BILIBILI_HISTORY_LIMIT,
     include_bili: bool = True,
     include_xhs: bool,
     include_dy: bool,
@@ -4581,7 +4783,10 @@ async def run_guided_init(
     following_data: list[dict[str, Any]] = []
     if include_bili:
         history, favorites_data, following_data = await _fetch_bilibili_init_data(
-            client, favorite_limit=favorite_limit, follow_limit=follow_limit
+            client,
+            history_limit=history_limit,
+            favorite_limit=favorite_limit,
+            follow_limit=follow_limit,
         )
         if not history:
             raise GuidedInitError("empty_history", "当前无法从 B 站历史中生成初始画像。")
@@ -4976,11 +5181,17 @@ def init(
         "--yes-x",
         help="跳过 X 的 y/n 提问,直接启用 X 来源(适合脚本化场景)。",
     ),
+    bilibili_history_limit: int | None = typer.Option(
+        None,
+        "--bilibili-history-limit",
+        min=0,
+        help="B 站历史初始化信号上限；默认 500，0 表示拉全部历史。",
+    ),
     bilibili_favorite_limit: int | None = typer.Option(
         None,
         "--bilibili-favorite-limit",
         min=0,
-        help="B 站收藏初始化信号上限；默认 300，0 表示跳过收藏。",
+        help="B 站收藏初始化信号上限；默认 500，0 表示跳过收藏。",
     ),
     bilibili_follow_limit: int | None = typer.Option(
         None,
@@ -5041,14 +5252,19 @@ def init(
     _maybe_setup_password_in_init(allow_lan=allow_lan)
 
     if include_bili:
-        resolved_bilibili_favorite_limit, resolved_bilibili_follow_limit = (
-            _ask_init_bilibili_limits(
-                favorite_limit=bilibili_favorite_limit,
-                follow_limit=bilibili_follow_limit,
-            )
+        (
+            resolved_bilibili_history_limit,
+            resolved_bilibili_favorite_limit,
+            resolved_bilibili_follow_limit,
+        ) = _ask_init_bilibili_limits(
+            history_limit=bilibili_history_limit,
+            favorite_limit=bilibili_favorite_limit,
+            follow_limit=bilibili_follow_limit,
         )
     else:
-        resolved_bilibili_favorite_limit, resolved_bilibili_follow_limit = 0, 0
+        resolved_bilibili_history_limit = 0
+        resolved_bilibili_favorite_limit = 0
+        resolved_bilibili_follow_limit = 0
 
     # v0.3.27+: ask the user whether to include xhs data, with a prep
     # checklist when they opt in. Defaults stay off unless the user
@@ -5128,6 +5344,7 @@ def init(
                 client=client,
                 memory=memory,
                 soul_engine=soul_engine,
+                history_limit=resolved_bilibili_history_limit,
                 favorite_limit=resolved_bilibili_favorite_limit,
                 follow_limit=resolved_bilibili_follow_limit,
                 include_bili=include_bili,
@@ -5889,6 +6106,80 @@ def fetch_youtube(
         source_label="YouTube",
         enqueue=_enqueue_yt_bootstrap_task,
         collect=lambda tid: _collect_yt_bootstrap_events(tid, max_wait_seconds=wait_seconds),
+        wait_seconds=wait_seconds,
+        summary_renderer=_render,
+    )
+
+
+@app.command("fetch-zhihu")
+def fetch_zhihu(
+    profile_slug: str = typer.Option(
+        "",
+        "--profile-slug",
+        help=(
+            "知乎个人主页 slug，例如 https://www.zhihu.com/people/<slug>。"
+            "提供后会额外拉个人动态里的点赞 / 收藏。"
+        ),
+    ),
+    wait_seconds: float = typer.Option(
+        _DEFAULT_ZHIHU_BOOTSTRAP_WAIT_SECONDS,
+        "--wait-seconds",
+        "-w",
+        help="等扩展回结果的最大秒数(默认 180s)。",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="忽略近期知乎 bootstrap 任务，强制重新拉取事件。",
+    ),
+) -> None:
+    """单独测试知乎事件拉取(独立于 ``init``，不生成画像)。
+
+    需要 daemon + 扩展 + 浏览器登录 https://www.zhihu.com。扩展会在知乎
+    页面内用当前登录态拉取最近浏览、收藏夹内容；传 ``--profile-slug`` 后
+    额外拉个人动态中的点赞 / 收藏。CLI 只读取任务结果并打印统计，不写 memory。
+    """
+
+    def _render(scope_counts: dict[str, int], status_label: str, event_count: int) -> None:
+        if status_label == "ok":
+            activity_favorites = scope_counts.get("zhihu_activity_favorite", 0)
+            total_favorites = scope_counts.get("zhihu_collection", 0) + activity_favorites
+            console.print(
+                "  知乎 "
+                f"浏览 [green]{scope_counts.get('zhihu_read_history', 0)}[/green] 条"
+                f" / 收藏 [green]{total_favorites}[/green] 条"
+                f" / 点赞 [green]{scope_counts.get('zhihu_activity_like', 0)}[/green] 条"
+            )
+            console.print(f"  共抓取并转换 [green]{event_count}[/green] 条事件；未触发画像生成。")
+        elif status_label == "empty":
+            console.print(
+                "  [yellow]知乎任务跑通但 0 条数据 —— "
+                "可能未登录知乎 / 浏览历史关闭 / 收藏夹为空 / 接口字段漂移。[/yellow]"
+            )
+        elif status_label == "timeout":
+            console.print(
+                "  [dim]知乎任务超时:扩展未连接 / 任务还在跑。可加 --wait-seconds 240 重试。[/dim]"
+            )
+        elif status_label == "failed":
+            console.print("  [yellow]知乎任务失败 —— 检查扩展日志。[/yellow]")
+
+    def _enqueue() -> str | None:
+        if force:
+            previous = os.environ.get("OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS")
+            os.environ["OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS"] = "0"
+            try:
+                return _enqueue_zhihu_bootstrap_task(profile_slug=profile_slug)
+            finally:
+                if previous is None:
+                    os.environ.pop("OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS", None)
+                else:
+                    os.environ["OPENBILICLAW_ZHIHU_BOOTSTRAP_DEDUPE_HOURS"] = previous
+        return _enqueue_zhihu_bootstrap_task(profile_slug=profile_slug)
+
+    _run_single_source_bootstrap(
+        source_label="知乎",
+        enqueue=_enqueue,
+        collect=lambda tid: _collect_zhihu_bootstrap_events(tid, max_wait_seconds=wait_seconds),
         wait_seconds=wait_seconds,
         summary_renderer=_render,
     )

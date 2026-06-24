@@ -190,12 +190,12 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama dynamic libraries fix (2026-06-23)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.139 / extension v0.3.91 / desktop v0.3.139: update-check rate-limit fallback and Zhihu smoke (2026-06-24)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
-- **macOS local embedding is fixed** — the installer now bundles the official `Ollama.app` runtime's `ollama + llama-server + lib*.dylib/.so + mlx_metal_*`, avoiding `/api/version` succeeding while `/api/embeddings` returns 500 because runtime libraries are missing.
-- **Guided init now verifies embedding with a real probe** — when local `ollama` embedding is configured by the installer, profile initialization waits for one successful `bge-m3` embedding request instead of silently degrading while the model is still downloading or Ollama is broken.
-- **Release builds now fail fast on incomplete Ollama runtimes** — the macOS desktop build checks `llama-server` and key dynamic libraries before producing a package, and the manual installer workflow uses the same official runtime.
-- **Extension version unchanged** — browser packages remain on `extension v0.3.90`; this release refreshes backend source and desktop installers only.
+- **Update checks no longer mislabel GitHub API quota as unreachable** — if the REST tags API is rate-limited, the backend falls back to the tags Atom feed; if that also fails, the UI shows a rate-limit message. Packaged installs now show a clickable desktop-installer Release link.
+- **Zhihu source smoke is available** — `openbiliclaw fetch-zhihu` can ask the extension to read real Zhihu history, collections, and optional activity likes/favorites for source validation.
+- **Cross-platform signal strength is unified** — Bilibili, Xiaohongshu, Douyin, YouTube, X, Zhihu, and recommendation-card feedback now feed preference analysis with a shared `signal_strength` contract.
+- **Extension version is now `extension v0.3.91`** — the update panel includes the packaged-installer download path, and Chrome / Firefox Release packages are published together.
 
 ## Community
 
@@ -663,7 +663,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama dynamic libraries fix (2026-06-23)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+Latest: **v0.3.139 / extension v0.3.91 / desktop v0.3.139: update-check rate-limit fallback and Zhihu smoke (2026-06-24)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 

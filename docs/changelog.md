@@ -4,6 +4,15 @@
 
 ---
 
+## v0.3.139 / extension v0.3.91 / desktop v0.3.139: 更新检查限流兜底与知乎 smoke（2026-06-24）
+
+后端源码走 `backend-v0.3.139`，浏览器插件走 `extension-v0.3.91`，桌面安装包走 `desktop-v0.3.139`。
+
+- **检查更新区分并绕过 GitHub API 限流**：后端自动更新查询 GitHub tags 时会把 REST API quota 耗尽的 403/429 识别出来，并优先用 GitHub tags Atom feed 兜底继续选择 `backend-v*` / `desktop-v*`；兜底也失败时才稳定上报 `github_rate_limited`，不再误报 `github_unreachable`。插件 side panel 和桌面 Web 设置页同步显示「GitHub API 限流，请稍后再试」；安装包模式下插件也会隐藏“立即应用”，改为提示下载新版安装包。
+- **新增知乎事件爬取 smoke 链路**：`openbiliclaw fetch-zhihu` 会通过后端 `zhihu_tasks` 队列与浏览器插件前台知乎 tab 拉取最近浏览记录、收藏夹条目，并可用 `--profile-slug` 补个人动态里的点赞 / 收藏动作。插件新增知乎 `PlatformAdapter`、content task executor、后台 dispatcher 和 manifest 权限；后端新增 `/api/sources/zhihu/next-task` / `task-result` / `kick`。该命令只转换并打印统一事件计数，不写入 memory、不触发画像初始化或增量画像更新，便于先做真实端到端来源验证。
+- **跨平台事件强度进入偏好分析**：统一事件构造会为缺失 `metadata.signal_strength` 的行为补兜底强度，B 站初始化 / 账号同步、小红书、抖音、YouTube、X、知乎等来源都能用同一套“证据强度”语义进入 PreferenceAnalyzer；平台自带的强度值优先保留。偏好分析 prompt 明确 `signal_strength` 不是最终兴趣权重，负向反馈 / dislike / thumbs_down / negative satisfaction 仍优先进入避让或降权。
+- **推荐卡反馈按强信号处理**：推荐卡 `comment` 反馈的 `signal_strength` 从 `0.6` 提到 `0.8`，`dismiss` 从 `0.4` 提到 `0.5`；`like` / `dislike` 继续保持 `1.0`。端到端覆盖 `/api/feedback` → `MemoryManager` → SQLite 事件入库，确保真实反馈卡片进入画像链路时带正确强度。
+
 ## v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama 动态库补齐（2026-06-23）
 
 后端源码走 `backend-v0.3.138`，浏览器插件沿用 `extension-v0.3.90`，桌面安装包走 `desktop-v0.3.138`。

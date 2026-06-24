@@ -6759,6 +6759,78 @@ def create_app(
         yt_bootstrap_item_key,
         yt_bootstrap_items_to_events,
     )
+    from openbiliclaw.sources.zhihu_tasks import ZhihuTaskQueue
+
+    _zhihu_task_queue: ZhihuTaskQueue | None = None
+    if hasattr(ctx.database, "conn"):
+        _zhihu_task_queue = ZhihuTaskQueue(ctx.database)
+
+    @app.get("/api/sources/zhihu/next-task")
+    def zhihu_next_task(response: Any = None) -> Any:
+        """Return the oldest pending Zhihu task, or 204 if none."""
+        from starlette.responses import Response
+
+        if _zhihu_task_queue is None:
+            return Response(status_code=204)
+        task = _zhihu_task_queue.next_pending()
+        if task is None:
+            return Response(status_code=204)
+
+        import json as _json
+
+        payload = _json.loads(task["payload_json"]) if task.get("payload_json") else {}
+        return {
+            "id": task["id"],
+            "type": task["type"],
+            **payload,
+        }
+
+    @app.post("/api/sources/zhihu/task-result")
+    async def zhihu_task_result(payload: dict[str, Any]) -> dict[str, Any]:
+        """Accept a Zhihu task result from the extension dispatcher.
+
+        This endpoint intentionally does not propagate events into memory/profile:
+        ``fetch-zhihu`` is a source-crawl smoke path, not an init/profile path.
+        """
+        task_id = str(payload.get("task_id", "") or "").strip()
+        status = str(payload.get("status", "") or "").strip()
+        items = [v for v in payload.get("items", []) if isinstance(v, dict)]
+        scope_counts = payload.get("scope_counts")
+        if not isinstance(scope_counts, dict):
+            scope_counts = None
+        debug = payload.get("debug")
+        if not isinstance(debug, dict):
+            debug = None
+
+        if not task_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail="task_id is required")
+
+        if _zhihu_task_queue is None:
+            return {"ok": True}
+
+        if status in {"partial", "ok"} or status == "empty":
+            _zhihu_task_queue.merge_result(
+                task_id,
+                items=items if items else None,
+                scope_counts=scope_counts,
+                debug=debug,
+                complete=status in {"ok", "empty"},
+            )
+        else:
+            _zhihu_task_queue.fail(task_id, error=str(payload.get("error", "") or ""), debug=debug)
+
+        return {"ok": True}
+
+    @app.post("/api/sources/zhihu/kick")
+    async def zhihu_task_kick() -> dict[str, Any]:
+        """Broadcast `zhihu_task_available` over runtime-stream."""
+        publish = getattr(getattr(ctx, "event_hub", None), "publish", None)
+        if callable(publish):
+            with suppress(Exception):
+                await publish({"type": "zhihu_task_available", "source": "task_kick"})
+        return {"ok": True}
 
     _yt_task_queue: YtTaskQueue | None = None
     if hasattr(ctx.database, "conn"):

@@ -194,12 +194,12 @@
 
 ## 最近更新
 
-最新版本：**v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama 动态库补齐（2026-06-23）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
+最新版本：**v0.3.139 / extension v0.3.91 / desktop v0.3.139: 更新检查限流兜底与知乎 smoke（2026-06-24）**。完整变更详见 [docs/changelog.md](docs/changelog.md)。
 
-- **macOS 本地 embedding 修复** —— 安装包改为随包携带官方 `Ollama.app` runtime 的 `ollama + llama-server + lib*.dylib/.so + mlx_metal_*`，避免 `/api/version` 正常但 `/api/embeddings` 因运行库缺失返回 500。
-- **初始化前会真实探活 embedding** —— 安装包默认配置本地 `ollama` embedding 时，初始化画像前必须完成一次真实 `bge-m3` 向量请求；模型仍在下载或 Ollama 异常时会停在前置清单，而不是悄悄降级。
-- **发布构建强校验** —— macOS 桌面包构建时会检查 `llama-server` 和关键动态库；缺失则直接失败，不再生成半可用安装包，手动 installer workflow 也使用同一官方 runtime。
-- **插件版本不变** —— 浏览器插件继续沿用 `extension v0.3.90`，本次只重发后端源码 tag 和桌面安装包。
+- **检查更新不再误报 GitHub 不可达** —— GitHub REST API 被匿名限流时会先走 tags Atom feed 兜底；兜底失败才显示“GitHub API 限流”，安装包模式下插件也会给出可点击的新安装包 Release 链接。
+- **新增知乎事件 smoke** —— `openbiliclaw fetch-zhihu` 可通过插件前台知乎 tab 拉取浏览记录、收藏夹和可选个人动态点赞 / 收藏，用于真实端到端来源验证。
+- **跨平台行为信号强度统一** —— B 站、小红书、抖音、YouTube、X、知乎和推荐卡反馈都会以统一 `signal_strength` 语义进入偏好分析。
+- **插件版本更新到 `extension v0.3.91`** —— 版本与更新面板补齐安装包下载入口，Chrome / Firefox Release 包同步发布。
 
 ## 用户交流群
 
@@ -675,7 +675,7 @@ OpenBiliClaw/
 
 ## 📜 更新日志
 
-最新版本：**v0.3.138 / extension v0.3.90 / desktop v0.3.138: macOS Ollama 动态库补齐（2026-06-23）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。普通用户从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 的 `openbiliclaw-v*` 聚合页下载插件包和可用桌面安装包；自动化频道 release 仍分别保留 `backend-v*`、`extension-v*`、`desktop-v*`。
+最新版本：**v0.3.139 / extension v0.3.91 / desktop v0.3.139: 更新检查限流兜底与知乎 smoke（2026-06-24）**。最近更新见上方摘要；完整历史见 [docs/changelog.md](docs/changelog.md)。普通用户从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 的 `openbiliclaw-v*` 聚合页下载插件包和可用桌面安装包；自动化频道 release 仍分别保留 `backend-v*`、`extension-v*`、`desktop-v*`。
 
 ## 🗺️ 后续规划
 

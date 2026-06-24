@@ -5758,6 +5758,20 @@ function bindSettings() {
     }
   }
 
+  const BACKEND_UPDATE_REASON_TEXT = {
+    github_rate_limited: "GitHub API 限流，请稍后再试",
+    github_unreachable: "无法访问 GitHub 检查更新",
+    no_backend_tag_yet: "远端暂无后端发布标签",
+    prerelease_ignored: "仅有预发布版本，已忽略",
+  };
+
+  function formatBackendUpdateError(backend) {
+    const key =
+      backend.last_error || (backend.reason && backend.reason !== "none" ? backend.reason : "");
+    if (!key) return "—";
+    return BACKEND_UPDATE_REASON_TEXT[key] || key;
+  }
+
   function renderBackendUpdateStatus(payload) {
     const backend = {
       ...(state.backendUpdateStatus || {}),
@@ -5768,16 +5782,28 @@ function bindSettings() {
     setText("backendUpdateLatest", backend.latest_version || backend.latest_tag || "—");
     setText("backendUpdateState", backend.state || "unknown");
     setText("backendUpdateLastCheck", backend.last_check_at || "—");
-    const backendErrorText =
-      backend.last_error || (backend.reason && backend.reason !== "none" ? backend.reason : "—");
-    setText("backendUpdateError", backendErrorText);
+    setText("backendUpdateError", formatBackendUpdateError(backend));
     setText("extensionVersionValue", getExtensionVersionLabel());
 
+    const installMode = String(backend.install_mode || "");
+    const unsupportedInstall = Boolean(installMode) && installMode !== "git";
+    const isFrozen = installMode === "frozen";
     const applyBtn = document.getElementById("backendUpdateApply");
     if (applyBtn instanceof HTMLButtonElement) {
-      const canApply = backend.state === "update_available" && Boolean(backend.latest_tag);
+      const canApply =
+        !unsupportedInstall && backend.state === "update_available" && Boolean(backend.latest_tag);
       applyBtn.hidden = !canApply;
+      applyBtn.disabled = !canApply;
       applyBtn.dataset.tag = backend.latest_tag || "";
+    }
+    const downloadLink = document.getElementById("backendUpdateDownload");
+    if (downloadLink instanceof HTMLAnchorElement) {
+      const showDownload = isFrozen && backend.state === "update_available";
+      downloadLink.hidden = !showDownload;
+      downloadLink.href =
+        showDownload && backend.latest_tag
+          ? `https://github.com/whiteguo233/OpenBiliClaw/releases/tag/${encodeURIComponent(String(backend.latest_tag))}`
+          : "https://github.com/whiteguo233/OpenBiliClaw/releases";
     }
   }
 

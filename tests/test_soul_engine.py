@@ -478,6 +478,109 @@ async def test_process_feedback_batch_updates_preference_after_threshold(
 
 
 @pytest.mark.asyncio
+async def test_feedback_signal_strength_reaches_profile_update_prompt_and_profile_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    memory = MemoryManager(tmp_path)
+    memory.initialize()
+    registry = FakeRegistry(
+        json.dumps(
+            {
+                "interests": [
+                    {
+                        "name": "城市建筑深度内容",
+                        "category": "文化",
+                        "weight": 0.86,
+                        "source": "feedback",
+                    }
+                ],
+                "style": {"depth_preference": 0.9},
+                "context": {},
+                "exploration_openness": 0.58,
+                "disliked_topics": ["浅层推荐"],
+                "favorite_up_users": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    engine = SoulEngine(llm=registry, memory=memory)
+
+    await memory.propagate_event(
+        {
+            "event_type": "feedback",
+            "title": "讲透城市与建筑",
+            "metadata": {
+                "feedback_type": "comment",
+                "feedback_note": "方向对，但我想看更深一点。",
+            },
+        }
+    )
+    await memory.propagate_event(
+        {
+            "event_type": "feedback",
+            "title": "泛泛而谈的城市内容",
+            "metadata": {"feedback_type": "dismiss"},
+        }
+    )
+    await memory.propagate_event(
+        {
+            "event_type": "feedback",
+            "title": "结构讲得很清楚的建筑分析",
+            "metadata": {"feedback_type": "like"},
+        }
+    )
+
+    async def fake_build(
+        *,
+        history: list[dict[str, object]],
+        preference: dict[str, object],
+        awareness_notes: list[dict[str, object]],
+        active_insights: list[dict[str, object]],
+    ) -> object:
+        from openbiliclaw.soul.profile import SoulProfile
+
+        assert history == []
+        assert preference["interests"][0]["name"] == "城市建筑深度内容"
+        assert preference["disliked_topics"] == ["浅层推荐"]
+        return SoulProfile(
+            personality_portrait="你最近更明显在找能把空间、城市和人的选择讲透的内容。" * 8,
+            core_traits=["理性", "耐心"],
+            cognitive_style=["更看重结构解释", "不满足于泛泛推荐"],
+            motivational_drivers=["看见复杂内容背后的脉络"],
+            current_phase="正在把推荐反馈收束成更明确的深度内容偏好。",
+            values=["真实", "深度"],
+            life_stage="持续校准内容口味",
+            deep_needs=["被更准确地理解"],
+        )
+
+    monkeypatch.setattr(engine._profile_builder, "build", fake_build)
+
+    result = await engine.process_feedback_batch_if_needed()
+
+    assert result["triggered"] is True
+    assert result["feedback_count"] == 3
+    assert result["preference_updated"] is True
+    assert result["profile_rebuilt"] is True
+
+    prompt_text = "\n".join(message["content"] for call in registry.calls for message in call)
+    assert '"feedback_type": "comment"' in prompt_text
+    assert '"signal_strength": 0.8' in prompt_text
+    assert '"feedback_type": "dismiss"' in prompt_text
+    assert '"signal_strength": 0.5' in prompt_text
+    assert '"feedback_type": "like"' in prompt_text
+    assert '"signal_strength": 1.0' in prompt_text
+
+    preference = memory.get_layer("preference").data
+    assert preference["interests"][0]["name"] == "城市建筑深度内容"
+    assert preference["interests"][0]["weight"] == 0.86
+    assert preference["disliked_topics"] == ["浅层推荐"]
+    soul = memory.get_layer("soul").data
+    assert soul["core"]["core_traits"] == ["理性", "耐心"]
+    assert "更明确的深度内容偏好" in soul["role"]["current_phase"]
+
+
+@pytest.mark.asyncio
 async def test_process_feedback_batch_new_dislikes_trigger_pool_purge(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
