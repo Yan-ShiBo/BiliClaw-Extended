@@ -624,7 +624,7 @@ OpenBiliClaw/
 │   ├── sources/               # Source adapters and XHS/Douyin/YouTube task bridges
 │   ├── youtube/               # Google Takeout import parser
 │   ├── api/                   # Local FastAPI (config rollback / degraded mode / popup API)
-│   ├── runtime/               # Refresh, presence gate, autostart/Ollama, degraded RuntimeContext
+│   ├── runtime/               # Refresh, feedback coalescing, presence gate, autostart/Ollama, degraded RuntimeContext
 │   ├── bilibili/              # Bilibili API layer (WBI signing · rate control)
 │   ├── llm/                   # Multi-model LLM adapters + structured JSON tolerance
 │   └── storage/               # Data storage layer

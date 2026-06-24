@@ -127,13 +127,90 @@ class TestBackendAPI:
 
         events = memory.query_events(event_types=["feedback"], limit=10)
         metadata_by_type = {
-            json.loads(str(event["metadata"]))["feedback_type"]: json.loads(
-                str(event["metadata"])
-            )
+            json.loads(str(event["metadata"]))["feedback_type"]: json.loads(str(event["metadata"]))
             for event in events
         }
         assert metadata_by_type["comment"]["signal_strength"] == 0.8
         assert metadata_by_type["dismiss"]["signal_strength"] == 0.5
+
+    def test_feedback_api_schedules_post_feedback_batch_without_inline_processing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from openbiliclaw.api import app as api_app
+        from openbiliclaw.memory.manager import MemoryManager
+
+        schedules = 0
+
+        class FakeFeedbackBatchScheduler:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def schedule(self) -> None:
+                nonlocal schedules
+                schedules += 1
+
+            async def close(self) -> None:
+                pass
+
+        class FakeDatabase:
+            def get_recommendation_by_id(self, recommendation_id: int) -> dict[str, object]:
+                return {
+                    "id": recommendation_id,
+                    "bvid": "BV1REC",
+                    "title": "讲透城市与建筑",
+                    "topic_label": "建筑",
+                    "up_name": "建筑师",
+                }
+
+            def update_recommendation_feedback(
+                self,
+                recommendation_id: int,
+                *,
+                feedback_type: str,
+                feedback_note: str = "",
+            ) -> None:
+                pass
+
+        class FakeSoulEngine:
+            def __init__(self) -> None:
+                self.batch_calls = 0
+
+            def record_immediate_feedback_cognition(
+                self,
+                *,
+                feedback_type: str,
+                title: str,
+                note: str,
+            ) -> None:
+                pass
+
+            async def process_feedback_batch_if_needed(self) -> dict[str, object]:
+                self.batch_calls += 1
+                return {"triggered": False}
+
+        monkeypatch.setattr(api_app, "FeedbackBatchScheduler", FakeFeedbackBatchScheduler)
+        memory = MemoryManager(tmp_path)
+        memory.initialize()
+        soul = FakeSoulEngine()
+        app = create_app(
+            memory_manager=memory,
+            database=FakeDatabase(),
+            soul_engine=soul,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/feedback",
+            json={"recommendation_id": 7, "feedback_type": "like", "note": ""},
+        )
+
+        assert response.status_code == 200
+        assert schedules == 1
+        assert soul.batch_calls == 0
 
     def test_desktop_web_index_cache_busts_static_assets(self) -> None:
         from fastapi.testclient import TestClient
@@ -3723,8 +3800,26 @@ class TestBackendAPI:
 
         assert response.status_code == 404
 
-    def test_feedback_endpoint_triggers_profile_refresh_check(self) -> None:
+    def test_feedback_endpoint_schedules_profile_refresh_check(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from fastapi.testclient import TestClient
+
+        from openbiliclaw.api import app as api_app
+
+        schedules = 0
+
+        class FakeFeedbackBatchScheduler:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                pass
+
+            def schedule(self) -> None:
+                nonlocal schedules
+                schedules += 1
+
+            async def close(self) -> None:
+                pass
 
         class FakeMemoryManager:
             async def propagate_event(self, event: dict[str, object]) -> None:
@@ -3761,6 +3856,7 @@ class TestBackendAPI:
                 self.called = True
                 return {"triggered": False}
 
+        monkeypatch.setattr(api_app, "FeedbackBatchScheduler", FakeFeedbackBatchScheduler)
         fake_soul_engine = FakeSoulEngine()
         app = create_app(
             memory_manager=FakeMemoryManager(),
@@ -3779,7 +3875,8 @@ class TestBackendAPI:
         )
 
         assert response.status_code == 200
-        assert fake_soul_engine.called is True
+        assert schedules == 1
+        assert fake_soul_engine.called is False
         assert fake_soul_engine.immediate_calls == [("like", "讲透城市与建筑", "")]
 
     def test_feedback_endpoint_does_not_block_on_post_feedback_refresh(self) -> None:
@@ -9137,9 +9234,7 @@ class TestGuidedInitEndpoints:
         assert body["can_start"] is False
         assert body["reason"] == "llm_not_ready"
 
-    def test_init_status_configured_embedding_hard_gates_can_start(
-        self, tmp_path: Path
-    ) -> None:
+    def test_init_status_configured_embedding_hard_gates_can_start(self, tmp_path: Path) -> None:
         from fastapi.testclient import TestClient
 
         prereqs = _FakeInitPrereqs(bili="ok", chat=True, platforms=["xiaohongshu"])

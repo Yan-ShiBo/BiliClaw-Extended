@@ -49,7 +49,7 @@
 | SoulEngine.generate_awareness_note() | ✅ | 生成并持久化 `awareness.json` |
 | SoulEngine.generate_insight() | ✅ | 生成并持久化 `insight.json` |
 | SoulEngine.update_from_feedback() | ✅ | feedback 事件落库，并校准匹配的洞察假设——确认→`validated=True`+置信度抬到 ≥0.75；推翻→`validated=False`+压到 ≤0.35（软作废：不删除、靠 delight 置信度加权降权）。**已接线**到 `POST /api/insights/feedback`（插件 + web/桌面三端洞察卡片「准/不准」按钮驱动），返回 `{matched, validated, confidence}`；此前实现但无生产调用方。命中后经 `_sync_insight_to_soul_snapshot` **同步把校准写回 soul 层 `active_insights` 快照**（`get_profile` / profile-summary / delight 读的是该快照，不是 insight 层），否则校准要等下一次 12h 认知 sync 才对 UI / 推荐生效 |
-| SoulEngine.process_feedback_batch_if_needed() | ✅ | 达到反馈阈值后重分析偏好，并在变化明显时重建画像；若本批新增 `disliked_topics`，会按新旧差集调度 `purge_pool_for_new_dislikes` 后台清理 fresh 候选池，保持普通推荐卡片 `dislike` 学到长期避雷项后的清池行为与手动编辑 / 避雷探针一致 |
+| SoulEngine.process_feedback_batch_if_needed() | ✅ | 达到反馈阈值后重分析偏好，并在变化明显时重建画像；批处理入口带 single-flight 锁，已有任务在跑时直接返回 `feedback_batch_in_progress`，避免多个 `/api/feedback` 后台任务用同一旧游标重复分析未处理反馈；传给 LLM 前会瘦身 feedback 事件，只保留标题、上下文和偏好相关 metadata；若本批新增 `disliked_topics`，会按新旧差集调度 `purge_pool_for_new_dislikes` 后台清理 fresh 候选池，保持普通推荐卡片 `dislike` 学到长期避雷项后的清池行为与手动编辑 / 避雷探针一致 |
 | SoulEngine.record_immediate_feedback_cognition() | ✅ | 单条 `dislike/comment` 可即时写入结构化 cognition card，供插件画像页展示；评论类更新会带上对应内容标题，并以中性直接反馈记录，不预设正负向 |
 | DialogueInsightAnalyzer | ✅ | 从聊天轮次提取 `goal/value/interest/dislike/state` 候选信号 |
 | SoulEngine.learn_from_dialogue() | ✅ | 聊天落 `dialogue` 事件、累计 insight candidate；单条 `interest/value/goal/dislike` 聊天信号到中高置信度时会先写入轻量 cognition update，高置信度或重复出现达阈值后再驱动偏好/画像更新 |
@@ -476,15 +476,19 @@ active 池会做两层多样性保护：词面 / specifics 的 novelty guard 阻
 
 真正会动到偏好层和画像的是 `process_feedback_batch_if_needed()`：
 
-1. 读取 `feedback_state.json` 中的 `last_processed_feedback_event_id`
-2. 从事件层找出这个游标之后的新 `feedback` 事件
-3. 如果新增反馈少于 `3` 条，直接返回，不做重分析
-4. 达到阈值后，调用 `PreferenceAnalyzer.analyze_events()` 用这批反馈重跑偏好提取
-5. 偏好写回 `preference.json`
-6. 再比较“这次偏好变化是否足够明显”
-7. 如果明显，才调用 `ProfileBuilder.build()` 重建画像并写回 `soul.json`
-8. 同时生成聚合层的 cognition updates
-9. 最后更新 `feedback_state.json` 的游标和处理时间
+生产 API 入口不会每条反馈都立即新起画像重分析任务；`/api/feedback` 会先交给 runtime 的 `FeedbackBatchScheduler` 做短窗口 debounce / coalesce，再进入这里的批量学习。
+
+1. 如果已有反馈批处理在跑，立即返回 `skipped=true, reason="feedback_batch_in_progress"`
+2. 读取 `feedback_state.json` 中的 `last_processed_feedback_event_id`
+3. 从事件层按 `id ASC` 找出这个游标之后的全部新 `feedback` 事件；不再用 newest-first `limit=500` 截断，避免大积压时跳过较早但未处理的 feedback
+4. 如果新增反馈少于 `3` 条，直接返回，不做重分析
+5. 达到阈值后，先把反馈事件瘦身为偏好分析需要的字段：`id/event_type/url/title/context/inferred_satisfaction/satisfaction_reason/created_at`，以及 `recommendation_id/bvid/content_id/source_platform/feedback_type/feedback_note/reaction/topic_label/signal_strength` 等白名单 metadata；插件原始字段如 `targetText`、`raw_context`、`href` 不进入 LLM prompt
+6. 调用 `PreferenceAnalyzer.analyze_events()` 用这批瘦身后的反馈重跑偏好提取
+7. 偏好写回 `preference.json`
+8. 再比较“这次偏好变化是否足够明显”
+9. 如果明显，才调用 `ProfileBuilder.build()` 重建画像并写回 `soul.json`
+10. 同时生成聚合层的 cognition updates
+11. 最后更新 `feedback_state.json` 的游标和处理时间
 
 #### 什么叫“变化明显”
 

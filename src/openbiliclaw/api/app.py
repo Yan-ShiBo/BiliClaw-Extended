@@ -123,6 +123,7 @@ from openbiliclaw.api.models import (
     XStatusResponse,
     YoutubeSourceConfigOut,
 )
+from openbiliclaw.runtime.feedback_scheduler import FeedbackBatchScheduler
 from openbiliclaw.runtime.image_cache import (
     CoverFetchError,
     cleanup_image_cache,
@@ -172,6 +173,7 @@ _EMBEDDING_FAIL_TTL_SECONDS = 8.0
 _EMBEDDING_PROBE_TIMEOUT_SECONDS = 15.0
 _LAN_IP_TTL_SECONDS = 30.0
 _AUTO_REPLENISH_DEBOUNCE_SECONDS = 30.0
+_FEEDBACK_BATCH_DEBOUNCE_SECONDS = 5.0
 
 # Canonical home is openbiliclaw.sources.x_auth (mirrors douyin_auth);
 # re-exported here because callers historically imported from api.app.
@@ -1038,6 +1040,11 @@ def create_app(
     app.state.degraded = bool(getattr(ctx, "degraded", False))
     app.state.degraded_reason = str(getattr(ctx, "degraded_reason", ""))
     app.state.degraded_issues = list(getattr(ctx, "degraded_issues", []))
+    feedback_batch_scheduler = FeedbackBatchScheduler(
+        getattr(ctx, "soul_engine", None),
+        debounce_seconds=_FEEDBACK_BATCH_DEBOUNCE_SECONDS,
+    )
+    app.state.feedback_batch_scheduler = feedback_batch_scheduler
 
     # ── Password gate (LAN/remote auth) ─────────────────────────────
     app.state.auth_gate = AuthGate(_auth_cfg, getattr(ctx, "database", None))
@@ -1344,9 +1351,9 @@ def create_app(
     # downstream handling. CORS stays inner; 401/403 echo a permissive header.
     app.middleware("http")(make_auth_middleware(_get_auth_gate))
 
-    async def _run_post_feedback_tasks() -> None:
+    def _schedule_post_feedback_tasks() -> None:
         with suppress(Exception):
-            await ctx.soul_engine.process_feedback_batch_if_needed()
+            feedback_batch_scheduler.schedule()
 
     async def _ingest_profile_update_events(events: list[dict[str, Any]]) -> None:
         """Feed source task events into the profile-update pipeline when ready.
@@ -2588,6 +2595,10 @@ def create_app(
 
     @app.on_event("shutdown")
     async def shutdown_refresh_loop() -> None:
+        feedback_scheduler = getattr(app.state, "feedback_batch_scheduler", None)
+        if feedback_scheduler is not None:
+            with suppress(Exception):
+                await feedback_scheduler.close()
         refresh_task = getattr(app.state, "refresh_task", None)
         if refresh_task is not None:
             refresh_task.cancel()
@@ -5165,7 +5176,7 @@ def create_app(
                     title=str(recommendation.get("title", "")),
                     note=note,
                 )
-        asyncio.create_task(_run_post_feedback_tasks())
+        _schedule_post_feedback_tasks()
         return FeedbackResponse(
             ok=True,
             recommendation_id=payload.recommendation_id,
