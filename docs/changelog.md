@@ -4,6 +4,16 @@
 
 ---
 
+## Unreleased: Evo 候选供给循环（2026-06-25）
+
+- **抖音 init 提问默认改为跳过**：交互式 `openbiliclaw init` 的“加入抖音数据?”现在与小红书一致默认 No，避免回车误触发需要登录浏览器前台 tab 的抖音 bootstrap；显式启用仍使用 `--yes-douyin` 或回答 yes。
+- **Evo 前供给改为按水位补肉**：`DiscoveryCandidatePipeline.ensure_pending_supply()` 会按 `pending_eval + evaluating` 水位循环生产 raw candidates，直到接近本轮 evaluator batch、池子已满、没有新候选或达到尝试 / 时间预算；refresh path 优先调用该 supply loop，不再只跑一次 discover 后插入几个算几个。
+- **Evo 首批评估强制使用批量下限**：API runtime 配置的 `min_eval_batch_size=8` 现在会同时约束 refresh 的 supply target、策略预算和 drain claim size；即使池子只差 1-7 条，首次 evaluator 也会先攒到 8 条或等待超时，不再因缺口算法把 first drain 压成 6 条。
+- **入待评估池前过滤历史重复**：候选入库前会先过滤同批重复、历史 `discovery_candidates` 任意状态和已进入 `content_cache` 的 BVID/content_id，减少重复 discovery 占住 raw 前排后被 `INSERT OR IGNORE` 静默吞掉导致 Evo 只拿到 1-3 条。
+- **热重载取消不再卡住 evaluating**：真实端到端测试发现插件 cookie 同步触发 hot-reload 时，正在跑的 Evo batch 可能在模型返回后被取消，导致候选停在 `evaluating`；pipeline 现在捕获 `CancelledError` 并即时释放 claim 回 `pending_eval`，后续 drain 可继续处理。
+- **搜索关键词 claim 接入供给水位**：B 站 search 关键词只有在待评估水位不足时才 claim；如果 `pending_eval + evaluating` 已经足够，本轮不会空 claim 后又因 supply loop 不抓内容而误标 failed。
+- **相关推荐 seed 优先正反馈**：`RelatedChainStrategy` 的事件种子现在优先使用 `favorite` / `like` / `coin` / `share` / positive feedback，普通 `view` 降为 fallback，减少 related_chain 从弱浏览信号继续挖窄内容圈。
+
 ## v0.3.143 / extension v0.3.94 / desktop v0.3.143: 候选评估蓄水与补池诊断（2026-06-25）
 
 后端源码走 `backend-v0.3.143`，浏览器插件沿用 `extension-v0.3.94`，桌面安装包走 `desktop-v0.3.143`。
