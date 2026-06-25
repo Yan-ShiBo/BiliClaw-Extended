@@ -2406,6 +2406,32 @@ def test_source_requested_count_is_bounded_by_global_available_deficit() -> None
     assert controller._source_requested_count("bilibili") == 2
 
 
+async def test_refresh_replenishes_when_raw_ceiling_is_full_but_available_pool_is_low() -> None:
+    discovery = _FakeDiscoveryEngine()
+    controller = ContinuousRefreshController(
+        memory_manager=_FakeMemoryManager(),
+        database=_FakeDatabase(
+            [],
+            pool_count=104,
+            source_available_counts={"bilibili": 104},
+            source_raw_counts={"bilibili": 600},
+            pool_raw_count=600,
+        ),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=discovery,
+        recommendation_engine=_FakeRecommendationEngine(),
+        pool_target_count=300,
+        pool_source_shares={"bilibili": 1},
+        discovery_limit=30,
+    )
+
+    result = await controller.refresh_if_needed()
+
+    assert result["refreshed"] is True
+    assert discovery.calls, "raw-ceiling pressure must not strand a low available pool"
+    assert discovery.calls[0][1] == ["search", "related_chain", "trending", "explore"]
+
+
 async def test_non_bili_producer_not_called_when_global_pool_is_full() -> None:
     xhs = _FakeXhsProducer()
     controller = ContinuousRefreshController(
@@ -2539,7 +2565,7 @@ def test_source_replenishment_plan_clamps_requested_count_by_raw_headroom() -> N
     ]
 
 
-def test_source_replenishment_plan_stops_when_raw_headroom_is_zero() -> None:
+def test_source_replenishment_plan_escapes_raw_headroom_deadlock() -> None:
     controller = ContinuousRefreshController(
         memory_manager=_FakeMemoryManager(),
         database=_FakeDatabase(
@@ -2554,8 +2580,10 @@ def test_source_replenishment_plan_stops_when_raw_headroom_is_zero() -> None:
         pool_target_count=300,
     )
 
-    assert controller._build_source_replenishment_plan() == []
-    assert controller._source_deficit("bilibili") == 0
+    assert controller._build_source_replenishment_plan() == [
+        (["search", "related_chain", "trending", "explore"], 30)
+    ]
+    assert controller._source_deficit("bilibili") == 30
 
 
 def test_real_database_enforce_then_replenish_reaches_available_target(

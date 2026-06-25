@@ -2451,16 +2451,16 @@ class ContinuousRefreshController:
 
     # ── keyword planner deficit / catalyst口径 (P1.6) ─────────────────────
     # The unified keyword planner reuses these so its "real deficit" shares the
-    # exact in-flight + raw-headroom accounting that drives pool replenishment,
-    # instead of naively counting visible pool rows.
+    # exact available-pool deficit口径 that drives pool replenishment, instead of
+    # naively counting visible pool rows. Raw headroom still caps normal request
+    # size, but cannot turn an under-target available pool into "no deficit".
 
     def keyword_planner_real_deficit(self, platform: str) -> int:
-        """Real search deficit for one platform (in-flight + raw headroom).
+        """Real search deficit for one platform.
 
         Wraps ``_source_requested_count`` — the same口径 used by
-        ``_build_source_replenishment_plan`` (available_deficit ∧ raw_headroom
-        ∧ global_available_deficit). ``> 0`` means the platform genuinely needs
-        more search supply.
+        ``_build_source_replenishment_plan``. ``> 0`` means the platform
+        genuinely needs more search supply.
         """
         try:
             return int(self._source_requested_count(str(platform).strip()))
@@ -2526,7 +2526,18 @@ class ContinuousRefreshController:
         raw_target = int(raw_target_counts.get(source_family, 0))
         current_raw = self._platform_source_count(source_raw_counts, source_family)
         raw_headroom = max(0, raw_target - current_raw)
-        return max(0, min(available_deficit, raw_headroom, global_available_deficit))
+        requested_by_available = max(0, min(available_deficit, global_available_deficit))
+        if requested_by_available <= 0:
+            return 0
+        if raw_headroom > 0:
+            return min(requested_by_available, raw_headroom)
+        # Raw ceiling is a trimming guard, not a hard stop for replenishment.
+        # A pool can have enough raw material but still be far below the
+        # frontend-servable target because existing rows are blocked by topic
+        # windows, linkability, copied text/category readiness, or recommendation
+        # history. In that state, returning 0 strands pending keywords and leaves
+        # the scheduler alive but unable to search.
+        return requested_by_available
 
     def _count_pool_available_candidates_by_source(self) -> dict[str, int]:
         count_fn = getattr(self.database, "count_pool_available_candidates_by_source", None)
