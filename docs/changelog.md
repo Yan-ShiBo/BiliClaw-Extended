@@ -4,9 +4,9 @@
 
 ---
 
-## v0.3.145 / extension v0.3.96 / desktop v0.3.145: Eval 缓存与推荐理由并发优化（2026-06-26）
+## v0.3.145 / extension v0.3.96 / desktop v0.3.145.1: Eval 缓存与推荐理由并发优化（2026-06-26）
 
-后端源码走 `backend-v0.3.145`，浏览器插件走 `extension-v0.3.96`，桌面安装包走 `desktop-v0.3.145`。
+后端源码走 `backend-v0.3.145`，浏览器插件走 `extension-v0.3.96`，桌面安装包走 `desktop-v0.3.145.1`。
 
 - **抖音 / YouTube init 提问默认改为跳过**：交互式 `openbiliclaw init` 的“加入抖音数据?”和“加入 YouTube 数据?”现在与小红书一致默认 No，避免回车误触发需要登录浏览器前台 tab 的 bootstrap；显式启用仍使用 `--yes-douyin` / `--yes-youtube` 或回答 yes。
 - **Evo 前供给改为按水位补肉**：`DiscoveryCandidatePipeline.ensure_pending_supply()` 会按 `pending_eval + evaluating` 水位循环生产 raw candidates，直到接近本轮 evaluator batch、池子已满、没有新候选或达到尝试 / 时间预算；refresh path 优先调用该 supply loop，不再只跑一次 discover 后插入几个算几个。
@@ -17,6 +17,7 @@
 - **推荐理由生成缓存前缀保护**：推荐池批量文案、单条实时文案和备用 delight reason 调用 LLMService 时同样在支持路径上关闭额外 core memory 注入；推荐 prompt 仍保留完整结构化 profile，只去掉重复拼接，减少 token 并让 `recommendation.write_expression` / `recommendation.expression` 的 provider prompt-cache 前缀更稳定。
 - **eval / 推荐理由生成默认双 worker**：统一候选 evaluator 单次 drain 默认最多领取两个 batch 的候选，并由 `evaluate_content_batch()` 以 2 个 worker 跑 LLM batch；推荐池文案 `_drain_expression_copy()` 也改为默认 2 个 worker。外层 drain / expression lock 仍串行化多入口，claim size 仍受 evaluator hard cap 约束，取消时不吞 `CancelledError`。
 - **长上下文 eval 默认大 batch，推荐理由保守 30**：文本 `discovery.evaluate_batch` 默认 batch size 从 30 提到 45；周期 candidate-eval loop 未显式传参时也按 45 drain。多模态 eval 继续使用独立小 batch。真实 provider 并发测试显示 `recommendation.write_expression` 45 条偶发 JSON 解析失败，因此推荐文案默认 batch 保持 30；批量解析失败时仍会先在同一 worker 内递归拆半重试，provider 限流仍直接留空等待下一轮，避免并发或重试倍增。
+- **macOS DMG 加入首次打开指引**：未签名 / 未公证的实验桌面包现在会在 DMG 内放入 `首次打开说明 First Launch.html` 和可见安装提示图，Release notes 与 README 同步说明右键 / Control-click 打开和 Privacy & Security fallback，降低用户找不到“仍要打开”的概率。
 - **搜索关键词 claim 接入供给水位**：B 站 search 关键词只有在待评估水位不足时才 claim；如果 `pending_eval + evaluating` 已经足够，本轮不会空 claim 后又因 supply loop 不抓内容而误标 failed。
 - **相关推荐 seed 优先正反馈**：`RelatedChainStrategy` 的事件种子现在优先使用 `favorite` / `like` / `coin` / `share` / positive feedback，普通 `view` 降为 fallback，减少 related_chain 从弱浏览信号继续挖窄内容圈。
 

@@ -24,6 +24,9 @@ DIST_DIR = PROJECT_ROOT / "dist"
 RELEASE_DIR = DIST_DIR / "release"
 PYPROJECT_FILE = PROJECT_ROOT / "pyproject.toml"
 SPEC_FILE = PROJECT_ROOT / "packaging" / "openbiliclaw.spec"
+MACOS_FIRST_LAUNCH_GUIDE_NAME = "首次打开说明 First Launch.html"
+MACOS_FIRST_LAUNCH_IMAGE_NAME = "首次打开提示 First Launch.png"
+MACOS_DMG_BACKGROUND_NAME = "openbiliclaw-dmg-guide.png"
 
 
 def ensure_pyinstaller() -> None:
@@ -299,6 +302,164 @@ def apply_macos_bundle_fixes(dist_dir: Path) -> None:
         print(f"[build] Added .app compatibility symlink: {alias_name} -> {name}")
 
 
+def write_macos_first_launch_guide(stage_dir: Path) -> Path:
+    """Write a visible first-launch guide into the macOS DMG root."""
+    guide_path = stage_dir / MACOS_FIRST_LAUNCH_GUIDE_NAME
+    guide_path.write_text(
+        """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>OpenBiliClaw macOS First Launch</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 36px;
+      line-height: 1.55;
+      color: #1d1d1f;
+    }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    code { background: #f2f2f2; border-radius: 4px; padding: 2px 4px; }
+    .note { border-left: 4px solid #0066cc; padding-left: 14px; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>首次打开 OpenBiliClaw</h1>
+  <p class="note">
+    当前 macOS 包是未签名 / 未公证的实验包。
+    请只在确认来源是 OpenBiliClaw GitHub Releases 后继续。
+  </p>
+  <ol>
+    <li>把 <strong>OpenBiliClaw</strong> 拖到 <strong>Applications</strong>。</li>
+    <li>
+      第一次启动时，不要直接双击。请右键 / Control-click 应用图标，
+      选择 <strong>Open</strong>，再在弹窗中点 <strong>Open</strong>。
+    </li>
+    <li>
+      如果仍被拦截，打开 <strong>System Settings -> Privacy & Security</strong>，
+      在页面底部点击 <strong>Open Anyway / 仍要打开</strong>。
+    </li>
+  </ol>
+
+  <h2>Advanced fallback</h2>
+  <p>如果 macOS 仍提示应用已损坏，并且你确认安装包来自本项目 Releases，可以在 Terminal 执行：</p>
+  <pre><code>APP="/Applications/OpenBiliClaw.app"
+xattr -dr com.apple.quarantine "$APP"
+codesign --force --deep --sign - "$APP"
+open "$APP"</code></pre>
+
+  <h2>English</h2>
+  <ol>
+    <li>Drag <strong>OpenBiliClaw</strong> into <strong>Applications</strong>.</li>
+    <li>
+      For the first launch, use <strong>right-click / Control-click -> Open</strong>,
+      then click <strong>Open</strong> in the dialog.
+    </li>
+    <li>
+      If macOS still blocks it, go to
+      <strong>System Settings -> Privacy & Security</strong>
+      and choose <strong>Open Anyway</strong>.
+    </li>
+  </ol>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    return guide_path
+
+
+def _load_dmg_font(size: int, *, bold: bool = False):
+    from PIL import ImageFont
+
+    candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        (
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+            if bold
+            else "/System/Library/Fonts/Supplemental/Arial.ttf"
+        ),
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        ),
+    ]
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def write_macos_dmg_background(stage_dir: Path) -> Path:
+    """Generate the DMG first-launch guidance background image."""
+    from PIL import Image, ImageDraw
+
+    background_dir = stage_dir / ".background"
+    background_dir.mkdir(parents=True, exist_ok=True)
+    background_path = background_dir / MACOS_DMG_BACKGROUND_NAME
+
+    image = Image.new("RGB", (980, 620), "#f7f8fa")
+    draw = ImageDraw.Draw(image)
+    title_font = _load_dmg_font(42, bold=True)
+    subtitle_font = _load_dmg_font(22, bold=True)
+    body_font = _load_dmg_font(21)
+    small_font = _load_dmg_font(17)
+
+    draw.rounded_rectangle(
+        (42, 42, 938, 578),
+        radius=20,
+        fill="#ffffff",
+        outline="#d6d9de",
+        width=2,
+    )
+    draw.text((78, 82), "OpenBiliClaw macOS 首次打开", fill="#111827", font=title_font)
+    draw.text(
+        (80, 144),
+        "Drag to Applications, then approve the first launch.",
+        fill="#4b5563",
+        font=subtitle_font,
+    )
+
+    steps = [
+        ("1", "拖到 Applications", "Drag OpenBiliClaw into Applications."),
+        ("2", "第一次请右键 / Control-click -> Open", "Do not double-click for the first launch."),
+        (
+            "3",
+            "仍被拦截: Privacy & Security -> Open Anyway",
+            "macOS keeps you in control of this approval.",
+        ),
+    ]
+    y = 218
+    for number, zh, en in steps:
+        draw.ellipse((82, y, 126, y + 44), fill="#0066cc")
+        draw.text((98, y + 7), number, fill="#ffffff", font=subtitle_font)
+        draw.text((148, y - 1), zh, fill="#111827", font=body_font)
+        draw.text((148, y + 30), en, fill="#4b5563", font=small_font)
+        y += 94
+
+    draw.text(
+        (80, 522),
+        "未签名实验包: 请只在确认来源是 OpenBiliClaw GitHub Releases 后继续。",
+        fill="#7c2d12",
+        font=small_font,
+    )
+    draw.text(
+        (80, 548),
+        "Unsigned experimental build: continue only when you trust the release source.",
+        fill="#7c2d12",
+        font=small_font,
+    )
+    image.save(background_path)
+    shutil.copyfile(background_path, stage_dir / MACOS_FIRST_LAUNCH_IMAGE_NAME)
+    return background_path
+
+
 def make_macos_dmg(*, app_bundle: Path, output_dir: Path, version: str) -> Path:
     """Build a drag-to-Applications ``.dmg`` from the ``.app`` bundle (macOS only).
 
@@ -319,6 +480,8 @@ def make_macos_dmg(*, app_bundle: Path, output_dir: Path, version: str) -> Path:
     try:
         subprocess.check_call(["ditto", str(app_bundle), str(stage / app_bundle.name)])
         (stage / "Applications").symlink_to("/Applications")
+        write_macos_first_launch_guide(stage)
+        write_macos_dmg_background(stage)
         hdiutil_cmd = [
             "hdiutil",
             "create",

@@ -70,7 +70,7 @@ desktop_note=""
 if [ -n "$desktop_tag" ]; then
   desktop_line="[${desktop_tag}](https://github.com/${repo}/releases/tag/${desktop_tag})"
   if [ "$desktop_tag" != "desktop-v${project_version}" ]; then
-    desktop_note=" The latest desktop installer can lag the backend source version."
+    desktop_note=" The latest desktop installer can differ from the backend source version when a desktop-only package hotfix is published."
   fi
 fi
 

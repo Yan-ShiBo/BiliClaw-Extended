@@ -44,7 +44,7 @@ Most users only need these four steps. Firefox, Docker, and manual setup paths a
 
 1. **Install the extension** — recommended: open the latest aggregate `openbiliclaw-v*` page on [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest), download `openbiliclaw-extension-v*.zip`, and load it (always newest; Firefox uses `openbiliclaw-extension-v*-firefox.zip`); or one-click from the [Chrome Web Store](https://chromewebstore.google.com/detail/cdfjfkdjjhdaccbldipkjhpibnfbiamg) (auto-updates, but the listed version can lag behind Releases due to review delays).
 2. **Deploy the backend (two ways — pick one, both recommended)**:
-   - 🖥️ **Download the desktop installer (easiest)**: the same [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) aggregate page keeps the current backend source, extension packages, and available desktop installers together; if the desktop package lags the backend, `Current Channels` names the matching `desktop-v*`. Grab the macOS `.dmg` / Windows `.exe`, install, and launch — it bundles local embedding and lives in the menu bar / system tray. It's an **unsigned experimental pre-release**, so the first launch needs a system-prompt bypass; see [Setup Details](#setup-details).
+   - 🖥️ **Download the desktop installer (easiest)**: the same [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) aggregate page keeps the current backend source, extension packages, and available desktop installers together; if the desktop package has a package-only hotfix or temporarily differs from the backend source, `Current Channels` names the matching `desktop-v*`. Grab the macOS `.dmg` / Windows `.exe`, install, and launch — it bundles local embedding and lives in the menu bar / system tray. It's an **unsigned experimental pre-release**, and the macOS DMG includes first-launch instructions; see [Setup Details](#setup-details).
    - 🤖 **Let an AI coding agent deploy it (pick this to customize / edit the source)**: paste this prompt into Claude Code, Codex CLI, Cursor, Windsurf, or another coding agent.
 
 ```text
@@ -190,7 +190,7 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.145 / extension v0.3.96 / desktop v0.3.145: Eval cache and recommendation-copy concurrency improvements (2026-06-26)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+Latest: **v0.3.145 / extension v0.3.96 / desktop v0.3.145.1: Eval cache and recommendation-copy concurrency improvements (2026-06-26)**. Full changelog: [docs/changelog.md](docs/changelog.md).
 
 - **Candidate eval cache is more stable** — scoring cache keys now use candidate identity, full profile digest, and recent negative-example digest instead of object identity or unrelated event waterlines.
 - **Eval uses larger default batches with two workers** — text `discovery.evaluate_batch` defaults to 45 items, and periodic drains can run two batches concurrently; multimodal eval keeps its smaller image batch.
@@ -272,15 +272,15 @@ Grab the installer for your OS from the `openbiliclaw-v*` aggregate [Latest Rele
 
 - Current backend source tag: `backend-v*`
 - Current extension release: `extension-v*`, with `openbiliclaw-extension-v*.zip` / `openbiliclaw-extension-v*-firefox.zip`
-- Current desktop installer release: `desktop-v*`, with available `.dmg` / `.exe` assets; the desktop package can temporarily lag the backend source version, so trust the page's `Current Channels`
+- Current desktop installer release: `desktop-v*`, with available `.dmg` / `.exe` assets; the desktop package can have package-only hotfixes or temporarily differ from the backend source version, so trust the page's `Current Channels`
 
-- **macOS**: download `OpenBiliClaw-macos-v*-arm64.dmg` (Apple silicon is published automatically; Intel `x64` is attached separately when available) — drag OpenBiliClaw into Applications.
+- **macOS**: download `OpenBiliClaw-macos-v*-arm64.dmg` (Apple silicon is published automatically; Intel `x64` is attached separately when available), open `首次打开说明 First Launch.html` in the DMG, then drag OpenBiliClaw into Applications.
 - **Windows**: download `OpenBiliClaw-windows-*-Setup.exe` — double-click to install.
 
 It bundles local Ollama + `bge-m3` embedding (works out of the box) and lives in the **macOS menu bar / Windows system tray**; right-click for "Open Web UI / View runtime logs / Quit". Data uses the same directory as the AI / script installers: `~/OpenBiliClaw` (macOS / Linux) / `%USERPROFILE%\OpenBiliClaw` (Windows), and survives upgrades and uninstalls. Data from older packaged builds under `~/Library/Application Support/OpenBiliClaw` / `%LOCALAPPDATA%\OpenBiliClaw` is copied back on first launch without overwriting existing files.
 
 > ⚠️ **First launch needs a system-prompt bypass (the app isn't signed / notarized yet)**:
-> - **macOS**: drag it into Applications first, then right-click the icon → "Open" → click "Open" again in the dialog; or allow it under "System Settings → Privacy & Security". If macOS still says the app is damaged, confirm the package came from this project's Releases and run:
+> - **macOS**: the DMG includes a first-launch guide. Drag it into Applications first, then right-click / Control-click the icon → "Open" → click "Open" again in the dialog; or allow it under "System Settings → Privacy & Security". If macOS still says the app is damaged, confirm the package came from this project's Releases and run:
 >
 >   ```bash
 >   APP="/Applications/OpenBiliClaw.app"
@@ -666,7 +666,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.145 / extension v0.3.96 / desktop v0.3.145: Eval cache and recommendation-copy concurrency improvements (2026-06-26)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+Latest: **v0.3.145 / extension v0.3.96 / desktop v0.3.145.1: Eval cache and recommendation-copy concurrency improvements (2026-06-26)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 
