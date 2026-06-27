@@ -4,6 +4,14 @@
 
 ---
 
+## v0.3.148: LLM 余额熔断与推荐避雷兜底（2026-06-27）
+
+- **DeepSeek / OpenAI-compatible 余额不足不再重试放大**：HTTP 402、`Insufficient Balance`、`payment required`、`billing`、余额不足等 provider 余额 / 账单失败现在归一为 `LLMRateLimitError`。Provider 自身不会再做 3 次 retry，registry 会进入 cooldown，批量推荐 / discovery 路径也会跳过逐条 fallback，避免余额不足时继续制造大量必失败请求和日志。
+- **Discovery 查询生成降本**：`TrendingStrategy` 的榜单分区 rids 按 `profile_kw_digest + 日期` 缓存约 6 小时；旧 B 站 `SearchStrategy` query 生成按画像 digest + pool hints 缓存；`ExploreStrategy` domain 生成改为短 JSON（只含 `domain/novelty_level/queries`，`max_tokens=2048`）并按画像 + covered topic groups 缓存；统一 `KeywordPlanner` 的 merged keyword 成功结果按画像 digest + 平台需求块 + 池子避让提示复用到 `[discovery].plan_ttl_hours`。真实环境验证发现 query/rid/domain 生成仍会被完整画像和 thinking 放大，因此这些生成 caller 现在统一使用稳定 compact profile summary，flat `interests` 保留前 64 个，关闭额外 core memory 注入，并对 `search/trending/explore` 关闭 DeepSeek thinking。后台 refresh 也改为约 90% 可换池低水位才跑 discovery，小缺口 B 站补货先只给 `search + related_chain` 预算，延后 `trending/explore`，避免几个库存缺口触发全套 planner/search/explore/trending。
+- **Discovery interest 丰富度保护**：query / rid / domain / keyword planner 的 compact profile summary 不再只是截取权重前 64 个兴趣；现在先取最多 128 个 interest 候选，再用 cache-only embedding 做 MMR 风格选择，在保留强兴趣的同时覆盖更多语义簇，并对贴近 `disliked_topics` 的 interest 降权。`disliked_topics` 自身也用同一缓存向量做多样性去重。没有 cached embedding 时保持原权重顺序，不新增热路径 embedding 调用。
+- **推荐出口增加 dislike 硬过滤兜底**：`RecommendationEngine.serve()` 从 discovery pool 读出候选后，会按当前 `profile.preferences.disliked_topics` 再过滤一次；主题字段精确命中，或标题 / 标签 / 简介 / 作者 / 短正文包含避雷 term 的候选不会进入排序，覆盖异步清池尚未完成或清池失败的窗口。
+- **画像增量回填增加并发 claim 保护**：`/api/events` 的 `last_profile_pipeline_event_id` backfill 现在有进程内 single-flight 保护；当前一批旧 pending 行正在喂给 `ProfileUpdatePipeline` 时，并发事件请求会跳过重复 backfill，只处理自身 accepted 事件，避免同一批 200 条画像信号被重复送进 `soul.preference.chunk`。
+
 ## v0.3.147 / extension v0.3.98 / desktop v0.3.147: PC Web 正向反馈与探针原地聊天（2026-06-26）
 
 后端源码走 `backend-v0.3.147`，浏览器插件走 `extension-v0.3.98`，桌面安装包走 `desktop-v0.3.147`。
