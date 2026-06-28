@@ -4015,6 +4015,74 @@ async def test_bili_search_flag_on_injects_and_marks_used(tmp_path: Path) -> Non
     assert _bili_kw_statuses(kw_db) == {"kw1": "used", "kw2": "used"}
 
 
+async def test_bili_search_flag_on_store_empty_drops_search_instead_of_legacy_query_gen(
+    tmp_path: Path,
+) -> None:
+    kw_db = Database(tmp_path / "bili_empty.db")
+    kw_db.initialize()
+    pipeline = _CapturingPipeline(cached=2)
+    controller = ContinuousRefreshController(
+        memory_manager=_FakeMemoryManager(),
+        database=_KeywordStoreFakeDatabase(
+            [{"id": 1, "event_type": "view"}], pool_count=0, kw_db=kw_db
+        ),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=_FakeDiscoveryEngine(),
+        recommendation_engine=_FakeRecommendationEngine(),
+        discovery_candidate_pipeline=pipeline,
+        pool_target_count=30,
+        pool_source_shares=_MULTI_SOURCE_SHARES,
+        keyword_fetch=KeywordFetchCoordinator(
+            database=kw_db, discovery_config=_BiliKwCfg(True, fetch_batch=5)
+        ),
+    )
+
+    await controller.force_refresh()
+
+    assert pipeline.produce_kwargs, "expected non-search strategies to keep replenishing"
+    assert all("search" not in list(kwargs["strategies"]) for kwargs in pipeline.produce_kwargs)
+    assert all("keywords" not in kwargs for kwargs in pipeline.produce_kwargs)
+    assert _bili_kw_statuses(kw_db) == {}
+
+
+async def test_bili_search_flag_on_store_empty_reassigns_tiny_search_budget(
+    tmp_path: Path,
+) -> None:
+    kw_db = Database(tmp_path / "bili_empty_tiny_gap.db")
+    kw_db.initialize()
+    pipeline = _CapturingPipeline(cached=1)
+    memory = _FakeMemoryManager()
+    controller = ContinuousRefreshController(
+        memory_manager=memory,
+        database=_KeywordStoreFakeDatabase([], pool_count=0, kw_db=kw_db),
+        soul_engine=_FakeSoulEngine(),
+        discovery_engine=_FakeDiscoveryEngine(),
+        recommendation_engine=_FakeRecommendationEngine(),
+        discovery_candidate_pipeline=pipeline,
+        pool_target_count=1,
+        discovery_limit=1,
+        pool_source_shares={"bilibili": 1},
+        keyword_fetch=KeywordFetchCoordinator(
+            database=kw_db, discovery_config=_BiliKwCfg(True, fetch_batch=5)
+        ),
+    )
+
+    await controller._run_refresh_plan(
+        state=memory.load_discovery_runtime_state(),
+        profile={"profile": "ok"},
+        plan=[(["search", "related_chain", "trending", "explore"], 1)],
+        reason="tiny_gap",
+    )
+
+    call = pipeline.produce_kwargs[0]
+    assert call["strategies"] == ["related_chain", "trending", "explore"]
+    assert call["strategy_limits"] == {
+        "related_chain": 1,
+        "trending": 0,
+        "explore": 0,
+    }
+
+
 async def test_bili_search_does_not_claim_when_eval_supply_is_full(tmp_path: Path) -> None:
     kw_db = Database(tmp_path / "bili_supply_full.db")
     kw_db.initialize()

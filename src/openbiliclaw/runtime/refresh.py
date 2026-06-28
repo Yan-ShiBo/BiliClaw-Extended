@@ -1912,16 +1912,6 @@ class ContinuousRefreshController:
             if current_pool_count >= self.pool_target_count:
                 break
 
-            await self._publish_event(
-                {
-                    "type": "refresh.strategy",
-                    "phase": "running",
-                    "strategy": "+".join(strategies),
-                    "message": self._strategy_message(strategies),
-                    **self._pool_count_payload(current_pool_counts),
-                }
-            )
-
             effective_limit = self._requested_refresh_limit(
                 requested_limit=requested_limit,
                 current_pool_count=current_pool_count,
@@ -1947,19 +1937,52 @@ class ContinuousRefreshController:
             # inline-admit: this plan iteration fetches + drains (admits) in the
             # same call. When the flag is on and this entry includes ``search``,
             # claim words from the store and inject them as ``keywords`` (the
-            # engine maps them onto the search strategy's ``queries`` param); on
-            # a successful admit mark them ``used``, on an empty/failed iteration
-            # mark them ``failed``. Non-search sub-strategies in the same entry
-            # are unaffected (they never receive the injected words).
+            # engine maps them onto the search strategy's ``queries`` param). If
+            # the planner store is empty, remove only ``search`` from this batch:
+            # passing queries=None would re-enable the legacy LLM generator.
             claimed_search: list[Any] = []
             coordinator = self.keyword_fetch
-            if (
+            should_claim_search = (
                 "search" in strategies
                 and coordinator is not None
                 and bool(getattr(coordinator, "should_claim", lambda: False)())
                 and int(current_pool_counts.get("pending_eval", 0) or 0) < effective_limit
-            ):
+            )
+            effective_strategies = list(strategies)
+            if should_claim_search:
                 claimed_search = coordinator.claim(_KW_PLATFORM_BILIBILI)
+                if not claimed_search:
+                    effective_strategies = [
+                        strategy for strategy in effective_strategies if strategy != "search"
+                    ]
+                    logger.info(
+                        "bili search skipped: unified keyword planner enabled but no "
+                        "pending keywords; running strategies=%s",
+                        ",".join(effective_strategies) or "none",
+                    )
+                    if not effective_strategies:
+                        continue
+            if strategy_limits:
+                filtered_strategy_limits = {
+                    strategy: limit
+                    for strategy, limit in strategy_limits.items()
+                    if strategy in effective_strategies
+                }
+                if should_claim_search and not claimed_search and effective_strategies:
+                    dropped_budget = max(0, int(strategy_limits.get("search", 0) or 0))
+                    if dropped_budget > 0:
+                        budget_target = (
+                            "related_chain"
+                            if "related_chain" in effective_strategies
+                            else effective_strategies[0]
+                        )
+                        filtered_strategy_limits[budget_target] = (
+                            max(0, int(filtered_strategy_limits.get(budget_target, 0) or 0))
+                            + dropped_budget
+                        )
+                effective_strategy_limits = filtered_strategy_limits or None
+            else:
+                effective_strategy_limits = None
             injected_keywords = (
                 [item.keyword for item in claimed_search] if claimed_search else None
             )
@@ -1968,6 +1991,16 @@ class ContinuousRefreshController:
             # admit-time yield backfill. Empty / None on the flag-off path.
             injected_keyword_ids = (
                 {item.keyword: int(item.id) for item in claimed_search} if claimed_search else None
+            )
+
+            await self._publish_event(
+                {
+                    "type": "refresh.strategy",
+                    "phase": "running",
+                    "strategy": "+".join(effective_strategies),
+                    "message": self._strategy_message(effective_strategies),
+                    **self._pool_count_payload(current_pool_counts),
+                }
             )
 
             pipeline = self.discovery_candidate_pipeline
@@ -1980,9 +2013,9 @@ class ContinuousRefreshController:
                 if pipeline is not None:
                     produce_kwargs: dict[str, Any] = {
                         "profile": profile,
-                        "strategies": strategies,
+                        "strategies": effective_strategies,
                         "limit": effective_limit,
-                        "strategy_limits": strategy_limits,
+                        "strategy_limits": effective_strategy_limits,
                         "pool_snapshot": pool_snapshot,
                     }
                     if injected_keywords is not None:
@@ -2016,11 +2049,11 @@ class ContinuousRefreshController:
                 else:
                     discover_fn = self.discovery_engine.discover
                     discover_kwargs: dict[str, Any] = {
-                        "strategies": strategies,
+                        "strategies": effective_strategies,
                         "limit": effective_limit,
                     }
-                    if strategy_limits and _call_accepts_strategy_limits(discover_fn):
-                        discover_kwargs["strategy_limits"] = strategy_limits
+                    if effective_strategy_limits and _call_accepts_strategy_limits(discover_fn):
+                        discover_kwargs["strategy_limits"] = effective_strategy_limits
                     if _call_accepts_pool_snapshot(discover_fn):
                         discover_kwargs["pool_snapshot"] = pool_snapshot
                     if injected_keywords is not None and _call_accepts_keywords(discover_fn):
@@ -2046,7 +2079,7 @@ class ContinuousRefreshController:
                     else:
                         coordinator.mark_failed(claimed_search)
             all_discovered.extend(discovered)
-            flattened_strategies.extend(strategies)
+            flattened_strategies.extend(effective_strategies)
 
             if admitted_count > 0:
                 replenished_topics.extend(self._extract_topics(topic_items))
