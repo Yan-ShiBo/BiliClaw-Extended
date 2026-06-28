@@ -581,6 +581,53 @@ async def test_evaluate_content_batch_skips_recently_viewed_non_bilibili_before_
 
 
 @pytest.mark.asyncio
+async def test_evaluate_content_batch_omits_duplicate_text_description() -> None:
+    llm_service = _DynamicBatchLLMService()
+    engine = ContentDiscoveryEngine(llm_service=llm_service)
+    summary = "知乎回答摘要，正文和描述来自同一段插件抓取文本。"
+
+    scores = await engine.evaluate_content_batch(
+        [
+            DiscoveredContent(
+                content_id="zhihu:answer:1",
+                source_platform="zhihu",
+                content_type="answer",
+                title="知乎问题",
+                description=summary,
+                body_text=summary,
+                source_strategy="zhihu-hot",
+            ),
+            DiscoveredContent(
+                content_id="twitter:tweet:1",
+                source_platform="twitter",
+                content_type="tweet",
+                title="Tweet first line",
+                description="短描述补充",
+                body_text="完整推文正文",
+                source_strategy="x-feed",
+            ),
+        ],
+        _build_profile(),
+        batch_size=2,
+    )
+
+    assert scores == [0.8, 0.8]
+    batch_json = (
+        llm_service.user_inputs[0]
+        .split("<content_batch>", 1)[1]
+        .split(
+            "</content_batch>",
+            1,
+        )[0]
+    )
+    items = json.loads(batch_json.strip())
+    assert items[0]["body_text"] == summary
+    assert items[0]["description"] == ""
+    assert items[1]["body_text"] == "完整推文正文"
+    assert items[1]["description"] == "短描述补充"
+
+
+@pytest.mark.asyncio
 async def test_multimodal_evaluation_uses_configured_smaller_batch_size() -> None:
     llm_service = _DynamicBatchLLMService()
     engine = ContentDiscoveryEngine(

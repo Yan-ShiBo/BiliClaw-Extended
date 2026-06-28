@@ -379,6 +379,71 @@ async def test_pipeline_evaluates_mixed_pending_and_caches_accepted(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_pipeline_e2e_dedupes_text_first_description_before_llm(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    db.initialize()
+    summary = "知乎回答摘要，正文和描述来自同一段插件抓取文本。"
+    db.enqueue_discovery_candidates(
+        [
+            DiscoveryCandidateWrite(
+                candidate_key="zhihu:answer:dedupe-e2e",
+                source_platform="zhihu",
+                source_strategy="zhihu-hot",
+                content_type="answer",
+                content_id="answer:dedupe-e2e",
+                content_url="https://www.zhihu.com/question/1/answer/2",
+                title="知乎问题",
+                author_name="知乎作者",
+                description=summary,
+                body_text=summary,
+            )
+        ]
+    )
+    llm = _ScoringLLM(
+        [
+            {
+                "content_id": "answer:dedupe-e2e",
+                "score": 0.82,
+                "reason": "text fit",
+                "topic_group": "knowledge",
+                "style_key": "deep_dive",
+            }
+        ]
+    )
+    discovery_engine = ContentDiscoveryEngine(llm_service=llm, database=db)
+    pipeline = DiscoveryCandidatePipeline(
+        database=db,
+        discovery_engine=discovery_engine,
+        pool_target_count=30,
+    )
+
+    result = await pipeline.drain_pending(profile=_build_profile(), batch_size=30)
+
+    assert result == {"evaluated": 1, "cached": 1, "rejected": 0}
+    assert (
+        db.conn.execute(
+            "SELECT COUNT(*) FROM content_cache WHERE content_id='answer:dedupe-e2e'"
+        ).fetchone()[0]
+        == 1
+    )
+    user_input = str(llm.calls[0]["user_input"])
+    batch_json = (
+        user_input.split("<content_batch>", 1)[1]
+        .split(
+            "</content_batch>",
+            1,
+        )[0]
+        .strip()
+    )
+    items = json.loads(batch_json)
+    assert items[0]["source_platform"] == "zhihu"
+    assert items[0]["body_text"] == summary
+    assert items[0]["description"] == ""
+
+
+@pytest.mark.asyncio
 async def test_pipeline_stops_admission_when_pool_reaches_target(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
     db.initialize()

@@ -368,6 +368,25 @@ def _prompt_visible_content_fields(content: DiscoveredContent) -> dict[str, obje
     return fields
 
 
+def _normalize_prompt_text_for_dedupe(value: str) -> str:
+    return re.sub(r"\s+", "", value).strip()
+
+
+def _prompt_description_for_content(
+    content: DiscoveredContent,
+    *,
+    limit: int | None = None,
+) -> str:
+    description = str(content.description or "")
+    if limit is not None:
+        description = description[:limit]
+    desc_key = _normalize_prompt_text_for_dedupe(description)
+    body_key = _normalize_prompt_text_for_dedupe(str(content.body_text or ""))
+    if desc_key and body_key.startswith(desc_key):
+        return ""
+    return description
+
+
 def _batch_results_by_content_key(
     payload: list[dict[str, Any]],
     batch: list[DiscoveredContent],
@@ -1192,7 +1211,7 @@ class ContentDiscoveryEngine:
                 "title": content.title,
                 "up_name": content.up_name,
                 "author_name": content.author_name or content.up_name,
-                "description": content.description,
+                "description": _prompt_description_for_content(content),
                 "duration": content.duration,
                 "source_strategy": content.source_strategy,
                 **_prompt_visible_content_fields(content),
@@ -1657,7 +1676,7 @@ class ContentDiscoveryEngine:
                     "title": c.title,
                     "up_name": c.up_name,
                     "author_name": c.author_name or c.up_name,
-                    "description": (c.description or "")[:400],
+                    "description": _prompt_description_for_content(c, limit=400),
                     "cover_url": c.cover_url,
                     "duration": c.duration,
                     **_prompt_visible_content_fields(c),
