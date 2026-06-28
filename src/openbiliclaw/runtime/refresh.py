@@ -1949,7 +1949,7 @@ class ContinuousRefreshController:
                 and int(current_pool_counts.get("pending_eval", 0) or 0) < effective_limit
             )
             effective_strategies = list(strategies)
-            if should_claim_search:
+            if should_claim_search and coordinator is not None:
                 claimed_search = coordinator.claim(_KW_PLATFORM_BILIBILI)
                 if not claimed_search:
                     effective_strategies = [
