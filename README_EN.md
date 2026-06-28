@@ -673,7 +673,7 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.147 / extension v0.3.98 / desktop v0.3.147: PC Web positive feedback and inline probe chat (2026-06-26)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+Latest: **v0.3.148 / extension v0.3.99 / desktop v0.3.148: LLM billing fuse and dislike recommendation guardrails (2026-06-28)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 
