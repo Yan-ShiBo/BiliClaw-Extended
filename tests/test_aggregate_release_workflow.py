@@ -55,9 +55,10 @@ def test_aggregate_release_helper_only_lists_signed_firefox_xpi_when_asset_exist
     )
     assert expected_xpi_name_assignment in script
     assert "asset_name_seen \"$firefox_xpi_asset_name\"" in script
-    assert "No signed Firefox extension XPI is available yet." in script
+    # Fallback wording must state the XPI is absent (v0.3.153 readable copy).
+    assert "no signed XPI in this release" in script
     assert (
-        "firefox_signed_asset_line=\"\\`openbiliclaw-extension-v${extension_version}-firefox.xpi\\`\""
+        "firefox_signed_asset_line=\"use \\`openbiliclaw-extension-v${extension_version}-firefox.xpi\\`\""
         not in script
     )
 
