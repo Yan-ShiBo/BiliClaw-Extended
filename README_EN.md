@@ -6,6 +6,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Release](https://img.shields.io/github/v/release/whiteguo233/OpenBiliClaw?filter=openbiliclaw-v*&style=flat-square&label=Release&color=success)](https://github.com/whiteguo233/OpenBiliClaw/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/whiteguo233/OpenBiliClaw/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/whiteguo233/OpenBiliClaw/actions/workflows/ci.yml)
 [![LINUX DO](https://img.shields.io/badge/LINUX_DO-Community-black?style=flat-square&logo=linux)](https://linux.do/)
 [![Discussion](https://img.shields.io/badge/LINUX_DO-Discussion-orange?style=flat-square&logo=discourse)](https://linux.do/t/topic/1978894)
 [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/cdfjfkdjjhdaccbldipkjhpibnfbiamg?style=flat-square&label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white&color=4285F4)](https://chromewebstore.google.com/detail/cdfjfkdjjhdaccbldipkjhpibnfbiamg)
@@ -16,13 +18,11 @@
 
 ## OpenBiliClaw in 10 Seconds
 
-A local-first AI discovery agent that learns your taste across Bilibili, Xiaohongshu, Douyin, YouTube, X, Zhihu, Reddit, and the open web — without handing your profile to another platform.
+A local-first AI discovery agent that learns your taste across Bilibili, Xiaohongshu (RedNote), Douyin (Chinese TikTok), YouTube, X, Zhihu, Reddit, and the open web — without handing your profile to another platform.
 
 | Cross-platform | Local-first | Trainable |
 |---|---|---|
 | Bilibili / Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit / Web | Data stays in your local SQLite by default | Likes, dislikes, and chat feedback shape future recommendations |
-
-Dev builds also include a local extension-driven E2E check: the backend can ask the installed extension to open or reuse real Douyin / Xiaohongshu / X pages, reset them to stable platform entry URLs, perform whitelisted DOM actions, and verify that events naturally reach the local `/api/events` pipeline.
 
 <p align="center">
   <a href="https://chromewebstore.google.com/detail/cdfjfkdjjhdaccbldipkjhpibnfbiamg"><b>Install the browser extension</b></a>
@@ -40,23 +40,21 @@ Dev builds also include a local extension-driven E2E check: the backend can ask 
 
 ## Quick Start
 
-Most users only need these four steps. Firefox, Docker, and manual setup paths are preserved later in [Setup Details](#setup-details).
+Four steps for most users. Firefox, Docker, scripted, and manual setup paths all live in [Setup Details](#setup-details).
 
-1. **Install the extension** — recommended: open the latest aggregate `openbiliclaw-v*` page on [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) and download the manual package (Chrome / Edge / Brave use `openbiliclaw-extension-v*.zip`; Firefox uses the signed `openbiliclaw-extension-v*-firefox.xpi` when present, otherwise use `openbiliclaw-extension-v*-firefox.zip` for temporary loading); or one-click from the [Chrome Web Store](https://chromewebstore.google.com/detail/cdfjfkdjjhdaccbldipkjhpibnfbiamg) (auto-updates, but the listed version can lag behind Releases due to review delays).
-2. **Deploy the backend (two ways — pick one, both recommended)**:
-   - 🖥️ **Download the desktop installer (easiest)**: the same [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) aggregate page only keeps same-version backend source, extension packages, and available desktop installers together; if a channel has not shipped yet, `Current Channels` shows it as unpublished instead of backfilling previous-version assets. Grab the macOS `.dmg` / Windows `.exe`, install using the platform-specific prompt, and launch — it bundles local embedding and lives in the menu bar / system tray. It's an **unsigned experimental pre-release**, and the macOS DMG includes first-launch instructions; see [Setup Details](#setup-details).
-   - 🤖 **Let an AI coding agent deploy it (pick this to customize / edit the source)**: paste this prompt into Claude Code, Codex CLI, Cursor, Windsurf, or another coding agent.
+1. **Install the extension** — one-click from the [Chrome Web Store](https://chromewebstore.google.com/detail/cdfjfkdjjhdaccbldipkjhpibnfbiamg) (auto-updates), or download the zip from [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for the newest build (the store listing can lag a few days behind).
+2. **Install the backend** — grab the desktop installer from the same [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) (macOS `.dmg` / Windows `.exe`, works out of the box, lives in the menu bar / tray); or, to customize or edit the source, paste this into Claude Code / Codex CLI / Cursor or another AI coding agent:
 
-```text
-Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
-```
+   ```text
+   Please follow https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md to deploy the OpenBiliClaw backend for me (use Bash `curl` to fetch the document, NOT WebFetch — WebFetch summarises markdown and drops critical commands).
+   ```
 
-3. **Log in to content platforms in the same browser**. Bilibili is selected by default for init, but you can deselect it and select [Xiaohongshu](https://www.xiaohongshu.com) / [Douyin](https://www.douyin.com) / [YouTube](https://www.youtube.com) / [X](https://x.com) / [Zhihu](https://www.zhihu.com) / [Reddit](https://www.reddit.com). Init needs at least one logged-in source that can return signals, and selecting a source enables it.
-4. **Open the desktop or mobile Web UI**. Use `http://127.0.0.1:8420/web` on the same machine, or scan the extension QR code for `http://<your-LAN-IP>:8420/m/` on your phone, then save it to your home screen for app-like access.
+3. **Log in to a platform** — in the same browser as the extension, log in to [Bilibili](https://www.bilibili.com) (default init source), or pick any logged-in platform among Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit instead.
+4. **Open the UI** — visit `http://127.0.0.1:8420/web`, or scan the extension QR code to open `http://<your-LAN-IP>:8420/m/` on your phone and save it to your home screen.
 
 ## Why OpenBiliClaw?
 
-> The name comes from Bilibili (`Bili` = Bilibili, `Claw` = "the claw that grabs content for you") — the project started as a Bilibili-only tool. Since v0.3.0 it has evolved into a general cross-platform Agent: Bilibili / Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit init signals, Douyin search / hot / feed, X server-side discovery, Zhihu extension-backed search / hot / feed / creator / related discovery, Reddit rdt-cli-backed search / hot / subreddit / related discovery, and generic Web sources all live in production, with more platforms on the roadmap.
+> The name comes from Bilibili (`Bili` = Bilibili, `Claw` = "the claw that grabs content for you") — the project started as a Bilibili-only tool. Since v0.3.0 it has evolved into a general cross-platform Agent covering Bilibili / Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit and the open web, with more platforms on the roadmap.
 
 Recommendation systems are essentially a **middleman** — the platform sits between millions of videos and millions of users, matching and distributing content at scale. Modern systems are far more sophisticated than "just optimizing CTR": they jointly weigh click-through rate, completion rate, like/coin probability, dwell time, user retention, creator ecosystem health, ad revenue, and a dozen other objectives, compressing them into a single weighted ranking score. Sounds scientific, but here's the catch: **the weights are set by the platform, and the optimization targets ultimately serve the platform** — user satisfaction is valued as a means to retention and monetization, not as an end in itself. You think you're choosing content, but really the middleman decides what you get to see. The result: recommendations look more and more like what you've already watched, and the occasional surprise is pure luck.
 
@@ -190,12 +188,14 @@ After starting the backend, open `http://127.0.0.1:8420/web` (or just `http://12
 
 ## Recent Updates
 
-Latest: **v0.3.145 / extension v0.3.96 / desktop v0.3.145.1: Eval cache and recommendation-copy concurrency improvements (2026-06-26)**. Full changelog: [docs/changelog.md](docs/changelog.md).
+📌 Latest: **v0.3.152 (2026-07-04)**
 
-- **Candidate eval cache is more stable** — scoring cache keys now use candidate identity, full profile digest, and recent negative-example digest instead of object identity or unrelated event waterlines.
-- **Eval uses larger default batches with two workers** — text `discovery.evaluate_batch` defaults to 45 items, and periodic drains can run two batches concurrently; multimodal eval keeps its smaller image batch.
-- **Recommendation copy is steadier** — copy generation uses two workers, keeps a conservative batch size of 30, and split-retries malformed batch responses before falling back to single-item generation.
-- **Prompt-cache prefixes are cleaner** — eval and recommendation-copy batch calls skip duplicate core-memory injection while still carrying the full structured profile in the prompt.
+- **Desktop installer self-heals broken configs** — if a corrupted `config.toml` blocks startup, the bad file is backed up, a default config is regenerated, and `/setup/` opens for re-initialization; your data directory is untouched.
+- **Delight picks are more surprising** — the delight threshold now tracks the top 10% of the candidate pool dynamically, so ordinary high-scoring content is no longer packaged as a "surprise" too early.
+- **Update entry points match your install channel** — "Apply now" only shows for source installs, desktop packages get a Release download link instead; when a backend update is rejected by a safety guard, the extension shows the specific reason.
+- **Aggregate Release assets stay version-aligned** — only same-version extension / installer packages are listed; missing Firefox XPIs are no longer advertised and old assets are no longer backfilled.
+
+Full changelog: [docs/changelog.md](docs/changelog.md).
 
 ## Community
 
@@ -548,70 +548,66 @@ The whole loop stays local — OpenClaw just calls the CLI bridge; your profile 
 
 ## ✨ Key Features
 
-- 🧠 **Five-Layer Soul Profile** — Event → Preference → Awareness → Insight → Soul, inferring MBTI, cognitive style, and deep needs — like a psychologist understanding you
-- 🔮 **Challenge Interest Probes** — Uses psychological bridging logic to guess unexplored domains you might love, labels distance as near/lateral/bridge/wildcard, keeps 5 regular near slots plus 3 separate challenge slots, buffers weak positives, and guards against short-term over-amplification
-- 🧭 **Avoidance Probe System** — Proactively confirms content forms, low-quality expressions, and style boundaries you may want to avoid; confirmed answers write `disliked_topics`, unconfirmed probes stay out of ranking
-- 🌐 **Cross-Platform Sources** — Started on Bilibili, now extended to Xiaohongshu, Douyin, YouTube, X, Zhihu, and Reddit init signals, Douyin search / hot / feed discovery, X (Twitter) server-side cookie-replay discovery, Zhihu extension-backed search / hot / feed / creator / related discovery, Reddit rdt-cli-backed search / hot / subreddit / related discovery, and generic Web; the architecture is built to keep adding more platforms. Your interests no longer get siloed
-- 🔍 **Multi-Source Discovery Strategies** — Bilibili four strategies (Search · Related Chain · Trending · Cross-domain Explore, with extension-rendered search-page fallback when API search degrades or cools down) + Xiaohongshu safe discovery + Douyin DOM-first search / hot / feed + YouTube search / trending / channel + X search / For-You / followed authors + Zhihu search / hot / feed / creator / related + Reddit search / hot / subreddit / related, coordinated cross-platform
-- 🎯 **Smart Diversity** — PoolCurator five-dimension scoring + cross-source/round topic quota (any topic ≤10% of pool) + share-aware pool trimming that protects smaller sources; goodbye to "all AI all day"
-- ⚡ **Instant "Reshuffle"** — popup reshuffle ~0.6s (down from 2.6s in v0.3.0); rapid clicks stay snappy
-- 💬 **Warm Recommendations** — Not "because you watched similar videos", but friend-like explanations of why you'd enjoy something
-- 🔄 **Continuous Learning** — Socratic dialogue + behavioral analysis + instant feedback, understands you better over time
-- 🧩 **Browser Extension (Chrome / Edge / Brave / Arc and more)** — Side panel for recommendations, cross-site behavior collection (Bilibili + Xiaohongshu + Douyin + YouTube + X + Zhihu) plus logged-in Zhihu / Reddit tasks, chat, and cognition update cards — install and go
-- 🚀 **Guided init in the UI** — No terminal required: the packaged `/setup/` wizard, Desktop Web `/web` uninitialized state, and the extension's "Recommend" tab all show source selection plus a prerequisite checklist (selected platform login / LLM / embedding; Bilibili is checked by default but can be deselected) and a "Start init" button that builds your profile and first content pool in place (the CLI `openbiliclaw init` remains an equivalent entry point)
-- 🔬 **Self-Optimizing Eval Loops** — Five modules each have an LLM-as-judge SGD/RL loop that automatically improves prompt quality over rounds — no manual tuning needed
-- 🔒 **Fully Private** — All data in local SQLite; LLM calls use your own key; each instance is built for exactly one person
-- 🔌 **Local Embedding Provider** — Optional Ollama + bge-m3, no extra embedding API key required for similarity computation (CPU-only, runs on Mac/Win/Linux)
-- 🔧 **Fully Controllable** — Swap LLMs per module, edit your profile directly, write custom Skills to extend discovery
+- 🧠 **Five-Layer Soul Profile** — Event → Preference → Awareness → Insight → Soul, inferring MBTI, cognitive style, and deep needs ([details](docs/modules/soul.md))
+- 🔮 **Interest Probes** — psychological bridging guesses domains you might love but have never explored; right guesses become real interests, wrong ones quietly retire
+- 🧭 **Avoidance Probes** — proactively confirms content forms and style boundaries you want to avoid; nothing is filtered until you confirm
+- 🌐 **Cross-Platform Sources** — Bilibili / Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit / generic Web, so your interests stop being siloed ([details](docs/modules/discovery.md))
+- 🎯 **Smart Diversity** — topic quotas + cross-platform interleaving + small-source protection; goodbye to "all AI all day"
+- ⚡ **Instant Reshuffle** — ~0.6s per reshuffle; rapid clicks stay snappy
+- 💬 **Warm Recommendations** — friend-like explanations of why you'd enjoy something, not "because you watched similar videos"
+- 🔄 **Continuous Learning** — Socratic dialogue + behavioral analysis + instant feedback; it understands you better over time
+- 🧩 **Browser Extension** — Chrome / Edge / Brave / Arc / Firefox; side-panel recommendations + cross-site behavior collection, install and go
+- 🚀 **Guided Init in the UI** — the packaged `/setup/` wizard, Desktop Web, and the extension can all initialize with one click; no terminal required
+- 🔬 **Self-Optimizing Eval Loops** — five modules each carry an LLM-as-judge loop that improves prompt quality over rounds
+- 🔒 **Fully Private** — all data in local SQLite, LLM calls use your own key, each instance is built for exactly one person
+- 🔌 **Local Embedding** — optional Ollama + bge-m3, CPU-only, no extra API key
+- 🔧 **Fully Controllable** — swap LLMs per module, edit your profile directly, write custom Skills to extend discovery
 
 ## 🏛️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Chrome Extension                   │
-│      (Unified behavior -> /api/events -> profile pipeline · Recs · Chat · Probes) │
-│      (Cookies · Bili/XHS/DY/YT/Zhihu tasks · optional init bridge · autostart) │
-└────────────────────────┬────────────────────────────┘
-                         │ REST API / WebSocket (presence + cookies + pool counts + source-aware clicks + probes)
-                         │ + Mobile/Desktop Web (/m · /web) · optional [api.auth] password gate (local free / LAN needs password)
-┌────────────────────────▼────────────────────────────┐
-│                 Agent Orchestration                   │
-│       (Skills · Dialogue · Runtime Gate · Account Sync) │
-├─────────┬──────────┬───────────┬────────────────────┤
-│  Soul   │ Memory   │ Discovery │  Recommendation    │
-│  Engine │ System   │  Engine   │     Engine          │
-│(Profile+Probe)│(5-Layer+Buffer)│(Eval Pool+Neg.)│(Guarded Mix)│
-├─────────┴──────────┴───────────┴────────────────────┤
-│ LLM (API Key/Codex OAuth) · Bilibili API · Extension Proxy │
-│ Runtime: account sync + producers + candidate eval + probe arbiter │
-│ Runtime status: pool_available/raw/pending/eval_count      │
-│ Profile pipeline: accepted browser events -> interest/surface/role buffers │
-│ SQLite: events · discovery_candidates · content_cache   │
-│         recommendations · chat_turns · avoidance_state  │
-│ Profile overrides: edits -> profile_overrides.json overlay │
-│         (merged at read · rebuild-proof · 3 frontends)   │
-│ Profile taxonomy: fixed interest categories · migration · homonym-safe cleanup │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│       Browser Extension (Chrome / Firefox)      │
+│  Behavior capture · Cookie sync · Platform tasks │
+└──────────────────────┬─────────────────────────┘
+                       │ REST API / WebSocket
+                       │ + Desktop Web (/web) · Mobile Web (/m)
+┌──────────────────────▼─────────────────────────┐
+│               Agent Orchestration               │
+│      Skills · Dialogue · Runtime scheduling      │
+├─────────┬──────────┬───────────┬───────────────┤
+│  Soul   │  Memory  │ Discovery │ Recommendation │
+│ Engine  │  System  │  Engine   │     Engine     │
+├─────────┴──────────┴───────────┴───────────────┤
+│   LLM adapters · Source adapters (SourceAdapter) │
+│   Local SQLite (events · pool · recs · chat)     │
+└────────────────────────────────────────────────┘
 ```
+
+> Full architecture detail (runtime state machine, pool accounting, profile overrides, and more) lives in [Architecture](docs/architecture.md) and the [visual architecture diagrams](docs/index.md).
 
 ### Content Discovery Engine
 
-Four Bilibili strategies work in coordination, each with independent API quota; while backend Bilibili search is degraded or cooling down, the runtime can enqueue extension search fallback tasks, have the extension open a real rendered Bilibili search page in the logged-in browser, and accept the visible DOM results. The source layer also accepts Xiaohongshu extension-proxy signals, YouTube init signals plus a backend-direct YouTube producer, Douyin init signals / DOM-first search / hot / feed discovery, X (Twitter) server-side cookie-replay discovery (search / For-You / followed authors), Zhihu guided-init signals plus extension-backed search / hot / feed / creator / related discovery, and Reddit guided-init signals plus rdt-cli-backed search / hot / subreddit / related discovery with extension fallback:
+**Multi-source adapter architecture** — every platform plugs in through the `SourceAdapter` protocol, each with its own discovery approach:
 
-| Strategy | Description | Quota |
-|----------|-------------|-------|
-| **Search** | Generates queries from interests + speculative interests | Fair share |
-| **Trending** | Popular content from multiple Bilibili ranking categories | Fair share |
-| **Related Chain** | Expands from seed videos along recommendation chains | Fair share |
-| **Explore** | LLM-driven cross-domain exploration | Fair share |
+| Source | Discovery | How data is fetched |
+|--------|-----------|---------------------|
+| **Bilibili** | search · trending · related chain · cross-domain explore | Backend-direct WBI-signed APIs, with a real rendered search-page fallback via the extension |
+| **Xiaohongshu** | passive collection · search · creator subscriptions · init import | Extension reads your logged-in pages; zero backend crawling |
+| **Douyin** | init import · search · hot · feed | Extension background tab with real DOM interactions; never steals focus |
+| **YouTube** | init import · Takeout offline import · search / trending / channel | Extension reads profile signals; steady-state refill is backend-direct |
+| **X (Twitter)** | init import · search · For-You · followed authors | Server-side read-only cookie replay; the extension only syncs cookies |
+| **Zhihu** | init import · search · hot · feed · creator · related | Extension reads logged-in tabs; renders as text cards |
+| **Reddit** | init import · search · hot · subreddit · related | Backend rdt-cli by default; the extension syncs your session automatically |
+| **Generic Web** | browser + LLM extraction | Adapts to any webpage |
 
-**Safe data fetching** — Bilibili and generic Web fetch backend-direct (Bilibili via WBI-signed APIs); if Bilibili search degrades or is blocked and cooling down, the backend task bridge can enqueue a search task, then the extension opens the real logged-in search page in a background tab and returns visible rendered DOM results as fallback candidates. Xiaohongshu / Douyin / YouTube / Zhihu are read by the browser extension inside your *already-logged-in* pages: init profiling doesn't deep-scroll by default and returns in batches, and the backend never crawls or logs in to those sites itself (YouTube can also import old history via Google Takeout). `fetch-zhihu` remains an event-smoke command and does not feed profiling unless you pass write/rebuild flags; guided init feeds Zhihu `bootstrap_events` into the first profile when Zhihu is selected. Reddit guided init turns saved / upvoted / subscribed subreddits into first-profile signals; `fetch-reddit --mode bootstrap` can run that event smoke by itself, and steady-state Reddit discovery defaults to backend-installed rdt-cli search / hot / subreddit / related commands; the connected extension syncs `reddit_session` into the rdt-cli credential store, and OpenBiliClaw falls back to extension tasks when the command backend is unavailable, unauthenticated, or explicitly selected. X is fetched backend-side via read-only server-side cookie replay using the x.com cookie the extension synced (`auth_token` + `ct0`); the extension only syncs the cookie and captures your own engagement. Ordinary browser behavior events enter the continuous-learning path only after the profile is initialized: accepted events are written to memory, ingested into the `ProfileUpdatePipeline` interest / surface / role buffers, then queue a replenishment request via `request_replenishment(reason="event_ingest")`. Runtime `pending_signal_events` is only the search / related_chain discovery watermark, not a profile backlog. First-run profile signals are fetched only after you click "Start initialization" and only from the selected sources. For steady-state refill, Douyin search / hot / feed background tabs first open the Douyin home page and perform real DOM interactions to trigger search, hot, or feed loading; search/feed passively collect page responses and rendered DOM, while hot can use a hot-board seed through the logged-in page's related API bridge when the page path returns no candidates. YouTube is refilled backend-side by platform deficit; Zhihu discovery runs extension tasks in a background task tab, while Reddit discovery defaults to rdt-cli with extension fallback and init / event smoke waits for each bootstrap task result.
+What happens after discovery:
 
-**Unified evaluation** — every source first writes raw candidates to `discovery_candidates`. The backend then claims mixed-source batches and scores them with the Soul profile, text / tags, engagement metrics, and recent negative examples. A refresh that discovers new raw candidates drains immediately, and an independent candidate eval loop also drains existing pending raw periodically, so evaluation no longer depends on a non-empty replenish plan. When optional cover-image evaluation is enabled and the evaluation model supports image input, covers are read from the runtime image cache first, fetched through the whitelist boundary only on cache miss, compressed, and sent to the same shared evaluator; the "will this user like it?" judgment does not live inside each platform producer.
+- **Safe fetching** — the backend never logs in for you and never crawls content you can't see; every platform reuses the sessions already in your browser, and first-run profile signals are pulled only after you click "Start initialization".
+- **Unified evaluation** — raw candidates from all sources land in one shared eval pool, scored in batches against your Soul profile, content text, and recent negative feedback; the "will you like it?" judgment never lives inside platform-specific logic.
+- **Diversity selection** — platform quotas → topic dedup → style balancing → cross-platform interleaving → count caps; only Bilibili is enabled out of the box, other platforms are switched on in settings.
 
-**Diversity selection** — accepted results then pass through platform-quota reservation → topic dedup → style balancing → **cross-platform interleaving** → count caps, so recommendations never become "all AI all day". Saved platform shares default to Bilibili / Xiaohongshu / Douyin / YouTube / X / Zhihu / Reddit = 5 / 1 / 1 / 1 / 1 / 1 / 1, configurable via `[scheduler.pool_source_shares]`; out of the box only Bilibili is enabled and the others must be turned on explicitly.
-
-**Pool counts** — the "swappable" number in the UI only counts `pool_available_count`: candidates with ready copy, a category and an openable link, and no recent-view conflict. Material still being prepared counts as `pool_pending_count`; `pool_pending_eval_count` / `pool_evaluated_pending_count` split out the not-yet-scored and scored-but-not-admitted stages. The extension / Mobile Web / Desktop Web never present pending material as swappable. After recommendation bootstrap, reshuffle, or append consumes the pool, the backend immediately broadcasts a fresh runtime-stream pool snapshot so every open surface sees the decremented inventory.
+> Per-platform task pipelines, pool accounting, and fallback strategies are documented in the [Discovery Engine docs](docs/modules/discovery.md).
 
 ### Soul Engine
 
@@ -666,6 +662,7 @@ OpenBiliClaw/
 ## 📖 Documentation
 
 - [Documentation Hub](docs/index.md) — All-in-one entry point
+- [FAQ](docs/faq.md) — quick answers for install / connection / update issues
 - [Project Spec](docs/spec.md) — Complete design & planning
 - [Architecture](docs/architecture.md) — System architecture deep dive
 - [Memory Design](docs/memory-design.md) — Multi-layer memory architecture
@@ -676,11 +673,11 @@ OpenBiliClaw/
 
 ## 📜 Release History
 
-Latest: **v0.3.152 / extension v0.3.152 / desktop v0.3.152: desktop startup recovery and dynamic delight threshold (2026-07-04)**. The recent updates section keeps the current release visible; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
+The current release is summarized in [Recent Updates](#recent-updates) above; full history lives in [docs/changelog.md](docs/changelog.md). Most users should use the `openbiliclaw-v*` aggregate [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) for extension packages and available desktop installers; automation-channel releases remain available as `backend-v*`, `extension-v*`, and `desktop-v*`.
 
 ## 🗺️ Roadmap
 
-OpenBiliClaw aims to be your **personalized entry point to the entire web**. Started on Bilibili, it now ships Xiaohongshu, Douyin, YouTube, X, Zhihu, and Reddit init signals, Douyin search / hot / feed discovery, X (Twitter) server-side discovery, Zhihu extension-backed search / hot / feed / creator / related discovery, Reddit rdt-cli-backed search / hot / subreddit / related discovery, and a generic-Web adapter; next:
+OpenBiliClaw aims to be your **personalized entry point to the entire web**. Started on Bilibili, it now covers Xiaohongshu, Douyin, YouTube, X, Zhihu, Reddit, and the generic Web; next:
 
 - **More content sources** — V2EX, Weibo, various BBS / forums; each platform is a `SourceAdapter` and the architecture is proven extensible
 - **Cross-platform interest fusion** — your mechanical-keyboard interest from Bilibili + your coffee-gear interest from Xiaohongshu + your short-video taste from Douyin likes/favorites + your long-form watching and subscriptions from YouTube + the news you like/bookmark on X = one complete you. Profile fusion stops your interests from being fragmented across silos
@@ -698,6 +695,8 @@ Contributions welcome! See the [Contributing Guide](docs/contributing.md) to get
 - Thanks to [@tangle111-design](https://github.com/tangle111-design) for exploring `style_key` viewing modes, recommendation tone, Bilibili initialization, and LLM / profile workflow improvements in [#69](https://github.com/whiteguo233/OpenBiliClaw/pull/69). The relevant ideas have been reviewed, split up, and selectively merged into main.
 
 ## ⭐ Star History
+
+If OpenBiliClaw gave you back control of your feed, [a star](https://github.com/whiteguo233/OpenBiliClaw) is the most direct vote for "keep adding platforms".
 
 [![Star History Chart](https://api.star-history.com/svg?repos=whiteguo233/OpenBiliClaw&type=Date)](https://www.star-history.com/#whiteguo233/OpenBiliClaw&Date)
 

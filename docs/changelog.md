@@ -15,6 +15,7 @@
 - **惊喜推荐改为池内 Top 10% 动态阈值**：`precompute_delight_scores()`、runtime 主动推送、pending-batch、CLI 和普通推荐池的 delight 占位排除都改用动态门槛。默认底线仍是 `0.70`，低探索开放度用户底线仍是 `0.80`；正式候选池样本不少于 20 条时，会取 `max(profile floor, 当前池内 Top 10% 分数边界)`，避免普通高分内容被过早包装成“惊喜推荐”。生产库副本验证还暴露了旧版 `delight_score` 标尺残留，因此 backfill 现在会重新领取并同步 `delight_score != relevance_score` 的历史行，包括 `shown` 且已有普通推荐历史的行。
 - **聚合 Release 不再误列缺失的 Firefox XPI**：`sync-aggregate-release.sh` 现在只有在实际收集到 `openbiliclaw-extension-v*-firefox.xpi` 资产时，才把 signed XPI 写进 `openbiliclaw-v*` 聚合页；未启用 AMO signing 时只列 Chrome zip 与 Firefox 临时加载 zip，避免用户看到不存在的下载文件。
 - **聚合 Release 只收同版本资产**：`openbiliclaw-vX.Y.Z` 现在只引用 `extension-vX.Y.Z` / `desktop-vX.Y.Z` 的包；某个 channel 尚未完成时显示未发布，不再从上一版 release 回填旧 `.zip` / `.dmg` / `.exe`。旧包清理同时把 GitHub API 超时后返回的 `not found` 视为幂等成功，避免删除实际已生效却导致 workflow 失败。
+- **README / 文档首页 / GitHub About 优化**：README 中英双版第一屏瘦身（删除开发版 E2E 段落、快速开始压缩为四短步、「最近更新」对齐 v0.3.152 用户可感知亮点并与更新日志板块去重）、核心特性与架构概览精简并链接模块文档、新增 Release / CI 徽章与结尾 star 引导、英文版补 RedNote / Chinese TikTok 平台注释；`docs/index.md` 拆分「用户 / 开发者」两个区块并去掉重复条目；新增 `docs/faq.md` 常见问题页；GitHub About 补 Reddit、缩短为卖点前置的双语文案。
 
 ## v0.3.151 / extension v0.3.151 / desktop v0.3.151: LLM 探测诊断与发布渠道版本对齐（2026-07-02）
 

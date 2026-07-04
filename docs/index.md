@@ -1,28 +1,31 @@
 # 📖 OpenBiliClaw 文档导航
 
-> 本页面是项目文档的一站式入口。
+> 本页面是项目文档的一站式入口。用户看第一区块就够了；第二区块起面向开发者和贡献者。
 
-## 项目概览
+## 👤 我是用户
 
-- [项目主页](index.html) — GitHub Pages 首页，桌面安装包 / 一句话安装、插件下载、GitHub 入口和产品卖点概览
-- [主页 SEO 维护指南](seo.md) — Search Console / Bing 提交清单、sitemap / OG / JSON-LD 长期维护要点
+- [项目主页](index.html) — GitHub Pages 首页，桌面安装包 / 一句话安装、插件下载和产品卖点概览
+- [常见问题 FAQ](faq.md) — macOS 安全阻挡、插件连不上后端、embedding 配置、手机访问等高频问题
+- [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) — Latest Release 的 `openbiliclaw-v*` 聚合页，下载浏览器插件 zip 和桌面安装包
+- [隐私权政策](privacy.md) — 插件数据收集披露与本地优先数据流说明
+- [变更日志](changelog.md) — 各版本交付记录
+- [Docker 部署指南](docker-deployment.md) — 手动 Docker / docker compose 部署步骤
+- [OpenClaw 接入最短指南](openclaw-quickstart.md) — 把 OpenBiliClaw 接进 OpenClaw / AI 编码助手
+
+## 🛠️ 我是开发者 / 贡献者
+
 - [项目规格说明书 (SPEC)](spec.md) — 完整的项目设计与规划
-- [隐私权政策](privacy.md) — Chrome Web Store / 插件数据收集披露与本地优先数据流说明
-- [Chrome Web Store 商店页文案](chrome-webstore-listing.md) — 可直接复制到商店后台的项目入口、安装使用说明和隐私引导
-- [v0.1 开发任务清单](v0.1-todolist.md) — 当前版本的开发主线
-- [技术债清单](technical-debt.md) — 已确认技术债、风险解析、建议治理方向和待确认 TODO 线索
 - [架构设计](architecture.md) — 系统架构与模块关系
 - [记忆系统设计](memory-design.md) — 多层网状记忆架构详解
-- [变更日志](changelog.md) — 各里程碑交付记录
-- [GitHub Releases](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) — 普通用户看 Latest Release 的 `openbiliclaw-v*` 聚合页，同时下载浏览器插件 zip、实验性桌面安装包并查看后端源码 tag；维护者通道仍保留 `extension-v*` / `desktop-v*` / `backend-v*`
+- [v0.1 开发任务清单](v0.1-todolist.md) — 当前版本的开发主线
+- [技术债清单](technical-debt.md) — 已确认技术债、风险解析、建议治理方向和待确认 TODO 线索
+- [新平台来源接入指南](platform-source-integration.md) — 事件抓取、插件任务、discover、配置页、推荐卡、真实 E2E 和发布文档的标准接入流程（含知乎 / Reddit 接入经验沉淀的检查清单）
 - [手动端到端联调](manual-e2e.md) — CLI、插件与 SQLite 的真实联调步骤
-- [新平台来源接入指南](platform-source-integration.md) — 事件抓取、插件任务、discover、配置页、推荐卡、真实 E2E 和发布文档的标准接入流程
-- [OpenClaw 接入最短指南](openclaw-quickstart.md) — Docker 优先、本地兜底的安装、初始化、skill 发现与 CLI bridge 自检
-- [Agent 机器契约 (短)](agent-install.md) — 给 AI 智能体 WebFetch 的短契约,配合 README 的短粘贴语句
+- [Agent 机器契约 (短)](agent-install.md) — 给 AI 智能体读取的短部署契约,配合 README 的短粘贴语句
 - [Agent 部署详细说明](agent-deployment.md) — 给人看的详细版本 + 所有 JSON 事件/错误码/排查表
-- [Docker 部署指南](docker-deployment.md) — 手动 Docker / docker compose 部署步骤
 - [后端自动更新 SPEC](specs/auto-update.md) — 后端源码自动应用、默认关闭的更新开关、git 安全边界与插件商店原生更新边界
-- [新平台来源接入指南](platform-source-integration.md) — 按知乎接入经验沉淀的端到端来源开发、验证和发布检查清单
+- [Chrome Web Store 商店页文案](chrome-webstore-listing.md) — 可直接复制到商店后台的项目入口、安装使用说明和隐私引导
+- [主页 SEO 维护指南](seo.md) — Search Console / Bing 提交清单、sitemap / OG / JSON-LD 长期维护要点
 
 ## 可视化架构图
 
