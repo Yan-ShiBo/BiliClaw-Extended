@@ -1912,20 +1912,33 @@ def create_app(
         coord = ctx.init_coordinator
         prereqs = ctx.init_prereqs
         run = coord.get_status()
-        # Probe the three services concurrently — each is a real (now strict)
-        # request with a generous cold-load timeout, so running them sequentially
-        # could stack to ~40s. gather() bounds the wait to the slowest single
-        # probe (TTL-cached, so steady-state polls are instant).
-        bili, chat, embedding = await asyncio.gather(
-            prereqs.bilibili_check(),
-            prereqs.chat_ready(),
-            _health_embedding_ready(),
-        )
-        platforms = prereqs.enabled_platforms()
         initialized = bool(_health_profile_ready())
+        running = bool(run["running"])
+        if initialized and not running:
+            # Steady state: once a profile exists the checklist is
+            # informational only (can_start is false regardless, and POST
+            # /api/init revalidates live before any force rebuild). Skip the
+            # real chat/Bilibili probes so an open polling page — /setup/ or
+            # the desktop web waiting for the first pool — no longer burns a
+            # billable LLM ping per TTL window. Embedding stays live: it is
+            # the same TTL-cached probe /api/health already exercises.
+            bili = prereqs.peek_bilibili()
+            chat = prereqs.peek_chat()
+            embedding = await _health_embedding_ready()
+        else:
+            # Probe the three services concurrently — each is a real (now
+            # strict) request with a generous cold-load timeout, so running
+            # them sequentially could stack to ~40s. gather() bounds the wait
+            # to the slowest single probe (TTL-cached, so steady-state polls
+            # are instant).
+            bili, chat, embedding = await asyncio.gather(
+                prereqs.bilibili_check(),
+                prereqs.chat_ready(),
+                _health_embedding_ready(),
+            )
+        platforms = prereqs.enabled_platforms()
         trusted = _get_auth_gate().is_trusted_local(request)
         supported = not is_running_in_container()
-        running = bool(run["running"])
         # v0.3.118+: bilibili login is no longer a server-side hard gate —
         # whether it blocks depends on the client's per-run source selection,
         # which only POST /api/init sees. ``bilibili_logged_in`` stays in the
@@ -7223,8 +7236,7 @@ def create_app(
                 value=", ".join(reddit_cookie_names),
                 available=bool(reddit_cookie_names),
                 detail=(
-                    "Reddit Cookie 由插件同步到 rdt-cli credential store；"
-                    "这里只展示 Cookie 名称。"
+                    "Reddit Cookie 由插件同步到 rdt-cli credential store；这里只展示 Cookie 名称。"
                 ),
             ),
         )

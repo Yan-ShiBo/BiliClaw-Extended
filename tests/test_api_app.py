@@ -9575,11 +9575,21 @@ class _FakeInitPrereqs:
         self._bili = bili
         self._chat = chat
         self._platforms = list(platforms or [])
+        self.bilibili_check_calls = 0
+        self.chat_ready_calls = 0
 
     async def bilibili_check(self) -> str:
+        self.bilibili_check_calls += 1
         return self._bili
 
     async def chat_ready(self) -> bool:
+        self.chat_ready_calls += 1
+        return self._chat
+
+    def peek_bilibili(self) -> str:
+        return self._bili
+
+    def peek_chat(self) -> bool:
         return self._chat
 
     def enabled_platforms(self) -> list[str]:
@@ -10126,6 +10136,36 @@ class TestGuidedInitEndpoints:
         assert body["initialized"] is True
         assert body["can_start"] is False
         assert body["reason"] == "already_initialized"
+
+    def test_init_status_skips_live_probes_when_already_initialized(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        # Steady-state polling of an initialized instance must not fire real
+        # (billable) chat probes or Bilibili round-trips — users spotted the
+        # recurring 5-in/10-out "hi" completions on their provider bill.
+        prereqs = _FakeInitPrereqs(bili="ok", chat=True)
+        app, _ = self._make_app(tmp_path, profile_ready=True, prereqs=prereqs)
+        with TestClient(app) as client:
+            for _ in range(3):
+                resp = client.get("/api/init-status")
+        body = resp.json()
+        assert body["initialized"] is True
+        assert prereqs.chat_ready_calls == 0
+        assert prereqs.bilibili_check_calls == 0
+        # Cached values still surface in the payload.
+        assert body["prerequisites"]["llm_ready"] is True
+        assert body["prerequisites"]["bilibili_logged_in"] is True
+
+    def test_init_status_probes_live_before_initialization(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        # Pre-init the checklist gates the start button, so probes stay real.
+        prereqs = _FakeInitPrereqs(bili="ok", chat=True, platforms=["bilibili"])
+        app, _ = self._make_app(tmp_path, prereqs=prereqs)
+        with TestClient(app) as client:
+            client.get("/api/init-status")
+        assert prereqs.chat_ready_calls == 1
+        assert prereqs.bilibili_check_calls == 1
 
     def test_init_status_bilibili_login_is_informational_not_blocking(self, tmp_path: Path) -> None:
         """v0.3.118+: B站 login no longer hard-gates can_start — whether it

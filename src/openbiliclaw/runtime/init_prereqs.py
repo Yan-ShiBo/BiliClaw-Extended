@@ -23,7 +23,13 @@ logger = logging.getLogger(__name__)
 # than staying red for the full success-TTL. Timeout is generous enough to
 # cover a cold Ollama load but still fails (not optimistically passes) if the
 # service never answers.
-_CHAT_OK_TTL = 30.0
+#
+# The chat probe is a real (billable) completion, so its success TTL is
+# generous: a green checkmark going stale for a few minutes is harmless,
+# while a 30s TTL meant an open polling page burned a provider request
+# every 30s — users spotted the recurring 5-in/10-out lines on their
+# DeepSeek bill.
+_CHAT_OK_TTL = 300.0
 _CHAT_FAIL_TTL = 8.0
 _CHAT_PROBE_TIMEOUT = 15.0
 _BILI_OK_TTL = 60.0
@@ -52,6 +58,18 @@ class InitPrereqs:
         self._bili_value = "checking"
         self._bili_at = float("-inf")
         self._bili_lock = asyncio.Lock()
+
+    def peek_chat(self) -> bool:
+        """Last cached chat probe result, without firing a new probe.
+
+        Used by already-initialized status reads where the checklist is
+        informational only — a live (billable) probe is not justified.
+        """
+        return self._chat_value
+
+    def peek_bilibili(self) -> str:
+        """Last cached Bilibili probe result, without firing a new probe."""
+        return self._bili_value
 
     async def chat_ready(self) -> bool:
         """Whether the default chat provider can *currently* complete.

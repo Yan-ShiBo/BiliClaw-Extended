@@ -834,6 +834,11 @@
       if (!status) {
         return '<li class="init-hint-row">点「开始初始化」会先检查 AI 服务 / 向量模型，以及所选平台的登录状态，通过才开始。</li>';
       }
+      // Post-init the pre-init checklist is irrelevant, and the backend no
+      // longer live-probes services for already-initialized status reads —
+      // the cached values could read stale-red here (e.g. right after a
+      // backend restart while the first pool is still filling). Hide it.
+      if (status.initialized) return "";
       return buildInitChecklist(status, selected)
         .map((row) => {
           const mark = row.ok ? "✓" : row.hard ? "✗" : "•";
