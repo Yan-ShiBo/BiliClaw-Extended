@@ -361,6 +361,44 @@ export function isReusableDouyinBootstrapTabUrl(url: string | undefined): boolea
   }
 }
 
+export interface ReusableDouyinBootstrapTabCandidate {
+  id?: number;
+  url?: string;
+  pendingUrl?: string;
+  active?: boolean;
+}
+
+function scoreReusableDouyinBootstrapTab(url: string | undefined): number {
+  if (!url) return 0;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.pathname.startsWith("/user/")) return 1;
+    const showTab = parsed.searchParams.get("showTab") ?? "";
+    if (["like", "favorite_collection", "following", ""].includes(showTab)) return 3;
+    return 2;
+  } catch {
+    return 0;
+  }
+}
+
+export function chooseReusableDouyinBootstrapTab<T extends ReusableDouyinBootstrapTabCandidate>(
+  tabs: T[],
+): T | null {
+  const candidates = tabs
+    .filter((tab) => tab.id !== undefined)
+    .filter((tab) => isReusableDouyinBootstrapTabUrl(tab.url ?? tab.pendingUrl))
+    .map((tab) => ({
+      tab,
+      score: scoreReusableDouyinBootstrapTab(tab.url ?? tab.pendingUrl),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return Number(Boolean(b.tab.active)) - Number(Boolean(a.tab.active));
+    });
+  return candidates[0]?.tab ?? null;
+}
+
 async function loadPreservedBootstrapTabId(): Promise<number | null> {
   if (preservedBootstrapTabId !== null) return preservedBootstrapTabId;
   try {
@@ -394,9 +432,23 @@ function clearPreservedBootstrapTabId(): void {
   }
 }
 
+async function findExistingBootstrapTab(): Promise<chrome.tabs.Tab | null> {
+  try {
+    const tabs = await chrome.tabs.query({ url: ["https://*.douyin.com/*"] });
+    const tab = chooseReusableDouyinBootstrapTab(tabs);
+    if (tab?.id !== undefined) {
+      rememberPreservedBootstrapTabId(tab.id);
+      return tab;
+    }
+  } catch {
+    // Host permissions may be unavailable in older builds; create a fresh tab.
+  }
+  return null;
+}
+
 async function getPreservedBootstrapTab(): Promise<chrome.tabs.Tab | null> {
   const tabId = await loadPreservedBootstrapTabId();
-  if (tabId === null) return null;
+  if (tabId === null) return findExistingBootstrapTab();
   try {
     const tab = await chrome.tabs.get(tabId);
     if (isReusableDouyinBootstrapTabUrl(tab.url ?? tab.pendingUrl)) return tab;
@@ -404,7 +456,7 @@ async function getPreservedBootstrapTab(): Promise<chrome.tabs.Tab | null> {
     // The user may have closed the preserved tab.
   }
   clearPreservedBootstrapTabId();
-  return null;
+  return findExistingBootstrapTab();
 }
 
 // ---------------------------------------------------------------------------

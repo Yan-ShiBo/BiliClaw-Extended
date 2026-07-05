@@ -17,6 +17,7 @@ import {
   buildDyDiscoveryPageUrl,
   buildDyTaskUrl,
   buildDyExecuteMessageData,
+  chooseReusableDouyinBootstrapTab,
   computeDyTaskTimeoutMs,
   isReusableDouyinBootstrapTabUrl,
   isValidDyTask,
@@ -103,6 +104,25 @@ test("reusable bootstrap tab URLs must be https douyin pages", () => {
   assert.equal(isReusableDouyinBootstrapTabUrl("http://www.douyin.com/user/self"), false);
   assert.equal(isReusableDouyinBootstrapTabUrl("https://example.com/user/self"), false);
   assert.equal(isReusableDouyinBootstrapTabUrl(undefined), false);
+});
+
+test("chooseReusableDouyinBootstrapTab prefers profile scope tabs", () => {
+  const tab = chooseReusableDouyinBootstrapTab([
+    { id: 1, url: "https://www.douyin.com/", active: true },
+    { id: 2, url: "https://example.com/user/self?showTab=like", active: false },
+    { id: 3, url: "https://www.douyin.com/user/self?showTab=like", active: false },
+  ]);
+
+  assert.equal(tab?.id, 3);
+});
+
+test("chooseReusableDouyinBootstrapTab falls back to an active douyin tab", () => {
+  const tab = chooseReusableDouyinBootstrapTab([
+    { id: 1, url: "https://www.douyin.com/", active: false },
+    { id: 2, url: "https://www.douyin.com/jingxuan", active: true },
+  ]);
+
+  assert.equal(tab?.id, 2);
 });
 
 test("isValidDyTask accepts bootstrap_profile with optional payload fields", () => {

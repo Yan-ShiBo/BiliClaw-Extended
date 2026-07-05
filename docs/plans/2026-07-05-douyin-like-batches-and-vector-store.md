@@ -140,6 +140,7 @@
 
 - `bootstrap_profile` 任务完成后继续保留前台抖音导入页签，并把页签 ID 写入 `chrome.storage.session`。
 - 下一批 `bootstrap_profile` 任务优先复用这个页签，而不是重新打开主页。
+- 如果刚重载扩展导致 `chrome.storage.session` 中没有旧页签 ID，后台会主动查找已打开的 `douyin.com` 页签，并优先选择 `/user/...?...showTab=like` 这类 profile tab。
 - content script 新增当前 scope route 判定：如果页面已经在 `/user/...?...showTab=like`，就不再重新点击“喜欢”，直接继续当前页面上的滚动与采集。
 - 浏览器关闭、扩展重载、用户手动关闭该抖音页签，或 Douyin 自己刷新/虚拟列表回收时，仍可能失去滚动上下文；这种情况下会自动退回新开页签，并继续依靠已见 key 跳过旧条目。
 
