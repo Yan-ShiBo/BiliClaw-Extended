@@ -98,6 +98,8 @@ def test_vector_store_upserts_douyin_like_videos(
                     "cover_url": "",
                     "source_platform": "douyin",
                     "import_source": "dy_bootstrap_like",
+                    "source_account_id": "primary",
+                    "account_id": "primary",
                 }
             ],
         }
@@ -140,3 +142,35 @@ def test_vector_store_upserts_douyin_like_events(
         "AI 绘画技巧\n抖音点赞：AI 绘画技巧"
     ]
     assert fake_client.collection.upserts[0]["metadatas"][0]["signal_strength"] == 0.85
+    assert fake_client.collection.upserts[0]["metadatas"][0]["source_account_id"] == "primary"
+
+
+def test_vector_store_scopes_douyin_like_ids_by_account(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake_client: FakeClient | None = None
+
+    def make_client(path: str) -> FakeClient:
+        nonlocal fake_client
+        fake_client = FakeClient(path)
+        return fake_client
+
+    monkeypatch.setattr(vector_store.chromadb, "PersistentClient", make_client)
+    manager = VectorStoreManager(tmp_path)
+
+    count = manager.upsert_dy_like_videos(
+        [
+            {
+                "scope": "dy_like",
+                "aweme_id": "shared",
+                "title": "same video from account2",
+                "source_account_id": "account2",
+            },
+        ]
+    )
+
+    assert count == 1
+    assert fake_client is not None
+    assert fake_client.collection.upserts[0]["ids"] == ["account2:shared"]
+    assert fake_client.collection.upserts[0]["metadatas"][0]["source_account_id"] == "account2"

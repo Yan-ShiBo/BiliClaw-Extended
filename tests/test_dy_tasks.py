@@ -60,6 +60,7 @@ def test_dy_bootstrap_videos_to_events_maps_scopes_to_event_types() -> None:
     assert [e["event_type"] for e in events] == ["view", "favorite", "like", "follow"]
     for event in events:
         assert event["metadata"]["source_platform"] == SOURCE_DOUYIN
+        assert event["metadata"]["source_account_id"] == "primary"
 
 
 def test_dy_bootstrap_videos_to_events_signal_strength_per_scope() -> None:
@@ -94,6 +95,24 @@ def test_dy_bootstrap_videos_to_events_signal_strength_per_scope() -> None:
     )
     strengths = [e["metadata"]["signal_strength"] for e in events]
     assert strengths == [0.4, 1.0, 0.85, 0.6]
+
+
+def test_dy_bootstrap_videos_to_events_preserves_source_account_id() -> None:
+    events = dy_bootstrap_videos_to_events(
+        [
+            {
+                "scope": "dy_like",
+                "title": "liked from second account",
+                "url": "https://www.douyin.com/video/second",
+                "aweme_id": "second",
+                "source_account_id": "account2",
+            },
+        ]
+    )
+
+    assert len(events) == 1
+    assert events[0]["metadata"]["source_account_id"] == "account2"
+    assert events[0]["metadata"]["account_id"] == "account2"
 
 
 def test_dy_bootstrap_videos_to_events_skips_blank_and_unknown() -> None:

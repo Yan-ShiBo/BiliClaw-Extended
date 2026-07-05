@@ -4,6 +4,13 @@
 
 ---
 
+## WIP: 抖音任务页保留与多账号分账续跑
+
+- **抖音导入页不再误消失**：`bootstrap_profile` 前台导入任务超时时保留抖音页面，避免用户看到页面被扩展自动关闭；搜索 / 热点 / feed 等后台临时任务页仍自动清理。
+- **抖音喜欢导入超时扩容**：bootstrap timeout 改为按滚动轮次和已跳过 `skip_item_keys` 数量共同估算，最高 20 分钟，适配第一个账号大量喜欢分批续跑。
+- **抖音多账号分账**：`source_bootstrap_state.json` 新增 `dy_accounts.<account_id>`，每个账号独立保存 `dy_seen_video_keys` 和 `dy_scope_progress`；旧顶层字段继续镜像 `primary` 以兼容旧路径。
+- **画像和向量库带账号来源**：抖音 bootstrap 事件、profile signal 和 `dy_likes` 向量 metadata 写入 `source_account_id` / `account_id`；非 primary 账号的向量 doc id 使用 `<account_id>:<aweme_id>`，避免两个账号喜欢同一视频时互相覆盖。
+
 ## WIP: 2026-07-05 抖音喜欢续跑与本地向量库
 
 - **抖音喜欢续跑 checkpoint**：`source_bootstrap_state.json` 现在记录 `dy_scope_progress`，后端会在 `skip_existing_bootstrap_keys=true` 的任务中下发已处理 `dy_like:*` key，扩展跳过旧条目且不占用本批新增名额。

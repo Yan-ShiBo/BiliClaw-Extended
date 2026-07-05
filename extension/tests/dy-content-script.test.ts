@@ -29,6 +29,7 @@ test("isValidScopeExecuteMessage accepts a well-formed scope payload", () => {
       max_items_per_scope: 300,
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
+      account_id: "account2",
     }),
     true,
   );
@@ -67,6 +68,18 @@ test("isValidScopeExecuteMessage rejects malformed input", () => {
       max_items_per_scope: "300",
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
+    }),
+    false,
+  );
+  // Wrong type for account_id
+  assert.equal(
+    isValidScopeExecuteMessage({
+      task_id: "t",
+      scope: "dy_collect",
+      max_items_per_scope: 300,
+      max_scroll_rounds: 15,
+      max_stagnant_scroll_rounds: 5,
+      account_id: 2,
     }),
     false,
   );

@@ -197,8 +197,53 @@ class TestDyNextTask:
         assert response.status_code == 200
         body = response.json()
         assert body["id"] == task_id
+        assert body["account_id"] == "primary"
         assert body["skip_item_keys"] == ["dy_like:old-like"]
         assert body["skip_item_key_count"] == 1
+
+    def test_resumable_bootstrap_next_task_uses_account_specific_seen_keys(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        from openbiliclaw.sources.dy_tasks import DyTaskQueue
+
+        client, db, memory = dy_task_client
+        memory.save_source_bootstrap_state(
+            {
+                "dy_accounts": {
+                    "primary": {
+                        "dy_seen_video_keys": ["dy_like:primary-old"],
+                    },
+                    "account2": {
+                        "dy_seen_video_keys": ["dy_like:account2-old"],
+                        "dy_scope_progress": {
+                            "dy_like": {"next_cursor": 222},
+                        },
+                    },
+                },
+                "last_source_bootstrap_sync_at": "2026-07-05T00:00:00+00:00",
+            }
+        )
+        queue = DyTaskQueue(db)
+        task_id = queue.enqueue_with_id(
+            "bootstrap_profile",
+            {
+                "account_id": "account2",
+                "scopes": ["dy_like"],
+                "skip_existing_bootstrap_keys": True,
+            },
+            daily_budget=10,
+        )
+        assert task_id is not None
+
+        response = client.get("/api/sources/dy/next-task")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["account_id"] == "account2"
+        assert body["skip_item_keys"] == ["dy_like:account2-old"]
+        assert body["skip_item_key_count"] == 1
+        assert body["cursors"] == {"dy_like": 222}
 
 
 class TestDyTaskEnqueue:
@@ -281,6 +326,7 @@ class TestDyTaskResult:
         event_types = [e["event_type"] for e in memory.events]
         assert event_types == ["favorite", "like", "follow"]
         assert all(e["metadata"]["source_platform"] == "douyin" for e in memory.events)
+        assert all(e["metadata"]["source_account_id"] == "primary" for e in memory.events)
         assert len(memory.profile_signals) == 3
         assert [signal.payload["event_type"] for signal in memory.profile_signals] == [
             "favorite",
@@ -510,6 +556,48 @@ class TestDyTaskResult:
             "dy_collect:repeated-dy"
         ]
 
+    def test_dy_bootstrap_dedupes_independently_per_account(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        client, db, memory = dy_task_client
+
+        for account_id in ("primary", "account2"):
+            task_id = _enqueue_dy_bootstrap_task(
+                db,
+                {
+                    "account_id": account_id,
+                    "scopes": ["dy_like"],
+                    "skip_existing_bootstrap_keys": True,
+                },
+            )
+            response = client.post(
+                "/api/sources/dy/task-result",
+                json={
+                    "task_id": task_id,
+                    "status": "ok",
+                    "videos": [
+                        {
+                            "scope": "dy_like",
+                            "title": "shared liked video",
+                            "url": "https://www.douyin.com/video/shared-dy",
+                            "aweme_id": "shared-dy",
+                        }
+                    ],
+                    "scope_counts": {"dy_like": 1},
+                },
+            )
+            assert response.status_code == 200
+
+        assert [event["metadata"]["source_account_id"] for event in memory.events] == [
+            "primary",
+            "account2",
+        ]
+        state = memory.load_source_bootstrap_state()
+        assert state["dy_accounts"]["primary"]["dy_seen_video_keys"] == ["dy_like:shared-dy"]
+        assert state["dy_accounts"]["account2"]["dy_seen_video_keys"] == ["dy_like:shared-dy"]
+        assert state["dy_seen_video_keys"] == ["dy_like:shared-dy"]
+
     def test_dy_bootstrap_records_resumable_scope_progress(
         self,
         dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
@@ -556,6 +644,10 @@ class TestDyTaskResult:
         assert progress["dy_like"]["last_task_id"] == task_id
         assert progress["dy_like"]["page_url"].endswith("showTab=like")
         assert progress["dy_like"]["api_error"] == "HTTP 404"
+        account_progress = memory.load_source_bootstrap_state()["dy_accounts"]["primary"][
+            "dy_scope_progress"
+        ]
+        assert account_progress["dy_like"]["last_task_id"] == task_id
 
 
 class TestDyTaskKick:

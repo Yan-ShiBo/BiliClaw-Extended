@@ -98,3 +98,13 @@
 - `skip_item_key_count` 等于当前已见 `dy_like` 数量。
 - `dy_bootstrap_like` 对应事件数量继续增长。
 - `source_bootstrap_state.json` 的 `dy_scope_progress.dy_like.seen_count` 同步增长。
+
+## 2026-07-05 追加：任务页超时与多账号隔离
+
+- 页面“运行一会自己消失”的根因是扩展后台把抖音导入页当成临时任务页，任务超时后 `cleanupTask()` 会执行 `chrome.tabs.remove()`。现在已改为：`bootstrap_profile` 前台导入任务超时时保留抖音页面，搜索/热点/feed 等后台临时页仍自动清理。
+- 抖音喜欢很多时，原来的超时预算按 `scope_count * max_scroll_rounds * 3s + 30s` 计算；当前 `dy_like` 单 scope、30 轮只有约 120 秒，容易在大量旧喜欢需要跳过时超时。现在 bootstrap 任务改为每滚动轮 10 秒，并按 `skip_item_keys` 数量追加预算，最高 20 分钟。
+- 多账号不是并发抓取。正确流程是：同一个后端实例支持多个账号槽位；当前浏览器登录第一个账号时排 `account_id=primary` 任务，切到第二个抖音账号或另一个浏览器 Profile 后排 `account_id=account2` 任务。
+- `source_bootstrap_state.json` 新增 `dy_accounts.<account_id>`。每个抖音账号都有独立的 `dy_seen_video_keys` 和 `dy_scope_progress`，第二个账号不会被第一个账号的已见 key 跳过。旧的顶层 `dy_seen_video_keys` / `dy_scope_progress` 继续镜像 `primary`，兼容旧代码和旧文档。
+- 画像事件和向量库 metadata 现在写入 `source_account_id` / `account_id`。`primary` 继续使用旧向量 doc id；非 primary 账号使用 `<account_id>:<aweme_id>`，避免两个账号喜欢同一个视频时互相覆盖。
+
+继续第一个账号时使用 `account_id=primary`；切换到第二个账号后使用 `account_id=account2`。两个账号会分别续跑，但最终都会进入同一个总画像。

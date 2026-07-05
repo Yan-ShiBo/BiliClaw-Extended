@@ -124,6 +124,7 @@ interface ScopeExecuteMessage {
   max_stagnant_scroll_rounds: number;
   debug_inject_status?: string;
   cursor?: number;
+  account_id?: string;
 }
 
 interface ScopeResultPayload {
@@ -149,6 +150,7 @@ interface ScopeResultPayload {
     api_items_harvested?: number;
     api_pages_fetched?: number;
     api_error?: string;
+    account_id?: string;
     sec_uid?: string;
     end_of_feed?: string;
     inject_status?: string;
@@ -1298,6 +1300,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         api_items_harvested: apiItemsHarvested,
         api_pages_fetched: apiPagesFetched,
         api_error: apiError,
+        account_id: msg.account_id,
         sec_uid: _detectedSecUid,
         end_of_feed: endOfFeedPhrase,
         inject_status: msg.debug_inject_status,
@@ -1323,6 +1326,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         api_items_harvested: apiItemsHarvested,
         api_pages_fetched: apiPagesFetched,
         api_error: apiError,
+        account_id: msg.account_id,
         sec_uid: _detectedSecUid,
         end_of_feed: endOfFeedPhrase,
         inject_status: msg.debug_inject_status,
@@ -1632,6 +1636,7 @@ export function isValidScopeExecuteMessage(value: unknown): value is ScopeExecut
   if (typeof v.max_scroll_rounds !== "number") return false;
   if (typeof v.max_stagnant_scroll_rounds !== "number") return false;
   if (v.cursor !== undefined && typeof v.cursor !== "number") return false;
+  if (v.account_id !== undefined && typeof v.account_id !== "string") return false;
   return true;
 }
 

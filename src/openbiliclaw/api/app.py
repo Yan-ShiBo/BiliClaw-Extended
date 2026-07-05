@@ -1592,20 +1592,35 @@ def create_app(
         with suppress(Exception):
             save_state(normalize_source_bootstrap_state(state))
 
+    def _dy_bootstrap_account_id(value: object = "primary") -> str:
+        from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
+
+        return normalize_douyin_account_id(value)
+
     def _filter_new_source_bootstrap_items(
         source: str,
         items: list[dict[str, Any]],
         key_func: Callable[[dict[str, Any]], str],
+        *,
+        account_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], dict[int, str]]:
         """Filter bootstrap items that already propagated from an older task."""
         from openbiliclaw.sources.bootstrap_state import (
             as_string_list,
+            dy_account_bootstrap_state,
             source_bootstrap_state_key,
         )
 
         state = _load_source_bootstrap_state()
         state_key = source_bootstrap_state_key(source)
-        seen = set(as_string_list(state.get(state_key, [])))
+        if state_key == "dy_seen_video_keys":
+            dy_account_state = dy_account_bootstrap_state(
+                state,
+                _dy_bootstrap_account_id(account_id),
+            )
+            seen = set(as_string_list(dy_account_state.get("dy_seen_video_keys", [])))
+        else:
+            seen = set(as_string_list(state.get(state_key, [])))
         batch_seen: set[str] = set()
         fresh: list[dict[str, Any]] = []
         fresh_keys_by_index: dict[int, str] = {}
@@ -1618,7 +1633,12 @@ def create_app(
             fresh.append(item)
         return fresh, fresh_keys_by_index
 
-    def _mark_source_bootstrap_keys(source: str, keys: list[str]) -> None:
+    def _mark_source_bootstrap_keys(
+        source: str,
+        keys: list[str],
+        *,
+        account_id: str | None = None,
+    ) -> None:
         """Persist bootstrap keys that already entered the source event path."""
         if not keys:
             return
@@ -1626,12 +1646,21 @@ def create_app(
 
         from openbiliclaw.sources.bootstrap_state import (
             as_string_list,
+            dy_account_bootstrap_state,
+            set_dy_account_bootstrap_state,
             source_bootstrap_state_key,
         )
 
         state = _load_source_bootstrap_state()
         state_key = source_bootstrap_state_key(source)
-        merged = as_string_list(state.get(state_key, []))
+        if state_key == "dy_seen_video_keys":
+            dy_account_id = _dy_bootstrap_account_id(account_id)
+            dy_account_state = dy_account_bootstrap_state(state, dy_account_id)
+            merged = as_string_list(dy_account_state.get("dy_seen_video_keys", []))
+        else:
+            dy_account_id = ""
+            dy_account_state = {}
+            merged = as_string_list(state.get(state_key, []))
         seen = set(merged)
         for key in keys:
             normalized = str(key).strip()
@@ -1639,16 +1668,31 @@ def create_app(
                 continue
             seen.add(normalized)
             merged.append(normalized)
-        state[state_key] = merged
+        if state_key == "dy_seen_video_keys":
+            dy_account_state["dy_seen_video_keys"] = merged
+            state = set_dy_account_bootstrap_state(state, dy_account_id, dy_account_state)
+        else:
+            state[state_key] = merged
         state["last_source_bootstrap_sync_at"] = datetime.now(UTC).isoformat()
         _save_source_bootstrap_state(state)
 
-    def _dy_seen_bootstrap_keys_for_scopes(scopes: set[str]) -> list[str]:
+    def _dy_seen_bootstrap_keys_for_scopes(
+        scopes: set[str],
+        *,
+        account_id: str | None = None,
+    ) -> list[str]:
         """Return persisted Douyin bootstrap keys, optionally scoped."""
-        from openbiliclaw.sources.bootstrap_state import as_string_list
+        from openbiliclaw.sources.bootstrap_state import (
+            as_string_list,
+            dy_account_bootstrap_state,
+        )
 
         state = _load_source_bootstrap_state()
-        keys = as_string_list(state.get("dy_seen_video_keys", []))
+        dy_account_state = dy_account_bootstrap_state(
+            state,
+            _dy_bootstrap_account_id(account_id),
+        )
+        keys = as_string_list(dy_account_state.get("dy_seen_video_keys", []))
         if not scopes:
             return keys
         prefixes = {f"{scope}:" for scope in scopes if scope}
@@ -1656,24 +1700,28 @@ def create_app(
 
     def _augment_dy_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
         """Attach skip keys for resumable Douyin bootstrap batches."""
+        account_id = _dy_bootstrap_account_id(payload.get("account_id", "primary"))
+        augmented = dict(payload)
+        augmented["account_id"] = account_id
         if not bool(payload.get("skip_existing_bootstrap_keys")):
-            return payload
+            return augmented
         scopes_raw = payload.get("scopes")
         scopes = {
             str(scope).strip()
             for scope in scopes_raw
             if isinstance(scope, str) and scope.strip()
         } if isinstance(scopes_raw, list) else set()
-        skip_keys = _dy_seen_bootstrap_keys_for_scopes(scopes)
-        if not skip_keys:
-            return payload
-        augmented = dict(payload)
-        augmented["skip_item_keys"] = skip_keys
-        augmented["skip_item_key_count"] = len(skip_keys)
+        skip_keys = _dy_seen_bootstrap_keys_for_scopes(scopes, account_id=account_id)
+        if skip_keys:
+            augmented["skip_item_keys"] = skip_keys
+            augmented["skip_item_key_count"] = len(skip_keys)
 
         # Add cursors for scopes that have them
+        from openbiliclaw.sources.bootstrap_state import dy_account_bootstrap_state
+
         state = _load_source_bootstrap_state()
-        progress = state.get("dy_scope_progress", {})
+        dy_account_state = dy_account_bootstrap_state(state, account_id)
+        progress = dy_account_state.get("dy_scope_progress", {})
         if isinstance(progress, dict):
             cursors = {}
             for scope in scopes:
@@ -1693,6 +1741,7 @@ def create_app(
         scope_counts: dict[str, Any] | None,
         debug: dict[str, Any] | None,
         next_cursor: int | None = None,
+        account_id: str | None = None,
     ) -> None:
         """Persist a resumable checkpoint for one Douyin bootstrap scope."""
         if not scope:
@@ -1701,13 +1750,17 @@ def create_app(
 
         from openbiliclaw.sources.bootstrap_state import (
             as_string_list,
+            dy_account_bootstrap_state,
             normalize_dy_scope_progress,
+            set_dy_account_bootstrap_state,
         )
 
         state = _load_source_bootstrap_state()
-        progress = normalize_dy_scope_progress(state.get("dy_scope_progress", {}))
+        dy_account_id = _dy_bootstrap_account_id(account_id)
+        dy_account_state = dy_account_bootstrap_state(state, dy_account_id)
+        progress = normalize_dy_scope_progress(dy_account_state.get("dy_scope_progress", {}))
         entry = dict(progress.get(scope, {})) if isinstance(progress.get(scope), dict) else {}
-        seen_keys = as_string_list(state.get("dy_seen_video_keys", []))
+        seen_keys = as_string_list(dy_account_state.get("dy_seen_video_keys", []))
         scoped_seen_count = sum(1 for key in seen_keys if key.startswith(f"{scope}:"))
         last_key = propagated_keys[-1] if propagated_keys else str(entry.get("last_key", ""))
         last_aweme_id = last_key.split(":", 1)[1] if ":" in last_key else ""
@@ -1715,7 +1768,7 @@ def create_app(
         last_scope_count = 0
         if isinstance(scope_counts, dict):
             raw_count = scope_counts.get(scope, 0)
-            if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool):
+            if isinstance(raw_count, int | float) and not isinstance(raw_count, bool):
                 last_scope_count = max(0, int(raw_count))
         progress[scope] = {
             "seen_count": scoped_seen_count,
@@ -1734,9 +1787,45 @@ def create_app(
         elif "next_cursor" in entry:
             # Preserve existing cursor if not updated
             progress[scope]["next_cursor"] = entry["next_cursor"]
-        state["dy_scope_progress"] = progress
+        dy_account_state["dy_scope_progress"] = progress
+        state = set_dy_account_bootstrap_state(state, dy_account_id, dy_account_state)
         state["last_source_bootstrap_sync_at"] = datetime.now(UTC).isoformat()
         _save_source_bootstrap_state(state)
+
+    def _dy_task_account_id(
+        task: dict[str, Any] | None,
+        result_payload: dict[str, Any] | None = None,
+    ) -> str:
+        raw: object = None
+        if isinstance(task, dict):
+            with suppress(Exception):
+                import json as _json
+
+                task_payload = _json.loads(task.get("payload_json") or "{}")
+                if isinstance(task_payload, dict):
+                    raw = task_payload.get("account_id") or raw
+        if isinstance(result_payload, dict):
+            raw = result_payload.get("account_id") or raw
+            debug_payload = result_payload.get("debug")
+            if isinstance(debug_payload, dict):
+                raw = debug_payload.get("account_id") or raw
+        return _dy_bootstrap_account_id(raw or "primary")
+
+    def _attach_dy_account_metadata(
+        videos: list[dict[str, Any]],
+        *,
+        account_id: str,
+    ) -> list[dict[str, Any]]:
+        normalized_account_id = _dy_bootstrap_account_id(account_id)
+        attached: list[dict[str, Any]] = []
+        for video in videos:
+            if not isinstance(video, dict):
+                continue
+            item = dict(video)
+            item["source_account_id"] = normalized_account_id
+            item.setdefault("account_id", normalized_account_id)
+            attached.append(item)
+        return attached
 
     def _schedule_dy_like_vector_upsert(videos: list[dict[str, Any]]) -> None:
         """Best-effort background indexing for newly persisted Douyin likes."""
@@ -7472,6 +7561,7 @@ def create_app(
 
         task = _dy_task_queue.get(task_id)
         task_type = str(task.get("type", "")).strip() if task else ""
+        account_id = _dy_task_account_id(task, payload)
 
         if status in {"partial", "ok"} or (status == "empty" and task_type == "bootstrap_profile"):
             is_final = status == "ok" or (status == "empty" and task_type == "bootstrap_profile")
@@ -7489,10 +7579,12 @@ def create_app(
             _init_busy = _init_active_now()
             _skip_profile = _init_busy and not _init_owns_task(task_id)
             if task_type == "bootstrap_profile" and added_videos and not _skip_profile:
+                added_videos = _attach_dy_account_metadata(added_videos, account_id=account_id)
                 fresh_videos, video_keys_by_index = _filter_new_source_bootstrap_items(
                     "dy",
                     added_videos,
                     dy_bootstrap_video_key,
+                    account_id=account_id,
                 )
                 _schedule_dy_like_vector_upsert(fresh_videos)
                 profile_events: list[dict[str, Any]] = []
@@ -7504,7 +7596,7 @@ def create_app(
                         key = video_keys_by_index.get(index, "")
                         if key:
                             propagated_keys.append(key)
-                _mark_source_bootstrap_keys("dy", propagated_keys)
+                _mark_source_bootstrap_keys("dy", propagated_keys, account_id=account_id)
                 keys_by_scope: dict[str, list[str]] = {}
                 for key in propagated_keys:
                     scope = key.split(":", 1)[0] if ":" in key else ""
@@ -7522,6 +7614,7 @@ def create_app(
                         scope_counts=scope_counts,
                         debug=debug,
                         next_cursor=payload.get("next_cursor"),
+                        account_id=account_id,
                     )
                 # Skip the incremental pipeline during init (see xhs handler).
                 if not _init_busy:

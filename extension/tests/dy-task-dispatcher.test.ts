@@ -96,6 +96,7 @@ test("isValidDyTask accepts bootstrap_profile with optional payload fields", () 
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
       skip_item_keys: ["dy_like:old"],
+      account_id: "account2",
     }),
     true,
   );
@@ -172,8 +173,8 @@ test("computeDyTaskTimeoutMs scales with max_scroll_rounds × number of scopes",
     max_scroll_rounds: 15,
     scopes: ["dy_post", "dy_collect", "dy_like", "dy_follow"],
   });
-  assert.ok(big >= 30_000, `expected >= 30s, got ${big}`);
-  assert.ok(big <= 360_000, `expected <= 360s ceiling, got ${big}`);
+  assert.ok(big >= 600_000, `expected >= 600s, got ${big}`);
+  assert.ok(big <= 1_200_000, `expected <= 20min ceiling, got ${big}`);
   assert.ok(big > 60_000, `15 rounds × 4 scopes should clear 60s, got ${big}`);
 });
 
@@ -186,6 +187,19 @@ test("computeDyTaskTimeoutMs falls back to 4-scope assumption when scopes omitte
     max_scroll_rounds: 5,
   });
   assert.ok(timeout > 30_000, `expected > 30s with 5 rounds, got ${timeout}`);
+});
+
+test("computeDyTaskTimeoutMs gives liked imports enough time to skip prior batches", () => {
+  const timeout = computeDyTaskTimeoutMs({
+    id: "t",
+    type: "bootstrap_profile",
+    scopes: ["dy_like"],
+    max_scroll_rounds: 30,
+    skip_item_keys: Array.from({ length: 600 }, (_, index) => `dy_like:${index}`),
+  });
+
+  assert.ok(timeout >= 450_000, `expected >= 450s for large liked import, got ${timeout}`);
+  assert.ok(timeout <= 1_200_000, `expected <= 20min ceiling, got ${timeout}`);
 });
 
 test("computeDyTaskTimeoutMs gives search enough time for DOM-triggered loading", () => {
@@ -228,6 +242,7 @@ test("buildDyExecuteMessageData includes only the fields the executor needs", ()
     max_items_per_scope: 300,
     max_new_items_per_scope: 120,
     skip_item_keys: ["dy_like:old"],
+    account_id: "account2",
     max_scroll_rounds: 15,
     max_stagnant_scroll_rounds: 5,
   });
@@ -237,6 +252,7 @@ test("buildDyExecuteMessageData includes only the fields the executor needs", ()
   assert.equal(data.max_items_per_scope, 300);
   assert.equal(data.max_new_items_per_scope, 120);
   assert.deepEqual(data.skip_item_keys, ["dy_like:old"]);
+  assert.equal(data.account_id, "account2");
   assert.equal(data.max_scroll_rounds, 15);
   assert.equal(data.max_stagnant_scroll_rounds, 5);
 });

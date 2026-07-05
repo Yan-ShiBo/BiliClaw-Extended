@@ -77,6 +77,7 @@ def dy_bootstrap_videos_to_events(
     ``aweme_id``) is the natural identity key, so we propagate that
     instead under the same metadata field name.
     """
+    from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
     from openbiliclaw.sources.event_format import SOURCE_DOUYIN, build_event
 
     events: list[dict[str, Any]] = []
@@ -109,6 +110,9 @@ def dy_bootstrap_videos_to_events(
         # scope_short strips the "dy_" prefix so import_source reads
         # "dy_bootstrap_collect" rather than "dy_bootstrap_dy_collect".
         scope_short = scope.removeprefix("dy_") if scope.startswith("dy_") else scope
+        source_account_id = normalize_douyin_account_id(
+            item.get("source_account_id") or item.get("account_id") or "primary"
+        )
 
         metadata: dict[str, Any] = {
             identity_key: identity_value,
@@ -116,6 +120,8 @@ def dy_bootstrap_videos_to_events(
             "cover_url": str(item.get("cover_url", "")).strip(),
             "import_source": f"dy_bootstrap_{scope_short}",
             "signal_strength": DY_BOOTSTRAP_SIGNAL_STRENGTH[scope],
+            "source_account_id": source_account_id,
+            "account_id": source_account_id,
         }
 
         events.append(

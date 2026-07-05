@@ -70,11 +70,26 @@ def _clean_metadata(metadata: dict[str, Any]) -> dict[str, str | int | float | b
     for key, value in metadata.items():
         if value is None:
             continue
-        if isinstance(value, (str, int, float, bool)):
+        if isinstance(value, str | int | float | bool):
             clean[str(key)] = value
         else:
             clean[str(key)] = str(value)
     return clean
+
+
+def _normalize_dy_vector_account_id(value: object) -> str:
+    try:
+        from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
+
+        return normalize_douyin_account_id(value)
+    except Exception:
+        account_id = str(value or "").strip().lower()
+        return account_id or "primary"
+
+
+def _dy_account_scoped_doc_id(doc_id: str, account_id: str) -> str:
+    account = _normalize_dy_vector_account_id(account_id)
+    return doc_id if account == "primary" else f"{account}:{doc_id}"
 
 
 def _dy_like_document_from_video(video: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
@@ -104,7 +119,12 @@ def _dy_like_document_from_video(video: dict[str, Any]) -> tuple[str, str, dict[
         "source_platform": "douyin",
         "import_source": "dy_bootstrap_like",
     }
-    return doc_id, text, metadata
+    source_account_id = _normalize_dy_vector_account_id(
+        video.get("source_account_id") or video.get("account_id") or "primary"
+    )
+    metadata["source_account_id"] = source_account_id
+    metadata["account_id"] = source_account_id
+    return _dy_account_scoped_doc_id(doc_id, source_account_id), text, metadata
 
 
 def _dy_like_document_from_event(event: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
@@ -141,7 +161,12 @@ def _dy_like_document_from_event(event: dict[str, Any]) -> tuple[str, str, dict[
             "import_source": "dy_bootstrap_like",
         }
     )
-    return doc_id, text, metadata
+    source_account_id = _normalize_dy_vector_account_id(
+        metadata.get("source_account_id") or metadata.get("account_id") or "primary"
+    )
+    metadata["source_account_id"] = source_account_id
+    metadata["account_id"] = source_account_id
+    return _dy_account_scoped_doc_id(doc_id, source_account_id), text, metadata
 
 
 class OllamaEmbeddingFunction(EmbeddingFunction):

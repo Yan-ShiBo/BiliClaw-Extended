@@ -14,8 +14,9 @@
  *   2. Listens for `DY_TASK_RESULT` messages from the content script
  *      (partial + final).
  *   3. POSTs each result back to `/api/sources/dy/task-result`.
- *   4. Closes the tab on the final (status=ok / failed / empty) result
- *      or on timeout.
+ *   4. Closes temporary discovery tabs on the final result. Foreground
+ *      bootstrap tabs are left visible on timeout so long-running imports
+ *      don't look like the Douyin page disappeared by itself.
  *   5. Waits ``DEFAULT_POLL_INTERVAL_MS`` before asking for the next.
  *
  * Only one task is in flight at a time (mutex). Bootstrap tasks get a
@@ -33,7 +34,7 @@ import { apiUrl } from "../shared/backend-endpoint.ts";
 // in xhs-task-dispatcher; both dispatchers coordinate by writing to
 // the same field on globalThis. See dispatcher-mutex.ts for the
 // canonical reference (kept as documentation, not an import target).
-const _MUTEX_STALE_MS = 6 * 60 * 1000;
+const _MUTEX_STALE_MS = 25 * 60 * 1000;
 function tryAcquireDispatcherMutex(label: string): boolean {
   const g = globalThis as unknown as {
     __OBC_DISPATCHER_MUTEX_HOLDER__?: string;
@@ -95,8 +96,10 @@ async function loadBuildScopeUrl(): Promise<
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
 const TASK_TIMEOUT_MS = 30_000;
 const SEARCH_TASK_TIMEOUT_MS = 180_000;
-const BOOTSTRAP_PER_ROUND_TIMEOUT_MS = 3_000;
-const BOOTSTRAP_MAX_TASK_TIMEOUT_MS = 360_000;
+const DISCOVERY_MAX_TASK_TIMEOUT_MS = 360_000;
+const BOOTSTRAP_PER_ROUND_TIMEOUT_MS = 10_000;
+const BOOTSTRAP_PER_SKIPPED_ITEM_TIMEOUT_MS = 250;
+const BOOTSTRAP_MAX_TASK_TIMEOUT_MS = 20 * 60_000;
 const POLL_ALARM_NAME = "openbiliclaw-dy-task-poll";
 const KNOWN_SCOPES: readonly DouyinScope[] = [
   "dy_post",
@@ -115,6 +118,7 @@ export interface DyTask {
   max_stagnant_scroll_rounds?: number;
   skip_item_keys?: string[];
   cursors?: Partial<Record<DouyinScope, number>>;
+  account_id?: string;
   keywords?: string[];
   max_items_per_keyword?: number;
   hot_items?: DyHotTaskItem[];
@@ -162,6 +166,7 @@ interface TaskProgress {
   max_stagnant_scroll_rounds: number;
   skip_item_keys: string[];
   cursors: Partial<Record<DouyinScope, number>>;
+  account_id: string;
 }
 
 let progress: TaskProgress | null = null;
@@ -249,6 +254,7 @@ export function isValidDyTask(task: unknown): task is DyTask {
       if (!KNOWN_SCOPES.includes(s as DouyinScope)) return false;
     }
   }
+  if (t.account_id !== undefined && typeof t.account_id !== "string") return false;
   return true;
 }
 
@@ -258,7 +264,7 @@ export function computeDyTaskTimeoutMs(task: DyTask): number {
       Array.isArray(task.keywords) && task.keywords.length > 0 ? task.keywords.length : 1;
     return Math.min(
       Math.max(SEARCH_TASK_TIMEOUT_MS, keywordCount * SEARCH_TASK_TIMEOUT_MS),
-      BOOTSTRAP_MAX_TASK_TIMEOUT_MS,
+      DISCOVERY_MAX_TASK_TIMEOUT_MS,
     );
   }
   if (task.type === "hot") {
@@ -266,11 +272,11 @@ export function computeDyTaskTimeoutMs(task: DyTask): number {
       Array.isArray(task.hot_items) && task.hot_items.length > 0 ? task.hot_items.length : 1;
     return Math.min(
       Math.max(TASK_TIMEOUT_MS, TASK_TIMEOUT_MS + hotCount * 70_000),
-      BOOTSTRAP_MAX_TASK_TIMEOUT_MS,
+      DISCOVERY_MAX_TASK_TIMEOUT_MS,
     );
   }
   if (task.type === "feed") {
-    return Math.min(Math.max(TASK_TIMEOUT_MS, 60_000), BOOTSTRAP_MAX_TASK_TIMEOUT_MS);
+    return Math.min(Math.max(TASK_TIMEOUT_MS, 60_000), DISCOVERY_MAX_TASK_TIMEOUT_MS);
   }
   // Default per-task timeout has to account for the executor visiting
   // up to 4 scope tabs in series, each scrolling up to N rounds. We
@@ -285,8 +291,10 @@ export function computeDyTaskTimeoutMs(task: DyTask): number {
       ? Math.max(0, Math.floor(task.max_scroll_rounds))
       : 0;
   const scrollBudget = scopeCount * rounds * BOOTSTRAP_PER_ROUND_TIMEOUT_MS;
+  const skippedItemCount = Array.isArray(task.skip_item_keys) ? task.skip_item_keys.length : 0;
+  const skippedItemBudget = skippedItemCount * BOOTSTRAP_PER_SKIPPED_ITEM_TIMEOUT_MS;
   return Math.min(
-    Math.max(TASK_TIMEOUT_MS, TASK_TIMEOUT_MS + scrollBudget),
+    Math.max(TASK_TIMEOUT_MS, TASK_TIMEOUT_MS + scrollBudget + skippedItemBudget),
     BOOTSTRAP_MAX_TASK_TIMEOUT_MS,
   );
 }
@@ -302,6 +310,7 @@ export function buildDyExecuteMessageData(task: DyTask): Record<string, unknown>
   }
   if (task.skip_item_keys !== undefined) data.skip_item_keys = task.skip_item_keys;
   if (task.cursors !== undefined) data.cursors = task.cursors;
+  if (task.account_id !== undefined) data.account_id = task.account_id;
   if (task.max_scroll_rounds !== undefined) data.max_scroll_rounds = task.max_scroll_rounds;
   if (task.max_stagnant_scroll_rounds !== undefined) {
     data.max_stagnant_scroll_rounds = task.max_stagnant_scroll_rounds;
@@ -366,12 +375,12 @@ async function postTaskResult(result: DyTaskResult): Promise<void> {
   }
 }
 
-function cleanupTask(): void {
+function cleanupTask(options: { preserveOwnedTab?: boolean } = {}): void {
   if (taskTimeoutId !== null) {
     clearTimeout(taskTimeoutId);
     taskTimeoutId = null;
   }
-  if (ownsTaskTab && taskTabId !== null) {
+  if (ownsTaskTab && taskTabId !== null && options.preserveOwnedTab !== true) {
     try {
       chrome.tabs.remove(taskTabId);
     } catch {
@@ -401,7 +410,7 @@ function armTaskTimeout(task: DyTask): void {
       status: "failed",
       error: "task_timeout",
     });
-    cleanupTask();
+    cleanupTask({ preserveOwnedTab: task.type === "bootstrap_profile" });
   }, timeoutMs);
 }
 
@@ -491,6 +500,7 @@ function sendScopeExecuteMessage(): void {
         max_new_items_per_scope: progress.max_new_items_per_scope,
         skip_item_keys: progress.skip_item_keys.filter((key) => key.startsWith(`${scope}:`)),
         cursor: progress.cursors[scope],
+        account_id: progress.account_id,
         max_scroll_rounds: progress.max_scroll_rounds,
         max_stagnant_scroll_rounds: progress.max_stagnant_scroll_rounds,
         debug_inject_status: _lastInjectStatus,
@@ -861,6 +871,9 @@ export async function executeTask(task: DyTask): Promise<void> {
       ? task.skip_item_keys.filter((key) => typeof key === "string" && key.trim())
       : [],
     cursors: task.cursors ?? {},
+    account_id: typeof task.account_id === "string" && task.account_id.trim()
+      ? task.account_id.trim()
+      : "primary",
   };
 
   // Open the Douyin homepage first instead of jumping straight to

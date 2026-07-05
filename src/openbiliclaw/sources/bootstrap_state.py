@@ -22,6 +22,7 @@ def default_source_bootstrap_state() -> dict[str, object]:
         "xhs_seen_note_keys": [],
         "dy_seen_video_keys": [],
         "dy_scope_progress": {},
+        "dy_accounts": {},
         "yt_seen_item_keys": [],
         "zhihu_seen_item_keys": [],
         "last_source_bootstrap_sync_at": "",
@@ -97,17 +98,126 @@ def normalize_dy_scope_progress(value: Any) -> dict[str, object]:
     return progress
 
 
+def normalize_dy_account_bootstrap_state(value: Any) -> dict[str, object]:
+    """Normalize one account's Douyin bootstrap state."""
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "dy_seen_video_keys": as_string_list(value.get("dy_seen_video_keys", [])),
+        "dy_scope_progress": normalize_dy_scope_progress(
+            value.get("dy_scope_progress", {})
+        ),
+    }
+
+
+def _merge_string_lists(left: list[str], right: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*left, *right]:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return merged
+
+
+def _merge_dy_account_states(
+    base: dict[str, object],
+    incoming: dict[str, object],
+) -> dict[str, object]:
+    base_norm = normalize_dy_account_bootstrap_state(base)
+    incoming_norm = normalize_dy_account_bootstrap_state(incoming)
+    progress = dict(base_norm.get("dy_scope_progress", {}))
+    incoming_progress = incoming_norm.get("dy_scope_progress", {})
+    if isinstance(incoming_progress, dict):
+        progress.update(incoming_progress)
+    return {
+        "dy_seen_video_keys": _merge_string_lists(
+            as_string_list(base_norm.get("dy_seen_video_keys", [])),
+            as_string_list(incoming_norm.get("dy_seen_video_keys", [])),
+        ),
+        "dy_scope_progress": normalize_dy_scope_progress(progress),
+    }
+
+
+def normalize_dy_accounts(value: Any) -> dict[str, object]:
+    """Normalize all persisted Douyin account bootstrap states."""
+    if not isinstance(value, dict):
+        return {}
+    from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
+
+    accounts: dict[str, object] = {}
+    for raw_account_id, raw_account_state in value.items():
+        account_id = normalize_douyin_account_id(raw_account_id)
+        normalized = normalize_dy_account_bootstrap_state(raw_account_state)
+        if account_id in accounts:
+            accounts[account_id] = _merge_dy_account_states(
+                accounts[account_id], normalized
+            )
+        else:
+            accounts[account_id] = normalized
+    return accounts
+
+
+def dy_account_bootstrap_state(
+    state: dict[str, object],
+    account_id: object,
+) -> dict[str, object]:
+    """Return one normalized Douyin account state from a full bootstrap state."""
+    from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
+
+    normalized = normalize_source_bootstrap_state(state)
+    account = normalize_douyin_account_id(account_id)
+    accounts = normalize_dy_accounts(normalized.get("dy_accounts", {}))
+    return normalize_dy_account_bootstrap_state(accounts.get(account, {}))
+
+
+def set_dy_account_bootstrap_state(
+    state: dict[str, object],
+    account_id: object,
+    account_state: dict[str, object],
+) -> dict[str, object]:
+    """Set one Douyin account state and mirror primary for legacy callers."""
+    from openbiliclaw.sources.douyin_auth import normalize_douyin_account_id
+
+    normalized = normalize_source_bootstrap_state(state)
+    account = normalize_douyin_account_id(account_id)
+    accounts = normalize_dy_accounts(normalized.get("dy_accounts", {}))
+    normalized_account_state = normalize_dy_account_bootstrap_state(account_state)
+    accounts[account] = normalized_account_state
+    normalized["dy_accounts"] = accounts
+    if account == "primary":
+        normalized["dy_seen_video_keys"] = normalized_account_state["dy_seen_video_keys"]
+        normalized["dy_scope_progress"] = normalized_account_state["dy_scope_progress"]
+    return normalized
+
+
 def normalize_source_bootstrap_state(loaded: Any) -> dict[str, object]:
     """Coerce arbitrary JSON into the stable source-bootstrap state shape."""
     default = default_source_bootstrap_state()
     if not isinstance(loaded, dict):
         return default
+    dy_seen_video_keys = as_string_list(loaded.get("dy_seen_video_keys", []))
+    dy_scope_progress = normalize_dy_scope_progress(
+        loaded.get("dy_scope_progress", {})
+    )
+    dy_accounts = normalize_dy_accounts(loaded.get("dy_accounts", {}))
+    if dy_seen_video_keys or dy_scope_progress:
+        primary_state = _merge_dy_account_states(
+            {
+                "dy_seen_video_keys": dy_seen_video_keys,
+                "dy_scope_progress": dy_scope_progress,
+            },
+            dy_accounts.get("primary", {}),
+        )
+        dy_accounts["primary"] = primary_state
+    primary = normalize_dy_account_bootstrap_state(dy_accounts.get("primary", {}))
     return {
         "xhs_seen_note_keys": as_string_list(loaded.get("xhs_seen_note_keys", [])),
-        "dy_seen_video_keys": as_string_list(loaded.get("dy_seen_video_keys", [])),
-        "dy_scope_progress": normalize_dy_scope_progress(
-            loaded.get("dy_scope_progress", {})
-        ),
+        "dy_seen_video_keys": primary["dy_seen_video_keys"],
+        "dy_scope_progress": primary["dy_scope_progress"],
+        "dy_accounts": dy_accounts,
         "yt_seen_item_keys": as_string_list(loaded.get("yt_seen_item_keys", [])),
         "zhihu_seen_item_keys": as_string_list(loaded.get("zhihu_seen_item_keys", [])),
         "last_source_bootstrap_sync_at": str(loaded.get("last_source_bootstrap_sync_at", "")),
