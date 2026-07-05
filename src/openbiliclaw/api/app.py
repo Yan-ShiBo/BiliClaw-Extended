@@ -1636,6 +1636,127 @@ def create_app(
         state["last_source_bootstrap_sync_at"] = datetime.now(UTC).isoformat()
         _save_source_bootstrap_state(state)
 
+    def _dy_seen_bootstrap_keys_for_scopes(scopes: set[str]) -> list[str]:
+        """Return persisted Douyin bootstrap keys, optionally scoped."""
+        from openbiliclaw.sources.bootstrap_state import as_string_list
+
+        state = _load_source_bootstrap_state()
+        keys = as_string_list(state.get("dy_seen_video_keys", []))
+        if not scopes:
+            return keys
+        prefixes = {f"{scope}:" for scope in scopes if scope}
+        return [key for key in keys if any(key.startswith(prefix) for prefix in prefixes)]
+
+    def _augment_dy_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Attach skip keys for resumable Douyin bootstrap batches."""
+        if not bool(payload.get("skip_existing_bootstrap_keys")):
+            return payload
+        scopes_raw = payload.get("scopes")
+        scopes = {
+            str(scope).strip()
+            for scope in scopes_raw
+            if isinstance(scope, str) and scope.strip()
+        } if isinstance(scopes_raw, list) else set()
+        skip_keys = _dy_seen_bootstrap_keys_for_scopes(scopes)
+        if not skip_keys:
+            return payload
+        augmented = dict(payload)
+        augmented["skip_item_keys"] = skip_keys
+        augmented["skip_item_key_count"] = len(skip_keys)
+
+        # Add cursors for scopes that have them
+        state = _load_source_bootstrap_state()
+        progress = state.get("dy_scope_progress", {})
+        if isinstance(progress, dict):
+            cursors = {}
+            for scope in scopes:
+                scope_prog = progress.get(scope, {})
+                if isinstance(scope_prog, dict) and "next_cursor" in scope_prog:
+                    cursors[scope] = scope_prog["next_cursor"]
+            if cursors:
+                augmented["cursors"] = cursors
+
+        return augmented
+
+    def _record_dy_scope_progress(
+        *,
+        task_id: str,
+        scope: str,
+        propagated_keys: list[str],
+        scope_counts: dict[str, Any] | None,
+        debug: dict[str, Any] | None,
+        next_cursor: int | None = None,
+    ) -> None:
+        """Persist a resumable checkpoint for one Douyin bootstrap scope."""
+        if not scope:
+            return
+        from datetime import UTC, datetime
+
+        from openbiliclaw.sources.bootstrap_state import (
+            as_string_list,
+            normalize_dy_scope_progress,
+        )
+
+        state = _load_source_bootstrap_state()
+        progress = normalize_dy_scope_progress(state.get("dy_scope_progress", {}))
+        entry = dict(progress.get(scope, {})) if isinstance(progress.get(scope), dict) else {}
+        seen_keys = as_string_list(state.get("dy_seen_video_keys", []))
+        scoped_seen_count = sum(1 for key in seen_keys if key.startswith(f"{scope}:"))
+        last_key = propagated_keys[-1] if propagated_keys else str(entry.get("last_key", ""))
+        last_aweme_id = last_key.split(":", 1)[1] if ":" in last_key else ""
+        debug_payload = debug or {}
+        last_scope_count = 0
+        if isinstance(scope_counts, dict):
+            raw_count = scope_counts.get(scope, 0)
+            if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool):
+                last_scope_count = max(0, int(raw_count))
+        progress[scope] = {
+            "seen_count": scoped_seen_count,
+            "last_batch_new_count": len(propagated_keys),
+            "last_scope_count": last_scope_count,
+            "last_key": last_key,
+            "last_aweme_id": last_aweme_id,
+            "last_task_id": task_id,
+            "last_batch_at": datetime.now(UTC).isoformat(),
+            "end_of_feed": str(debug_payload.get("end_of_feed", "")),
+            "page_url": str(debug_payload.get("page_url", "")),
+            "api_error": str(debug_payload.get("api_error", "")),
+        }
+        if next_cursor is not None:
+            progress[scope]["next_cursor"] = next_cursor
+        elif "next_cursor" in entry:
+            # Preserve existing cursor if not updated
+            progress[scope]["next_cursor"] = entry["next_cursor"]
+        state["dy_scope_progress"] = progress
+        state["last_source_bootstrap_sync_at"] = datetime.now(UTC).isoformat()
+        _save_source_bootstrap_state(state)
+
+    def _schedule_dy_like_vector_upsert(videos: list[dict[str, Any]]) -> None:
+        """Best-effort background indexing for newly persisted Douyin likes."""
+        dy_like_videos = [
+            video
+            for video in videos
+            if isinstance(video, dict) and str(video.get("scope", "")).strip() == "dy_like"
+        ]
+        if not dy_like_videos:
+            return
+        vector_store = getattr(ctx.memory_manager, "vector_store", None)
+        upsert_many = getattr(vector_store, "upsert_dy_like_videos", None)
+        if not callable(upsert_many):
+            return
+
+        async def _run() -> None:
+            try:
+                count = await asyncio.to_thread(upsert_many, dy_like_videos)
+                logger.info("Douyin like vector upsert scheduled batch complete: %d", count)
+            except Exception:
+                logger.warning("Douyin like vector upsert failed", exc_info=True)
+
+        try:
+            asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            logger.debug("Douyin like vector upsert skipped: no running event loop")
+
     chat_turn_lock = asyncio.Lock()
     fallback_chat_turns: dict[str, dict[str, Any]] = {}
     running_chat_turn_tasks: set[str] = set()
@@ -2452,7 +2573,10 @@ def create_app(
         persist the browser-provided Cookie header as-is and let discovery
         smoke surface whether search / hot / feed calls return content.
         """
-        from openbiliclaw.sources.douyin_auth import DouyinCookieManager
+        from openbiliclaw.sources.douyin_auth import (
+            DouyinCookieManager,
+            normalize_douyin_account_id,
+        )
         from openbiliclaw.sources.douyin_direct import parse_cookie_header
 
         cookie_value = payload.cookie.strip()
@@ -2466,7 +2590,19 @@ def create_app(
 
         runtime_config = getattr(ctx, "config", None) or config
         manager = DouyinCookieManager(runtime_config.data_path)
-        manager.set_cookie(cookie_value, source=payload.source)
+        explicit_account_id = "account_id" in getattr(payload, "model_fields_set", set())
+        account_id = (
+            normalize_douyin_account_id(payload.account_id)
+            if explicit_account_id and str(payload.account_id).strip().lower() != "auto"
+            else manager.account_id_for_cookie(cookie_value)
+        )
+        manager.set_cookie(
+            cookie_value,
+            source=payload.source,
+            account_id=account_id,
+            label=payload.label,
+        )
+        records = manager.load_records(include_legacy=True)
         cookie_names = sorted(parse_cookie_header(cookie_value).keys())
 
         with suppress(Exception):
@@ -2474,7 +2610,9 @@ def create_app(
                 {
                     "type": "douyin_cookie_synced",
                     "source": payload.source,
+                    "account_id": account_id,
                     "cookie_names": cookie_names,
+                    "account_count": len(records),
                 }
             )
 
@@ -2482,6 +2620,9 @@ def create_app(
             ok=True,
             has_cookie=True,
             cookie_names=cookie_names,
+            account_id=account_id,
+            account_count=len(records),
+            account_ids=[record.account_id for record in records],
             message="Douyin Cookie synced.",
         )
 
@@ -2717,7 +2858,7 @@ def create_app(
             client_name = str(websocket.query_params.get("client", "") or "").strip().lower()
             if client_name in {"background", "extension", "service-worker"}:
                 from openbiliclaw.bilibili.auth import resolve_runtime_cookie
-                from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie
+                from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie_records
 
                 runtime_config = getattr(ctx, "config", None) or config
                 with suppress(Exception):
@@ -2736,13 +2877,13 @@ def create_app(
                 with suppress(Exception):
                     dy_cfg = getattr(runtime_config.sources, "douyin", None)
                     if dy_cfg is not None and bool(getattr(dy_cfg, "enabled", False)):
-                        dy_cookie = resolve_douyin_cookie(
+                        dy_records = resolve_douyin_cookie_records(
                             data_dir=runtime_config.data_path,
                             cookie_env=str(
                                 getattr(dy_cfg, "cookie_env", "OPENBILICLAW_DOUYIN_COOKIE")
                             ),
                         )
-                        if not str(dy_cookie or "").strip():
+                        if not dy_records:
                             await websocket.send_json(
                                 {
                                     "type": "douyin_cookie_sync_requested",
@@ -6905,21 +7046,25 @@ def create_app(
                 detail="未检测到访问令牌 —— 在浏览器登录小红书后插件会自动同步。",
             )
 
-        # ── 抖音: cookie resolvable from env / data/douyin_cookie.json ──
+        # ── 抖音: cookies resolvable from env / data/douyin_cookies.json ──
         dy_enabled = bool(getattr(srcs.douyin, "enabled", False))
-        dy_cookie = ""
+        dy_records: list[Any] = []
         try:
-            from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie
+            from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie_records
 
-            dy_cookie = resolve_douyin_cookie(
+            dy_records = resolve_douyin_cookie_records(
                 data_dir=cfg.data_path,
                 cookie_env=getattr(srcs.douyin, "cookie_env", "OPENBILICLAW_DOUYIN_COOKIE"),
             )
         except Exception:  # pragma: no cover - defensive
-            dy_cookie = ""
-        if dy_cookie.strip():
+            dy_records = []
+        if dy_records:
+            count = len(dy_records)
             douyin = SourceStatusItem(
-                enabled=dy_enabled, state="ready", detail="Cookie 就绪。", logged_in=True
+                enabled=dy_enabled,
+                state="ready",
+                detail=f"{count} 个 Cookie 就绪。" if count > 1 else "Cookie 就绪。",
+                logged_in=True,
             )
         else:
             douyin = SourceStatusItem(
@@ -7183,7 +7328,10 @@ def create_app(
         """Return current local Cookie / token snapshots for source settings pages."""
         from openbiliclaw.bilibili.auth import resolve_runtime_cookie
         from openbiliclaw.config import load_config
-        from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie
+        from openbiliclaw.sources.douyin_auth import (
+            DouyinCookieManager,
+            resolve_douyin_cookie,
+        )
         from openbiliclaw.sources.reddit_tasks import rdt_credential_cookie_names
 
         cfg = load_config()
@@ -7197,6 +7345,7 @@ def create_app(
             data_dir=cfg.data_path,
             cookie_env=getattr(srcs.douyin, "cookie_env", "OPENBILICLAW_DOUYIN_COOKIE"),
         )
+        dy_count = DouyinCookieManager(cfg.data_path).account_count()
         tw_cookie = resolve_x_cookie(
             data_dir=cfg.data_path,
             cookie_env=getattr(srcs.twitter, "cookie_env", "OPENBILICLAW_X_COOKIE"),
@@ -7219,7 +7368,11 @@ def create_app(
                 xhs_token,
                 "小红书不保存整站 Cookie；这里展示最近同步内容 URL 中的 xsec_token。",
             ),
-            douyin=item("Cookie", dy_cookie, "抖音当前 resolved Cookie。"),
+            douyin=item(
+                "Cookie",
+                dy_cookie,
+                f"抖音当前 resolved Cookie；本机保存 {dy_count} 个账号。",
+            ),
             youtube=SourceCredentialItem(
                 label="Cookie",
                 available=False,
@@ -7258,19 +7411,24 @@ def create_app(
         _dy_task_queue = DyTaskQueue(ctx.database)
 
     @app.get("/api/sources/dy/next-task")
-    def dy_next_task(response: Any = None) -> Any:
+    def dy_next_task(request: Request, response: Any = None) -> Any:
         """Return the oldest pending dy task, or 204 if none."""
         from starlette.responses import Response
 
         if _dy_task_queue is None:
             return Response(status_code=204)
-        task = _dy_task_queue.next_pending(only_ids=_init_owned_ids_filter())
+        task = _dy_task_queue.next_pending(
+            only_ids=_init_owned_ids_filter(),
+            runner_host=str(request.headers.get("host", "") or ""),
+        )
         if task is None:
             return Response(status_code=204)
 
         import json as _json
 
         payload = _json.loads(task["payload_json"]) if task.get("payload_json") else {}
+        if str(task.get("type", "")).strip() == "bootstrap_profile":
+            payload = _augment_dy_resume_payload(payload)
         return {
             "id": task["id"],
             "type": task["type"],
@@ -7279,15 +7437,6 @@ def create_app(
 
     @app.post("/api/sources/dy/task-result")
     async def dy_task_result(payload: dict[str, Any]) -> dict[str, Any]:
-        """Accept a Douyin task result from the extension dispatcher.
-
-        Status semantics mirror XHS (``ok`` = final, ``partial`` = keep
-        pending, ``failed`` = mark failed) but the result schema uses
-        ``videos`` instead of ``notes`` and propagation goes through
-        ``dy_bootstrap_videos_to_events``. No self-author filtering yet
-        (Douyin has its own posts in ``dy_post`` scope which we treat as
-        a weak ``view`` signal — they're meant to count as input).
-        """
         task_id = payload.get("task_id", "")
         status = payload.get("status", "")
         videos = [v for v in payload.get("videos", []) if isinstance(v, dict)]
@@ -7326,6 +7475,7 @@ def create_app(
                 debug=debug,
                 complete=is_final,
             )
+
             # gui-init D1: persist the result (above) for init's own collector;
             # during init skip profile propagation for non-owned results, but
             # propagate init-OWNED bootstrap results through the deduped path.
@@ -7337,6 +7487,7 @@ def create_app(
                     added_videos,
                     dy_bootstrap_video_key,
                 )
+                _schedule_dy_like_vector_upsert(fresh_videos)
                 profile_events: list[dict[str, Any]] = []
                 propagated_keys: list[str] = []
                 for index, video in enumerate(fresh_videos):
@@ -7346,10 +7497,47 @@ def create_app(
                         key = video_keys_by_index.get(index, "")
                         if key:
                             propagated_keys.append(key)
+                _mark_source_bootstrap_keys("dy", propagated_keys)
+                keys_by_scope: dict[str, list[str]] = {}
+                for key in propagated_keys:
+                    scope = key.split(":", 1)[0] if ":" in key else ""
+                    if scope:
+                        keys_by_scope.setdefault(scope, []).append(key)
+                if not keys_by_scope and debug is not None:
+                    debug_scope = str(debug.get("scope", "")).strip()
+                    if debug_scope:
+                        keys_by_scope[debug_scope] = []
+                for scope, keys in keys_by_scope.items():
+                    _record_dy_scope_progress(
+                        task_id=task_id,
+                        scope=scope,
+                        propagated_keys=keys,
+                        scope_counts=scope_counts,
+                        debug=debug,
+                        next_cursor=payload.get("next_cursor"),
+                    )
                 # Skip the incremental pipeline during init (see xhs handler).
                 if not _init_busy:
                     await _ingest_profile_update_events(profile_events)
-                _mark_source_bootstrap_keys("dy", propagated_keys)
+
+                # Auto-enqueue continuation task if cursor was returned
+                if is_final and payload.get("next_cursor"):
+                    import json as _json
+                    orig_payload = (
+                        _json.loads(task["payload_json"])
+                        if task and task.get("payload_json")
+                        else {}
+                    )
+                    _dy_task_queue.enqueue(
+                        task_type="bootstrap_profile",
+                        payload=orig_payload,
+                        daily_budget=0,  # No budget cap for continuations
+                    )
+                    # Kick the task dispatcher to pick it up immediately
+                    publish = getattr(getattr(ctx, "event_hub", None), "publish", None)
+                    if callable(publish):
+                        with suppress(Exception):
+                            await publish({"type": "dy_task_available", "source": "task_kick"})
         else:
             _dy_task_queue.fail(task_id, error=payload.get("error", ""), debug=debug)
 
@@ -7649,6 +7837,7 @@ def create_app(
                 debug=debug,
                 complete=is_final,
             )
+
             # gui-init D1: persist the result (above) for init's own collector;
             # during init skip profile propagation for non-owned results, but
             # propagate init-OWNED bootstrap results through the deduped path.
@@ -8058,14 +8247,19 @@ def create_app(
         from openbiliclaw.config import (
             _normalize_pool_source_shares as _normalized_config_pool_source_shares,
         )
-        from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie
+        from openbiliclaw.sources.douyin_auth import (
+            DouyinCookieManager,
+            resolve_douyin_cookie,
+        )
 
         dy_cookie = ""
+        dy_records: list[Any] = []
         with suppress(Exception):
             dy_cookie = resolve_douyin_cookie(
                 data_dir=cfg.data_path,
                 cookie_env=cfg.sources.douyin.cookie_env,
             )
+            dy_records = DouyinCookieManager(cfg.data_path).load_records(include_legacy=True)
         tw_cookie = ""
         with suppress(Exception):
             tw_cookie = resolve_x_cookie(
@@ -8082,6 +8276,7 @@ def create_app(
                 http_referer=getattr(p, "http_referer", ""),
                 x_title=getattr(p, "x_title", ""),
                 reasoning_effort=getattr(p, "reasoning_effort", ""),
+                num_ctx=int(getattr(p, "num_ctx", 0) or 0),
             )
 
         issue_list = [
@@ -8162,6 +8357,8 @@ def create_app(
                     enabled=cfg.sources.douyin.enabled,
                     mode=cfg.sources.douyin.mode,
                     cookie=_mask(dy_cookie),
+                    cookie_account_count=len(dy_records),
+                    cookie_account_ids=[record.account_id for record in dy_records],
                     cookie_env=cfg.sources.douyin.cookie_env,
                     daily_search_budget=cfg.sources.douyin.daily_search_budget,
                     daily_hot_budget=cfg.sources.douyin.daily_hot_budget,
@@ -8379,6 +8576,11 @@ def create_app(
                             skipped_fields.append(f"{field_name}=empty_skip")
                             continue
                         setattr(provider_cfg, field_name, new_value)
+                if "num_ctx" in pdata:
+                    try:
+                        provider_cfg.num_ctx = max(0, int(pdata["num_ctx"]))
+                    except (TypeError, ValueError):
+                        provider_cfg.num_ctx = 0
                 if skipped_fields:
                     logger.debug(
                         "Config LLM update: provider %s skipped fields: %s",
@@ -8685,12 +8887,16 @@ def create_app(
                         # auto-sync writes) — secrets never land in config.toml.
                         from openbiliclaw.sources.douyin_auth import (
                             DouyinCookieManager,
+                            normalize_douyin_account_id,
                             resolve_douyin_cookie,
                         )
 
                         new_cookie = str(dy_data["cookie"]).strip()
                         if new_cookie and not _is_masked_echo(new_cookie):
                             current = ""
+                            account_id = normalize_douyin_account_id(
+                                dy_data.get("cookie_account_id", "primary")
+                            )
                             with suppress(Exception):
                                 current = resolve_douyin_cookie(
                                     data_dir=cfg.data_path,
@@ -8700,7 +8906,10 @@ def create_app(
                             # must not be copied into the file needlessly).
                             if new_cookie != current:
                                 DouyinCookieManager(cfg.data_path).set_cookie(
-                                    new_cookie, source="config-update"
+                                    new_cookie,
+                                    source="config-update",
+                                    account_id=account_id,
+                                    label=str(dy_data.get("cookie_label", "") or ""),
                                 )
                     for key in (
                         "daily_search_budget",
@@ -9312,6 +9521,63 @@ def create_app(
     # the user to /web. Kept isolated from the main desktop SPA on purpose.
     _setup_dir = _Path(__file__).resolve().parent.parent / "web" / "setup"
     if _setup_dir.is_dir():
+        @app.get("/setup/local-setup-defaults.js", include_in_schema=False)
+        async def setup_local_defaults(request: Request) -> Response:
+            client_host = (request.client.host if request.client else "").strip()
+            try:
+                is_loopback = ipaddress.ip_address(client_host).is_loopback
+            except ValueError:
+                is_loopback = client_host.lower() == "localhost"
+            if not is_loopback:
+                raise HTTPException(status_code=404, detail="not found")
+
+            defaults_path = _setup_dir / "local-setup-defaults.js"
+            if not defaults_path.is_file():
+                return Response(
+                    "window.OBC_LOCAL_SETUP_DEFAULTS = {};\n",
+                    media_type="application/javascript",
+                )
+            return FileResponse(defaults_path, media_type="application/javascript")
+
         app.mount("/setup", _StaticFiles(directory=_setup_dir, html=True), name="setup-wizard")
+
+
+    @app.post("/api/sources/dy/enqueue")
+    async def dy_task_enqueue(payload: dict[str, Any]) -> dict[str, Any]:
+        """Enqueue a new task directly from the UI."""
+        if _dy_task_queue is None:
+            raise HTTPException(status_code=500, detail="No database connection")
+
+        task_type = str(payload.get("task_type", "bootstrap_profile")).strip()
+        task_payload = payload.get("payload", {})
+        if not isinstance(task_payload, dict):
+            raise HTTPException(status_code=422, detail="payload must be an object")
+        try:
+            daily_budget = int(payload.get("daily_budget", 0) or 0)
+        except (TypeError, ValueError):
+            daily_budget = 0
+
+        task_id = _dy_task_queue.enqueue_with_id(
+            task_type=task_type,
+            payload=task_payload,
+            daily_budget=daily_budget,
+        )
+        if task_id is None:
+            raise HTTPException(status_code=429, detail="dy task budget exhausted")
+
+        publish = getattr(getattr(ctx, "event_hub", None), "publish", None)
+        if callable(publish):
+            with suppress(Exception):
+                await publish({"type": "dy_task_available", "source": "api_enqueue"})
+        return {"ok": True, "task_id": task_id}
+
+    @app.post("/api/sources/dy/remote_analyze")
+    async def dy_remote_analyze(payload: dict[str, Any]) -> dict[str, Any]:
+        """Trigger remote heavy recommendation analysis (Compute Decoupling)."""
+        logger.info("Received request for remote analysis: %s", payload)
+        return {
+            "ok": False,
+            "message": "远程重度分析还没有接入；当前已先接入本地抖音喜欢向量库。",
+        }
 
     return app

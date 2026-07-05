@@ -4,6 +4,21 @@
 
 ---
 
+## WIP: 2026-07-05 抖音喜欢续跑与本地向量库
+
+- **抖音喜欢续跑 checkpoint**：`source_bootstrap_state.json` 现在记录 `dy_scope_progress`，后端会在 `skip_existing_bootstrap_keys=true` 的任务中下发已处理 `dy_like:*` key，扩展跳过旧条目且不占用本批新增名额。
+- **任务失败保留 partial 结果**：`DyTaskQueue.fail()` 不再用 `{ "error": ... }` 覆盖已上报的 `videos/scope_counts/debug`，任务超时时仍能保留本批已进入画像的数据和续跑证据。
+- **本地向量库接入**：新增 `VectorStoreManager`，使用 ChromaDB 持久化 `dy_likes` collection，默认通过 Ollama `qwen3-embedding:8b` 生成 embedding；抖音 bootstrap 去重后的新 `dy_like` 会在后台批量 upsert，失败只记录 warning，不阻断事件入库。
+- **扩展续跑按钮**：设置页“本地扫描 & 向量化喜欢”按钮改为触发小批次续跑任务，默认每批最多 100 条新喜欢，并返回后端 `task_id`。
+- **状态文档**：新增 `docs/plans/2026-07-05-douyin-like-batches-and-vector-store.md`，记录第一个抖音账号当前已导入数量、已知问题、续跑方式、向量库状态，以及暂停的第二账号/小红书范围。
+
+## WIP: 抖音喜欢列表批量扫描
+
+- **扩展基础支持**：在 `extension/src/main/dy-fetch-tap.ts` 和 `extension/src/content/douyin.ts` 中实现了基于游标 (cursor) 的主动 API 拉取，并拦截返回的新游标。
+- **后端自动接力**：后端 `app.py` 中新增 `/api/sources/dy/enqueue` 端点，允许主动触发带游标的初始化扫描。任务完成时检查 `next_cursor` 并自动通过 `_dy_task_queue` 触发后续批次，实现无限接力扫描直至完成。
+- **扩展 UI 按钮**：在浏览器扩展设置面板中增加了“全量扫描喜欢”按钮，直接呼叫后端执行后台扫描，无需再通过前台模拟 UI 无限向下滚动。
+- **规划设计**：新增 `docs/plans/2026-douyin-likes-scan.md`，确立了带有游标记录的后台分批扫描机制，并为后续多账号与小红书支持奠定演进路线。
+
 ## v0.3.153 / extension v0.3.153 / desktop v0.3.153: Docker 预构建镜像与 LLM 探活降噪（2026-07-04）
 
 后端源码走 `backend-v0.3.153`，浏览器插件走 `extension-v0.3.153`，桌面安装包走 `desktop-v0.3.153`。

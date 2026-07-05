@@ -730,6 +730,7 @@ function buildScopeApiUrl(
 interface ScopeApiResult {
   items: DouyinBootstrapItem[];
   pages_fetched: number;
+  next_cursor?: number;
 }
 
 interface SearchApiResult {
@@ -742,11 +743,12 @@ async function harvestScopeViaApi(
   scope: DouyinScope,
   secUid: string,
   maxItems: number,
+  initialCursor: number = 0,
 ): Promise<ScopeApiResult> {
   const w = target as unknown as { fetch: FetchLike };
   const items: DouyinBootstrapItem[] = [];
   const seen = new Set<string>();
-  let cursor = 0;
+  let cursor = initialCursor;
   let pages = 0;
   const cap = Math.max(0, Math.floor(maxItems));
   const MAX_PAGES = 50; // safety
@@ -784,7 +786,7 @@ async function harvestScopeViaApi(
     cursor = nextCursor;
     await new Promise((r) => setTimeout(r, 300));
   }
-  return { items, pages_fetched: pages };
+  return { items, pages_fetched: pages, next_cursor: cursor };
 }
 
 function pickCookieValue(cookieHeader: string, name: string): string {
@@ -1166,16 +1168,18 @@ export function installApiHarvester(target: Window): void {
     const scope = data.scope as DouyinScope;
     const secUid = String(data.secUid ?? "");
     const maxItems = Number(data.maxItems ?? 0);
+    const cursor = Number(data.cursor ?? 0);
     if (!requestId || !scope || !secUid) return;
     void (async () => {
       try {
-        const result = await harvestScopeViaApi(target, scope, secUid, maxItems);
+        const result = await harvestScopeViaApi(target, scope, secUid, maxItems, cursor);
         target.postMessage(
           {
             type: API_RESPONSE_TYPE,
             requestId,
             items: result.items,
             pages_fetched: result.pages_fetched,
+            next_cursor: result.next_cursor,
           },
           target.location.origin,
         );

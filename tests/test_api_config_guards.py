@@ -33,8 +33,21 @@ def _make_client(
         "openbiliclaw.config.save_config",
         lambda cfg, path=None: save_config(cfg, config_path),
     )
+    monkeypatch.setattr(
+        "openbiliclaw.api.app._validate_llm_buildable",
+        lambda _cfg, issues: list(issues),
+    )
 
     app = create_app(memory_manager=object(), database=object(), soul_engine=object())
+
+    async def fake_rebuild_from_config(new_config: Config) -> None:
+        app.state.runtime_context.config = new_config
+
+    async def fake_restart_background_tasks(*_args, **_kwargs) -> None:
+        return None
+
+    app.state.runtime_context.rebuild_from_config = fake_rebuild_from_config
+    app.state.runtime_context.restart_background_tasks = fake_restart_background_tasks
     return TestClient(app), initial_cfg, config_path
 
 
@@ -333,6 +346,32 @@ def test_put_config_routes_douyin_cookie_to_data_file(monkeypatch, tmp_path) -> 
     # Secret lands in data/douyin_cookie.json, never in config.toml.
     assert DouyinCookieManager(cfg.data_path).load_cookie() == "sessionid=dy-sess; ttwid=dy-tw"
     assert "dy-sess" not in config_path.read_text(encoding="utf-8")
+
+
+def test_douyin_cookie_sync_auto_adds_second_account(monkeypatch, tmp_path) -> None:
+    from openbiliclaw.sources.douyin_auth import DouyinCookieManager
+
+    monkeypatch.delenv("OPENBILICLAW_DOUYIN_COOKIE", raising=False)
+    cfg = _cookie_config(tmp_path)
+    manager = DouyinCookieManager(cfg.data_path)
+    manager.set_cookie("sessionid=dy-one; uid_tt=u1", source="test")
+    client, _cfg, _config_path = _make_client(monkeypatch, tmp_path, cfg)
+
+    response = client.post(
+        "/api/sources/dy/cookie",
+        json={"cookie": "sessionid=dy-two; uid_tt=u2", "source": "profile-b"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["account_id"] == "account2"
+    assert payload["account_count"] == 2
+    assert payload["account_ids"] == ["primary", "account2"]
+    records = DouyinCookieManager(cfg.data_path).load_records()
+    assert [record.cookie for record in records] == [
+        "sessionid=dy-one; uid_tt=u1",
+        "sessionid=dy-two; uid_tt=u2",
+    ]
 
 
 def test_put_config_routes_x_cookie_to_data_file(monkeypatch, tmp_path) -> None:

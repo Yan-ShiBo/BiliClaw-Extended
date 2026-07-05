@@ -279,7 +279,10 @@ task_interval_seconds = 45
 
 # ── 抖音（Douyin）direct-cookie discovery 专用配置 ──
 # 初始化画像仍走浏览器扩展；这里仅控制可选的后台内容发现。
-# Cookie 优先读下方环境变量；未设置时会使用浏览器扩展同步到 data/douyin_cookie.json 的值。
+# Cookie 优先读下方环境变量；未设置时会使用浏览器扩展同步到 data/douyin_cookie.json
+# / data/douyin_cookies.json 的值。第二账号可放到 OPENBILICLAW_DOUYIN_COOKIE_2，
+# 或通过 POST /api/sources/dy/cookie 传 account_id=account2 写入本机。
+# 多账号存在时，后台 direct-cookie discovery 会在账号 Cookie 之间轮换。
 # 不要把真实 Cookie 写进 config.toml。
 # daily_*_budget 为每日任务上限；0 表示不设每日上限，仅受平台缺口、
 # 每轮 discovery_limit、producer 节流与 request_interval_seconds 控制。

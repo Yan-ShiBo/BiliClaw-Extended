@@ -10,6 +10,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from openbiliclaw.memory.vector_store import VectorStoreManager
 from openbiliclaw.sources.event_format import default_signal_strength_for_event
 from openbiliclaw.storage.database import Database
 
@@ -144,6 +145,7 @@ class MemoryManager:
         self._cognition_updates_path = data_dir / "memory" / "cognition_updates.json"
         self._profile_overrides_path = data_dir / "memory" / "profile_overrides.json"
         self._working_memory: dict[str, Any] = {}  # Session-only
+        self.vector_store = VectorStoreManager(data_dir)
         # Optional callback that fires after the soul layer is saved or
         # ``sync_profile_files`` runs. The runtime context wires this to
         # ``event_hub.publish({"type": "profile_updated"})`` so the

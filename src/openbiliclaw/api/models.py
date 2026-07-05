@@ -305,6 +305,14 @@ class DouyinCookieIn(BaseModel):
         default="extension",
         description="Where the cookie came from. Used for telemetry only.",
     )
+    account_id: str = Field(
+        default="auto",
+        description="Local Douyin account slot to update, e.g. primary or account2. auto chooses a slot by Cookie fingerprint.",
+    )
+    label: str = Field(
+        default="",
+        description="Optional human-readable label for this local account slot.",
+    )
 
 
 class DouyinCookieResponse(BaseModel):
@@ -313,6 +321,9 @@ class DouyinCookieResponse(BaseModel):
     ok: bool
     has_cookie: bool
     cookie_names: list[str] = Field(default_factory=list)
+    account_id: str = "primary"
+    account_count: int = 0
+    account_ids: list[str] = Field(default_factory=list)
     message: str = ""
     error_code: str = ""
 
@@ -954,6 +965,7 @@ class LLMProviderConfigOut(BaseModel):
     http_referer: str = ""
     x_title: str = ""
     reasoning_effort: str = ""
+    num_ctx: int = 0
 
 
 class EmbeddingConfigOut(BaseModel):
@@ -1024,6 +1036,8 @@ class DouyinSourceConfigOut(BaseModel):
     # Read-only mirror for the settings pages — masked unless reveal_keys.
     # PUT routes a non-empty value to DouyinCookieManager, never config.toml.
     cookie: str = ""
+    cookie_account_count: int = 0
+    cookie_account_ids: list[str] = Field(default_factory=list)
     cookie_env: str = "OPENBILICLAW_DOUYIN_COOKIE"
     daily_search_budget: int = 0
     daily_hot_budget: int = 0

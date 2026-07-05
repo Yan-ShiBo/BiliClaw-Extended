@@ -145,6 +145,88 @@ class TestDyNextTask:
         assert body["type"] == "bootstrap_profile"
         assert body["scopes"] == ["dy_post", "dy_collect", "dy_like", "dy_follow"]
 
+    def test_runner_host_restricts_task_claiming(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        from openbiliclaw.sources.dy_tasks import DyTaskQueue
+
+        client, db, _memory = dy_task_client
+        queue = DyTaskQueue(db)
+        task_id = queue.enqueue_with_id(
+            "bootstrap_profile",
+            {"scopes": ["dy_collect"], "runner_host": "localhost"},
+            daily_budget=10,
+        )
+        assert task_id is not None
+
+        response = client.get("/api/sources/dy/next-task", headers={"host": "127.0.0.1:8420"})
+        assert response.status_code == 204
+
+        response = client.get("/api/sources/dy/next-task", headers={"host": "localhost:8420"})
+        assert response.status_code == 200
+        assert response.json()["id"] == task_id
+
+    def test_resumable_bootstrap_next_task_includes_seen_skip_keys(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        from openbiliclaw.sources.dy_tasks import DyTaskQueue
+
+        client, db, memory = dy_task_client
+        memory.save_source_bootstrap_state(
+            {
+                "dy_seen_video_keys": ["dy_like:old-like", "dy_collect:old-collect"],
+                "last_source_bootstrap_sync_at": "2026-07-05T00:00:00+00:00",
+            }
+        )
+        queue = DyTaskQueue(db)
+        task_id = queue.enqueue_with_id(
+            "bootstrap_profile",
+            {
+                "scopes": ["dy_like"],
+                "skip_existing_bootstrap_keys": True,
+                "max_new_items_per_scope": 100,
+            },
+            daily_budget=10,
+        )
+        assert task_id is not None
+
+        response = client.get("/api/sources/dy/next-task")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == task_id
+        assert body["skip_item_keys"] == ["dy_like:old-like"]
+        assert body["skip_item_key_count"] == 1
+
+
+class TestDyTaskEnqueue:
+    def test_enqueue_endpoint_returns_task_id(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        client, db, _memory = dy_task_client
+
+        response = client.post(
+            "/api/sources/dy/enqueue",
+            json={
+                "task_type": "bootstrap_profile",
+                "payload": {
+                    "scopes": ["dy_like"],
+                    "skip_existing_bootstrap_keys": True,
+                    "max_new_items_per_scope": 100,
+                },
+                "daily_budget": 0,
+            },
+        )
+
+        assert response.status_code == 200
+        task_id = response.json()["task_id"]
+        row = db.conn.execute("SELECT * FROM dy_tasks WHERE id = ?", (task_id,)).fetchone()
+        assert row is not None
+        assert row["status"] == "pending"
+
 
 class TestDyTaskResult:
     def test_rejects_missing_task_id(
@@ -427,6 +509,53 @@ class TestDyTaskResult:
         assert memory.load_source_bootstrap_state()["dy_seen_video_keys"] == [
             "dy_collect:repeated-dy"
         ]
+
+    def test_dy_bootstrap_records_resumable_scope_progress(
+        self,
+        dy_task_client: tuple[TestClient, Database, RecordingMemoryManager],
+    ) -> None:
+        client, db, memory = dy_task_client
+        task_id = _enqueue_dy_bootstrap_task(
+            db,
+            {
+                "scopes": ["dy_like"],
+                "skip_existing_bootstrap_keys": True,
+                "max_new_items_per_scope": 100,
+            },
+        )
+
+        response = client.post(
+            "/api/sources/dy/task-result",
+            json={
+                "task_id": task_id,
+                "status": "partial",
+                "videos": [
+                    {
+                        "scope": "dy_like",
+                        "title": "liked",
+                        "url": "https://www.douyin.com/video/liked-1",
+                        "aweme_id": "liked-1",
+                    }
+                ],
+                "scope_counts": {"dy_like": 1},
+                "debug": {
+                    "scope": "dy_like",
+                    "page_url": "https://www.douyin.com/user/self?showTab=like",
+                    "api_error": "HTTP 404",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        progress = memory.load_source_bootstrap_state()["dy_scope_progress"]
+        assert progress["dy_like"]["seen_count"] == 1
+        assert progress["dy_like"]["last_batch_new_count"] == 1
+        assert progress["dy_like"]["last_scope_count"] == 1
+        assert progress["dy_like"]["last_key"] == "dy_like:liked-1"
+        assert progress["dy_like"]["last_aweme_id"] == "liked-1"
+        assert progress["dy_like"]["last_task_id"] == task_id
+        assert progress["dy_like"]["page_url"].endswith("showTab=like")
+        assert progress["dy_like"]["api_error"] == "HTTP 404"
 
 
 class TestDyTaskKick:

@@ -255,23 +255,34 @@ def build_douyin_discovery_producer(
         logger.info("douyin producer disabled: database does not expose task tables")
         return None
 
+    cookie_index = 0
+
     async def _discover(profile: Any, options: DouyinDiscoveryOptions) -> DouyinDiscoveryResult:
+        nonlocal cookie_index
         from openbiliclaw.discovery.douyin import DouyinDiscoveryService
-        from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie
+        from openbiliclaw.sources.douyin_auth import resolve_douyin_cookie_records
         from openbiliclaw.sources.douyin_direct import DouyinDirectClient
         from openbiliclaw.sources.douyin_plugin_search import DouyinPluginSearchClient
 
         cookie_env = str(getattr(dy_cfg, "cookie_env", "OPENBILICLAW_DOUYIN_COOKIE"))
-        cookie = resolve_douyin_cookie(
+        cookie_records = resolve_douyin_cookie_records(
             data_dir=config.data_path,
             cookie_env=cookie_env,
         )
-        if not cookie:
+        if not cookie_records:
             raise RuntimeError(
                 f"missing Douyin cookie; set {cookie_env} or keep the browser extension online"
             )
+        selected_record = cookie_records[cookie_index % len(cookie_records)]
+        cookie_index += 1
+        if len(cookie_records) > 1:
+            logger.info(
+                "douyin producer using account=%s (%d configured account cookies)",
+                selected_record.account_id,
+                len(cookie_records),
+            )
 
-        async with DouyinDirectClient(cookie=cookie) as direct_client:
+        async with DouyinDirectClient(cookie=selected_record.cookie) as direct_client:
             client: Any = direct_client
             if any(source in options.sources for source in ("search", "hot", "feed")):
                 wait_seconds = float(
@@ -291,6 +302,10 @@ def build_douyin_discovery_producer(
                     # exhaustion as a distinguishable signal so the claimed
                     # keyword rolls back instead of being burned (P1.7).
                     raise_on_budget=bool(getattr(options, "raise_on_budget", False)),
+                    # In multi-account mode, direct fallback lets secondary
+                    # account cookies participate even when the browser plugin
+                    # only has one currently logged-in profile.
+                    allow_direct_fallback=len(cookie_records) > 1,
                 )
             service = DouyinDiscoveryService(
                 client=client,

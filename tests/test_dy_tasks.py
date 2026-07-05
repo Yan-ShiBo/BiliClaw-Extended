@@ -6,6 +6,7 @@ Task 1 of the Douyin bootstrap import plan
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -192,6 +193,36 @@ def test_dy_task_queue_counts_non_stale_failures_for_daily_budget(
     assert queue.enqueue_with_id("search", {"keywords": ["有效任务"]}, daily_budget=2)
 
     assert queue.enqueue_with_id("search", {"keywords": ["第三个任务"]}, daily_budget=2) is None
+
+def test_dy_task_queue_fail_preserves_partial_result(
+    database: Database,
+) -> None:
+    queue = DyTaskQueue(database)
+    task_id = queue.enqueue_with_id("bootstrap_profile", {"scopes": ["dy_like"]})
+    assert task_id is not None
+
+    queue.merge_result(
+        task_id,
+        videos=[
+            {
+                "scope": "dy_like",
+                "aweme_id": "liked-1",
+                "title": "liked title",
+            }
+        ],
+        scope_counts={"dy_like": 1},
+        debug={"skip_item_key_count": 587},
+    )
+    queue.fail(task_id, error="task_timeout", debug={"timeout_ms": 120000})
+
+    row = queue.get(task_id)
+    assert row is not None
+    payload = json.loads(str(row["result_json"]))
+    assert payload["error"] == "task_timeout"
+    assert payload["videos"][0]["aweme_id"] == "liked-1"
+    assert payload["scope_counts"] == {"dy_like": 1}
+    assert payload["debug"]["skip_item_key_count"] == 587
+    assert payload["debug"]["timeout_ms"] == 120000
 
 
 def test_dy_task_queue_zero_daily_budget_disables_daily_cap(

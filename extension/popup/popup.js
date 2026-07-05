@@ -6842,6 +6842,74 @@ function bindSettings() {
     });
   }
 
+  const dyScanLikesBtn = document.getElementById("btnDouyinScanLikes");
+  if (dyScanLikesBtn instanceof HTMLButtonElement) {
+    dyScanLikesBtn.addEventListener("click", async () => {
+      dyScanLikesBtn.disabled = true;
+      const originalText = dyScanLikesBtn.textContent;
+      dyScanLikesBtn.textContent = "触发中...";
+      try {
+        const backendBase = await getBackendBaseUrl();
+        const resp = await fetch(`${backendBase}/sources/dy/enqueue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_type: "bootstrap_profile",
+            payload: {
+              scopes: ["dy_like"],
+              max_items_per_scope: 5000,
+              max_new_items_per_scope: 100,
+              max_scroll_rounds: 30,
+              max_stagnant_scroll_rounds: 15,
+              skip_existing_bootstrap_keys: true,
+              requested_account_label: "primary-current-browser-like-resume-batch",
+            },
+            daily_budget: 0
+          })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => ({}));
+        showToast(`已触发抖音喜欢续跑任务${data.task_id ? `：${data.task_id}` : ""}。`, "success");
+      } catch (err) {
+        showToast(`任务触发失败: ${err.message}`, "error");
+      } finally {
+        dyScanLikesBtn.textContent = originalText;
+        dyScanLikesBtn.disabled = false;
+      }
+    });
+  }
+
+  const dyRemoteAnalyzeBtn = document.getElementById("btnDouyinRemoteAnalyze");
+  if (dyRemoteAnalyzeBtn instanceof HTMLButtonElement) {
+    dyRemoteAnalyzeBtn.addEventListener("click", async () => {
+      dyRemoteAnalyzeBtn.disabled = true;
+      const originalText = dyRemoteAnalyzeBtn.textContent;
+      dyRemoteAnalyzeBtn.textContent = "请求远程大模型中...";
+      try {
+        const backendBase = await getBackendBaseUrl();
+        const resp = await fetch(`${backendBase}/sources/dy/remote_analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "trigger_remote_analysis"
+          })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => ({}));
+        if (data.ok === false) {
+          showToast(data.message || "远程分析尚未接入。", "error");
+        } else {
+          showToast(data.message || "已成功请求远程服务器进行深度推荐分析。", "success");
+        }
+      } catch (err) {
+        showToast(`远程分析请求失败: ${err.message}`, "error");
+      } finally {
+        dyRemoteAnalyzeBtn.textContent = originalText;
+        dyRemoteAnalyzeBtn.disabled = false;
+      }
+    });
+  }
+
   saveBtn.addEventListener("click", async () => {
     saveBtn.disabled = true;
     saveBtn.textContent = "保存中...";

@@ -110,8 +110,11 @@ export interface DyTask {
   type: "bootstrap_profile" | "search" | "hot" | "feed";
   scopes?: DouyinScope[];
   max_items_per_scope?: number;
+  max_new_items_per_scope?: number;
   max_scroll_rounds?: number;
   max_stagnant_scroll_rounds?: number;
+  skip_item_keys?: string[];
+  cursors?: Partial<Record<DouyinScope, number>>;
   keywords?: string[];
   max_items_per_keyword?: number;
   hot_items?: DyHotTaskItem[];
@@ -134,6 +137,7 @@ export interface DyTaskResult {
   scope_counts?: Record<string, number>;
   error?: string;
   debug?: Record<string, unknown>;
+  next_cursor?: number;
 }
 
 let taskInFlight = false;
@@ -153,8 +157,11 @@ interface TaskProgress {
   current_scope_idx: number;
   accumulated_counts: Record<DouyinScope, number>;
   max_items_per_scope: number;
+  max_new_items_per_scope: number;
   max_scroll_rounds: number;
   max_stagnant_scroll_rounds: number;
+  skip_item_keys: string[];
+  cursors: Partial<Record<DouyinScope, number>>;
 }
 
 let progress: TaskProgress | null = null;
@@ -290,6 +297,11 @@ export function buildDyExecuteMessageData(task: DyTask): Record<string, unknown>
   if (task.max_items_per_scope !== undefined) {
     data.max_items_per_scope = task.max_items_per_scope;
   }
+  if (task.max_new_items_per_scope !== undefined) {
+    data.max_new_items_per_scope = task.max_new_items_per_scope;
+  }
+  if (task.skip_item_keys !== undefined) data.skip_item_keys = task.skip_item_keys;
+  if (task.cursors !== undefined) data.cursors = task.cursors;
   if (task.max_scroll_rounds !== undefined) data.max_scroll_rounds = task.max_scroll_rounds;
   if (task.max_stagnant_scroll_rounds !== undefined) {
     data.max_stagnant_scroll_rounds = task.max_stagnant_scroll_rounds;
@@ -476,6 +488,9 @@ function sendScopeExecuteMessage(): void {
         task_id: progress.task_id,
         scope,
         max_items_per_scope: progress.max_items_per_scope,
+        max_new_items_per_scope: progress.max_new_items_per_scope,
+        skip_item_keys: progress.skip_item_keys.filter((key) => key.startsWith(`${scope}:`)),
+        cursor: progress.cursors[scope],
         max_scroll_rounds: progress.max_scroll_rounds,
         max_stagnant_scroll_rounds: progress.max_stagnant_scroll_rounds,
         debug_inject_status: _lastInjectStatus,
@@ -839,8 +854,13 @@ export async function executeTask(task: DyTask): Promise<void> {
     current_scope_idx: 0,
     accumulated_counts: emptyScopeCounts(),
     max_items_per_scope: task.max_items_per_scope ?? 300,
+    max_new_items_per_scope: task.max_new_items_per_scope ?? task.max_items_per_scope ?? 300,
     max_scroll_rounds: task.max_scroll_rounds ?? 15,
     max_stagnant_scroll_rounds: task.max_stagnant_scroll_rounds ?? 5,
+    skip_item_keys: Array.isArray(task.skip_item_keys)
+      ? task.skip_item_keys.filter((key) => typeof key === "string" && key.trim())
+      : [],
+    cursors: task.cursors ?? {},
   };
 
   // Open the Douyin homepage first instead of jumping straight to
@@ -933,6 +953,7 @@ export async function handleDyScopeResult(result: DyScopeResult): Promise<void> 
       scope_status: result.status,
       ...(result.debug ?? {}),
     },
+    next_cursor: result.next_cursor,
   });
 
   progress.current_scope_idx += 1;
@@ -947,6 +968,7 @@ export async function handleDyScopeResult(result: DyScopeResult): Promise<void> 
     status: "ok",
     videos: [],
     scope_counts: { ...progress.accumulated_counts },
+    next_cursor: result.next_cursor,
   });
   cleanupTask();
 }
@@ -1106,6 +1128,7 @@ export interface DyScopeResult {
   status: "ok" | "empty" | "failed";
   error?: string;
   debug?: Record<string, unknown>;
+  next_cursor?: number;
 }
 
 export interface DySearchResult {

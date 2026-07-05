@@ -394,7 +394,12 @@ class DyTaskQueue:
             count += 1
         return count
 
-    def next_pending(self, only_ids: set[str] | None = None) -> dict[str, Any] | None:
+    def next_pending(
+        self,
+        only_ids: set[str] | None = None,
+        *,
+        runner_host: str = "",
+    ) -> dict[str, Any] | None:
         stale_before = (datetime.now(UTC) - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
         # ``only_ids`` restricts which tasks may be claimed (gui-init: during an
         # active init only init-owned bootstrap tasks are handed out). None = all.
@@ -409,10 +414,19 @@ class DyTaskQueue:
         conn = self._db.open_connection()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                f"SELECT * FROM dy_tasks WHERE {where} ORDER BY created_at ASC LIMIT 1",
+            rows = conn.execute(
+                f"SELECT * FROM dy_tasks WHERE {where} ORDER BY created_at ASC",
                 params,
-            ).fetchone()
+            ).fetchall()
+            row = None
+            normalized_runner_host = runner_host.strip().lower()
+            for candidate in rows:
+                payload = _decode_payload_json(str(candidate["payload_json"] or "{}"))
+                required_host = str(payload.get("runner_host", "") or "").strip().lower()
+                if required_host and not normalized_runner_host.startswith(required_host):
+                    continue
+                row = candidate
+                break
             if row is None:
                 conn.commit()
                 return None
@@ -557,9 +571,23 @@ class DyTaskQueue:
         error: str = "",
         debug: dict[str, Any] | None = None,
     ) -> None:
-        result_payload: dict[str, Any] = {"error": error}
+        result_payload: dict[str, Any] = {}
+        row = self.get(task_id)
+        if row and row.get("result_json"):
+            try:
+                parsed = json.loads(str(row["result_json"]))
+                if isinstance(parsed, dict):
+                    result_payload = parsed
+            except json.JSONDecodeError:
+                result_payload = {}
+
+        result_payload["error"] = error
         if debug is not None:
-            result_payload["debug"] = debug
+            merged_debug: dict[str, Any] = {}
+            if isinstance(result_payload.get("debug"), dict):
+                merged_debug.update(result_payload["debug"])
+            merged_debug.update(debug)
+            result_payload["debug"] = merged_debug
         result = json.dumps(result_payload, ensure_ascii=False)
         self._db.conn.execute(
             "UPDATE dy_tasks SET status = 'failed', result_json = ?, "
@@ -575,3 +603,11 @@ def _is_stale_pending_result(result_json: Any) -> bool:
     except json.JSONDecodeError:
         return False
     return isinstance(payload, dict) and payload.get("error") == "stale_pending"
+
+
+def _decode_payload_json(payload_json: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}

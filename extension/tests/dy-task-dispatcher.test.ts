@@ -92,8 +92,10 @@ test("isValidDyTask accepts bootstrap_profile with optional payload fields", () 
       type: "bootstrap_profile",
       scopes: ["dy_post", "dy_collect", "dy_like", "dy_follow"],
       max_items_per_scope: 300,
+      max_new_items_per_scope: 100,
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
+      skip_item_keys: ["dy_like:old"],
     }),
     true,
   );
@@ -224,6 +226,8 @@ test("buildDyExecuteMessageData includes only the fields the executor needs", ()
     type: "bootstrap_profile",
     scopes: ["dy_post", "dy_collect"],
     max_items_per_scope: 300,
+    max_new_items_per_scope: 120,
+    skip_item_keys: ["dy_like:old"],
     max_scroll_rounds: 15,
     max_stagnant_scroll_rounds: 5,
   });
@@ -231,6 +235,8 @@ test("buildDyExecuteMessageData includes only the fields the executor needs", ()
   assert.equal(data.type, "bootstrap_profile");
   assert.deepEqual(data.scopes, ["dy_post", "dy_collect"]);
   assert.equal(data.max_items_per_scope, 300);
+  assert.equal(data.max_new_items_per_scope, 120);
+  assert.deepEqual(data.skip_item_keys, ["dy_like:old"]);
   assert.equal(data.max_scroll_rounds, 15);
   assert.equal(data.max_stagnant_scroll_rounds, 5);
 });

@@ -2132,6 +2132,8 @@ def _render_provider_section(name: str, provider: LLMProviderConfig) -> list[str
     lines.append(f"model = {_toml_string(provider.model)}")
     if name in {"openai", "deepseek", "ollama", "openrouter", "openai_compatible"}:
         lines.append(f"base_url = {_toml_string(provider.base_url)}")
+    if name == "ollama":
+        lines.append(f"num_ctx = {max(0, int(provider.num_ctx or 0))}")
     if name == "openai":
         lines.append(f"auth_mode = {_toml_string(provider.auth_mode)}")
     if name == "deepseek":

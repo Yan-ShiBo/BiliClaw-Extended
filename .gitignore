@@ -53,6 +53,7 @@ config.toml.*
 extension/node_modules/
 extension/dist/
 extension/openbiliclaw-extension-*.zip
+src/openbiliclaw/web/setup/local-setup-defaults.js
 
 # Raw screenshots (canonical copies live in docs/images/)
 screenshot/

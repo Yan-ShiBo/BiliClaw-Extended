@@ -123,6 +123,7 @@ interface ScopeExecuteMessage {
   max_scroll_rounds: number;
   max_stagnant_scroll_rounds: number;
   debug_inject_status?: string;
+  cursor?: number;
 }
 
 interface ScopeResultPayload {
@@ -132,6 +133,7 @@ interface ScopeResultPayload {
   scope_count: number;
   status: "ok" | "empty" | "failed";
   error?: string;
+  next_cursor?: number;
   /**
    * Diagnostic counters surfaced through the dispatcher into the
    * /api/sources/dy/task-result partial debug field. Lets us
@@ -299,8 +301,9 @@ async function harvestScopeViaApiBridge(
   scope: DouyinScope,
   secUid: string,
   maxItems: number,
+  cursor: number = 0,
   timeoutMs: number = 90_000,
-): Promise<{ items: DouyinBootstrapItem[]; pages: number; error?: string }> {
+): Promise<{ items: DouyinBootstrapItem[]; pages: number; error?: string; next_cursor?: number }> {
   return new Promise((resolve) => {
     const requestId = `obc_dy_api_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let settled = false;
@@ -324,7 +327,8 @@ async function harvestScopeViaApiBridge(
         : [];
       const pages = Number(data.pages_fetched ?? 0);
       const error = typeof data.error === "string" ? data.error : undefined;
-      resolve({ items, pages, error });
+      const next_cursor = typeof data.next_cursor === "number" ? data.next_cursor : undefined;
+      resolve({ items, pages, error, next_cursor });
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
@@ -334,6 +338,7 @@ async function harvestScopeViaApiBridge(
         scope,
         secUid,
         maxItems,
+        cursor,
       },
       window.location.origin,
     );
@@ -1108,6 +1113,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
   let apiItemsHarvested = 0;
   let apiPagesFetched = 0;
   let apiError = "";
+  let apiNextCursor: number | undefined;
 
   const onMessage = (event: MessageEvent): void => {
     const data = event?.data as { type?: unknown } | null;
@@ -1185,9 +1191,11 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         msg.scope,
         _detectedSecUid,
         msg.max_items_per_scope,
+        msg.cursor,
       );
       apiPagesFetched = apiResult.pages;
       apiError = apiResult.error ?? "";
+      apiNextCursor = apiResult.next_cursor;
       if (apiResult.items.length > 0) {
         const newOnes = sink.ingest(apiResult.items);
         apiItemsHarvested += newOnes.length;
@@ -1201,6 +1209,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         items_total: apiResult.items.length,
         items_new: apiItemsHarvested,
         error: apiError,
+        next_cursor: apiResult.next_cursor,
       });
     } else {
       debugLog("api_harvest_skipped", { scope: msg.scope, reason: "no_sec_uid" });
@@ -1211,6 +1220,12 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         ? 'a[href*="/user/MS4w"]'
         : 'a[href*="/video/"]';
     let stagnantRounds = 0;
+
+    if (typeof msg.cursor === "number" && msg.cursor > 0) {
+      debugLog("scroll_skipped", { reason: "cursor_provided" });
+      msg.max_scroll_rounds = 0;
+    }
+
     for (let round = 0; round < msg.max_scroll_rounds; round += 1) {
       const beforeCount = sink.scopeCounts()[msg.scope];
       const beforeDomSize = document.querySelectorAll(anchorSelector).length;
@@ -1274,6 +1289,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
       items: allItems,
       scope_count: sink.scopeCounts()[msg.scope],
       status: allItems.length > 0 ? "ok" : "empty",
+      next_cursor: apiNextCursor,
       debug: {
         fetch_tap_install_status: _lastFetchTapInstallStatus,
         aweme_messages_received: awemeMessagesReceived,
@@ -1298,6 +1314,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
       scope_count: sink.scopeCounts()[msg.scope],
       status: "failed",
       error: String(err),
+      next_cursor: apiNextCursor,
       debug: {
         fetch_tap_install_status: _lastFetchTapInstallStatus,
         aweme_messages_received: awemeMessagesReceived,
@@ -1601,8 +1618,20 @@ export function isValidScopeExecuteMessage(value: unknown): value is ScopeExecut
   const KNOWN: readonly DouyinScope[] = ["dy_post", "dy_collect", "dy_like", "dy_follow"];
   if (!KNOWN.includes(v.scope as DouyinScope)) return false;
   if (typeof v.max_items_per_scope !== "number") return false;
+  if (
+    v.max_new_items_per_scope !== undefined
+    && typeof v.max_new_items_per_scope !== "number"
+  ) return false;
+  if (
+    v.skip_item_keys !== undefined
+    && (
+      !Array.isArray(v.skip_item_keys)
+      || !v.skip_item_keys.every((key) => typeof key === "string")
+    )
+  ) return false;
   if (typeof v.max_scroll_rounds !== "number") return false;
   if (typeof v.max_stagnant_scroll_rounds !== "number") return false;
+  if (v.cursor !== undefined && typeof v.cursor !== "number") return false;
   return true;
 }
 

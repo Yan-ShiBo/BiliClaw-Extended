@@ -120,6 +120,7 @@
           <option value="openrouter">OpenRouter</option>
           <option value="openai_compatible">OpenAI 兼容接口（自建 / 第三方）</option>
           <option value="ollama">本地 Ollama（免 key，需自备聊天模型）</option>
+          <option value="server_ollama">服务器 Ollama（局域网 / SSH 辅助）</option>
         </select>
 
         <div id="keyWrap">
@@ -136,6 +137,41 @@
         <div id="ollamaNote" class="hint" style="display:none; margin-top:14px">
           本地 Ollama 已随安装包附带,无需填 key。聊天默认用 <code>qwen2.5</code> 等模型,
           首次使用前请确保已 <code>ollama pull</code> 对应模型(embedding 的 bge-m3 已自动就绪)。
+        </div>
+
+        <div id="serverOllamaWrap" style="display:none">
+          <label for="serverHost">服务器 Ollama 地址</label>
+          <input id="serverHost" type="text" placeholder="192.168.0.239">
+          <div class="hint">保存时会写入 <code>http://&lt;服务器 IP&gt;:11434/v1</code>，用于聊天模型。</div>
+
+          <label for="serverUser">SSH 用户名（仅保存在本机）</label>
+          <input id="serverUser" type="text" placeholder="test" autocomplete="username">
+
+          <label for="serverPassword">SSH 密码（仅保存在本机浏览器）</label>
+          <input id="serverPassword" type="password" placeholder="服务器 SSH 密码" autocomplete="current-password">
+
+          <label for="embeddingHostMode">Embedding 运行位置</label>
+          <select id="embeddingHostMode">
+            <option value="local">本机 Ollama</option>
+            <option value="server">服务器 Ollama</option>
+          </select>
+
+          <div id="localEmbeddingWrap">
+            <label for="localEmbeddingModel">本机 Embedding 模型</label>
+            <input id="localEmbeddingModel" type="text" placeholder="qwen3-embedding:4b">
+            <div class="hint">保存时会写入 <code>http://127.0.0.1:11434/v1</code>，适合把向量模型留在当前电脑运行。</div>
+          </div>
+
+          <div id="serverEmbeddingWrap" style="display:none">
+            <label for="serverEmbeddingModel">服务器 Embedding 模型</label>
+            <input id="serverEmbeddingModel" type="text" placeholder="qwen3-embedding:8b">
+          </div>
+
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500">
+            <input id="saveServerOllama" type="checkbox" checked style="width:16px;height:16px;padding:0">
+            保存服务器信息到本机浏览器
+          </label>
+          <div class="hint">SSH 信息不会发送给 OpenBiliClaw 后端；后端只保存 Ollama HTTP 地址和模型名。</div>
         </div>
 
         <label for="model">模型名</label>
@@ -193,7 +229,7 @@
         <p class="sub">基础配置和首轮初始化已完成,本地引擎可以开始为你工作了。</p>
         <ul class="check-list">
           <li><span class="tick">✓</span><div><b>AI 大脑</b><br><span class="hint" id="doneLlm">已连接</span></div></li>
-          <li><span class="tick">✓</span><div><b>本地语义引擎</b><br><span class="hint">Ollama bge-m3 已随包就绪,推荐去重 / 多样性已开启</span></div></li>
+          <li><span class="tick">✓</span><div><b>语义引擎</b><br><span class="hint">已按上一步选择的本机或服务器 embedding 配置启用</span></div></li>
           <li id="biliDone" class="pending"><span class="tick">…</span><div><b>平台账号</b><br><span class="hint" id="doneBili">B 站可稍后连接；Reddit 等来源按初始化勾选项检查</span></div></li>
           <li><span class="tick">✓</span><div><b>首轮初始化</b><br><span class="hint">画像和推荐池已就绪</span></div></li>
         </ul>
@@ -206,6 +242,7 @@
     </div>
   </div>
 
+  <script src="./local-setup-defaults.js"></script>
   <script>
     const $ = (s) => document.querySelector(s);
     const KEY_LINKS = {
@@ -216,6 +253,7 @@
       openrouter: ["https://openrouter.ai/keys", "OpenRouter"],
       openai_compatible: ["", ""],
       ollama: ["", ""],
+      server_ollama: ["", ""],
     };
     const DEFAULT_MODELS = {
       deepseek: "deepseek-v4-flash",
@@ -225,7 +263,29 @@
       openrouter: "openai/gpt-5-nano",
       openai_compatible: "",
       ollama: "qwen2.5:7b",
+      server_ollama: "qwen3:30b",
     };
+    const SERVER_OLLAMA_STORAGE_KEY = "openbiliclaw.setup.serverOllama";
+    const SERVER_OLLAMA_DEFAULTS = {
+      host: "192.168.0.239",
+      username: "test",
+      password: "",
+      chatModel: "qwen3:30b",
+      numCtx: 262144,
+      embeddingMode: "local",
+      localEmbeddingModel: "qwen3-embedding:4b",
+      serverEmbeddingModel: "qwen3-embedding:8b",
+      ...((window.OBC_LOCAL_SETUP_DEFAULTS || {}).serverOllama || {}),
+    };
+    if (SERVER_OLLAMA_DEFAULTS.embeddingModel && !SERVER_OLLAMA_DEFAULTS.serverEmbeddingModel) {
+      SERVER_OLLAMA_DEFAULTS.serverEmbeddingModel = SERVER_OLLAMA_DEFAULTS.embeddingModel;
+    }
+    if (!SERVER_OLLAMA_DEFAULTS.localEmbeddingModel) {
+      SERVER_OLLAMA_DEFAULTS.localEmbeddingModel = "qwen3-embedding:4b";
+    }
+    if (!["local", "server"].includes(SERVER_OLLAMA_DEFAULTS.embeddingMode)) {
+      SERVER_OLLAMA_DEFAULTS.embeddingMode = "local";
+    }
     // v0.3.118+: bilibili is selectable like every other source — default
     // checked (recommended) but no longer forced. At least one source must
     // stay checked to start.
@@ -271,13 +331,78 @@
       if (n === 2) renderInitIdle();
     }
 
+    function readServerOllamaSettings() {
+      let saved = {};
+      try {
+        saved = JSON.parse(localStorage.getItem(SERVER_OLLAMA_STORAGE_KEY) || "{}") || {};
+      } catch {
+        saved = {};
+      }
+      return { ...SERVER_OLLAMA_DEFAULTS, ...saved };
+    }
+
+    function fillServerOllamaFields(force = false) {
+      const current = readServerOllamaSettings();
+      const pairs = [
+        ["serverHost", current.host],
+        ["serverUser", current.username],
+        ["serverPassword", current.password],
+        ["localEmbeddingModel", current.localEmbeddingModel || "qwen3-embedding:4b"],
+        ["serverEmbeddingModel", current.serverEmbeddingModel || current.embeddingModel || "qwen3-embedding:8b"],
+      ];
+      for (const [id, value] of pairs) {
+        const input = $("#" + id);
+        if (input && (force || !input.value.trim())) input.value = value || "";
+      }
+      const embeddingMode = ["local", "server"].includes(current.embeddingMode) ? current.embeddingMode : "local";
+      if ($("#embeddingHostMode") && (force || !$("#embeddingHostMode").value)) {
+        $("#embeddingHostMode").value = embeddingMode;
+      }
+      renderEmbeddingHostMode();
+      if (force || !$("#model").value.trim()) {
+        $("#model").value = current.chatModel || DEFAULT_MODELS.server_ollama;
+        lastAutoModel = $("#model").value;
+      }
+    }
+
+    function serverOllamaBaseUrl(host) {
+      const raw = String(host || "").trim();
+      if (!raw) return "";
+      if (/^https?:\/\//i.test(raw)) {
+        const withoutSlash = raw.replace(/\/+$/, "");
+        return withoutSlash.endsWith("/v1") ? withoutSlash : `${withoutSlash}/v1`;
+      }
+      const normalized = raw.replace(/\/+$/, "");
+      const hasPort = normalized.includes(":") && !normalized.startsWith("[");
+      return `http://${normalized}${hasPort ? "" : ":11434"}/v1`;
+    }
+
+    function localOllamaBaseUrl() {
+      return "http://127.0.0.1:11434/v1";
+    }
+
+    function renderEmbeddingHostMode() {
+      const mode = $("#embeddingHostMode")?.value || "local";
+      const isServer = mode === "server";
+      if ($("#localEmbeddingWrap")) $("#localEmbeddingWrap").style.display = isServer ? "none" : "block";
+      if ($("#serverEmbeddingWrap")) $("#serverEmbeddingWrap").style.display = isServer ? "block" : "none";
+    }
+
+    function saveServerOllamaSettings(settings) {
+      if (!$("#saveServerOllama")?.checked) return;
+      localStorage.setItem(SERVER_OLLAMA_STORAGE_KEY, JSON.stringify(settings));
+    }
+
     function renderProvider() {
       const p = $("#provider").value;
       const isOllama = p === "ollama";
+      const isServerOllama = p === "server_ollama";
       const isCompat = p === "openai_compatible";
-      $("#keyWrap").style.display = isOllama ? "none" : "block";
+      $("#keyWrap").style.display = (isOllama || isServerOllama) ? "none" : "block";
       $("#baseWrap").style.display = isCompat ? "block" : "none";
       $("#ollamaNote").style.display = isOllama ? "block" : "none";
+      $("#serverOllamaWrap").style.display = isServerOllama ? "block" : "none";
+      if (isServerOllama) fillServerOllamaFields();
       const [url, name] = KEY_LINKS[p] || ["", ""];
       $("#keyHint").innerHTML = url ? `还没有 key？去 <a href="${url}" target="_blank" rel="noopener">${name}</a> 免费申请,粘贴回来即可。` : "";
       const modelInput = $("#model");
@@ -298,10 +423,37 @@
     }
 
     async function saveLlm() {
-      const provider = $("#provider").value;
+      const selectedProvider = $("#provider").value;
+      let provider = selectedProvider;
       const apiKey = $("#apiKey").value.trim();
-      const baseUrl = $("#baseUrl").value.trim();
-      const model = $("#model").value.trim();
+      let baseUrl = $("#baseUrl").value.trim();
+      let model = $("#model").value.trim();
+      let embeddingConfig = null;
+      if (selectedProvider === "server_ollama") {
+        const serverSettings = {
+          host: $("#serverHost").value.trim(),
+          username: $("#serverUser").value.trim(),
+          password: $("#serverPassword").value,
+          chatModel: model,
+          numCtx: Number(SERVER_OLLAMA_DEFAULTS.numCtx) || 262144,
+          embeddingMode: $("#embeddingHostMode").value === "server" ? "server" : "local",
+          localEmbeddingModel: $("#localEmbeddingModel").value.trim() || "qwen3-embedding:4b",
+          serverEmbeddingModel: $("#serverEmbeddingModel").value.trim() || "qwen3-embedding:8b",
+        };
+        if (!serverSettings.host) { showMsg("#msg0", "请填写服务器 Ollama 地址。", "err"); return; }
+        if (!serverSettings.chatModel) { showMsg("#msg0", "请填写服务器聊天模型。", "err"); return; }
+        provider = "ollama";
+        baseUrl = serverOllamaBaseUrl(serverSettings.host);
+        model = serverSettings.chatModel;
+        const embeddingUsesServer = serverSettings.embeddingMode === "server";
+        embeddingConfig = {
+          provider: "ollama",
+          model: embeddingUsesServer ? serverSettings.serverEmbeddingModel : serverSettings.localEmbeddingModel,
+          base_url: embeddingUsesServer ? baseUrl : localOllamaBaseUrl(),
+          output_dimensionality: 0,
+        };
+        saveServerOllamaSettings(serverSettings);
+      }
       if (provider !== "ollama" && !apiKey) { showMsg("#msg0", "请先填入 API Key（本地 Ollama 才可免 key）。", "err"); return; }
       if (provider === "openai_compatible" && !baseUrl) { showMsg("#msg0", "OpenAI 兼容接口需要填 Base URL。", "err"); return; }
       if (!model) { showMsg("#msg0", "请填写模型名。", "err"); return; }
@@ -310,9 +462,12 @@
       if (apiKey) pcfg.api_key = apiKey;
       if (baseUrl) pcfg.base_url = baseUrl;
       pcfg.model = model;
+      if (selectedProvider === "server_ollama") pcfg.num_ctx = Number(SERVER_OLLAMA_DEFAULTS.numCtx) || 262144;
+      const llmPayload = { default_provider: provider, [provider]: pcfg };
+      if (embeddingConfig) llmPayload.embedding = embeddingConfig;
       const payload = {
         suppress_background_llm_work: true,
-        llm: { default_provider: provider, [provider]: pcfg },
+        llm: llmPayload,
       };
 
       const btn = $("#saveLlm");
@@ -322,7 +477,7 @@
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
         if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 200));
-        const label = provider === "ollama" ? "本地 Ollama" : provider;
+        const label = selectedProvider === "server_ollama" ? "服务器 Ollama" : (provider === "ollama" ? "本地 Ollama" : provider);
         $("#doneLlm").textContent = "已连接 · " + label;
         setStep(1);
       } catch (e) {
@@ -729,8 +884,33 @@
           const providerCfg = (llm[prov] && typeof llm[prov] === "object") ? llm[prov] : {};
           const hasKey = prov && (prov === "ollama" || providerCfg.api_key);
           if (hasKey) {
-            $("#provider").value = prov;
-            if (providerCfg.model) {
+            const base = String(providerCfg.base_url || "");
+            const preferServerOllama = Boolean(SERVER_OLLAMA_DEFAULTS.prefer);
+            const hasRemoteOllamaBase = prov === "ollama" && base && !/localhost|127\.0\.0\.1/i.test(base);
+            $("#provider").value = prov === "ollama" && (preferServerOllama || hasRemoteOllamaBase)
+              ? "server_ollama"
+              : prov;
+            if ($("#provider").value === "server_ollama") {
+              const settings = readServerOllamaSettings();
+              if (hasRemoteOllamaBase) {
+                try {
+                  const parsed = new URL(base);
+                  settings.host = parsed.hostname || settings.host;
+                } catch {}
+              }
+              settings.chatModel = providerCfg.model || settings.chatModel;
+              const embeddingBase = String(llm.embedding?.base_url || "");
+              const embeddingIsLocal = !embeddingBase || /localhost|127\.0\.0\.1/i.test(embeddingBase);
+              settings.embeddingMode = embeddingIsLocal ? "local" : "server";
+              if (embeddingIsLocal) {
+                settings.localEmbeddingModel = llm.embedding?.model || settings.localEmbeddingModel;
+              } else {
+                settings.serverEmbeddingModel = llm.embedding?.model || settings.serverEmbeddingModel;
+              }
+              localStorage.setItem(SERVER_OLLAMA_STORAGE_KEY, JSON.stringify(settings));
+              fillServerOllamaFields(true);
+            }
+            if (providerCfg.model && $("#provider").value !== "server_ollama") {
               $("#model").value = providerCfg.model;
               lastAutoModel = "";
             }
@@ -741,6 +921,7 @@
     })();
 
     $("#provider").addEventListener("change", renderProvider);
+    $("#embeddingHostMode").addEventListener("change", renderEmbeddingHostMode);
     $("#saveLlm").addEventListener("click", saveLlm);
     $("#back1").addEventListener("click", () => setStep(0));
     $("#next1").addEventListener("click", () => setStep(2));

@@ -101,6 +101,26 @@ test("BootstrapItemSink.ingest respects maxItemsPerScope cap", () => {
   assert.equal(sink.scopeCounts().dy_collect, 2);
 });
 
+test("BootstrapItemSink skips persisted keys without consuming the new-item cap", () => {
+  const sink = new BootstrapItemSink({
+    maxItemsPerScope: 2,
+    skipItemKeys: ["dy_like:old-1", "dy_like:old-2"],
+  });
+  const ingested = sink.ingest([
+    makeItem("dy_like", "old-1"),
+    makeItem("dy_like", "old-2"),
+    makeItem("dy_like", "new-1"),
+    makeItem("dy_like", "new-2"),
+    makeItem("dy_like", "new-3"),
+  ]);
+  assert.deepEqual(
+    ingested.map((i) => i.aweme_id),
+    ["new-1", "new-2"],
+  );
+  assert.equal(sink.scopeCounts().dy_like, 2);
+  assert.equal(sink.skippedExistingCounts().dy_like, 2);
+});
+
 test("BootstrapItemSink.scopeCounts reflects accumulated counts per scope", () => {
   const sink = new BootstrapItemSink({ maxItemsPerScope: 100 });
   sink.ingest([makeItem("dy_post", "p1"), makeItem("dy_post", "p2")]);

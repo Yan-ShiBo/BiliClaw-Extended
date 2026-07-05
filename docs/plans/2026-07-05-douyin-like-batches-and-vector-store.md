@@ -1,0 +1,98 @@
+# 2026-07-05 抖音喜欢分批导入与本地向量库状态
+
+本文记录本地 `D:\BiliClaw` 实例对第一个抖音账号的喜欢/收藏导入、续跑 checkpoint、已知问题和本地向量库接入状态。
+
+## 当前范围
+
+- 当前只继续处理第一个/当前浏览器登录的抖音账号。
+- 第二个抖音账号和小红书喜欢/收藏今天暂停，不继续抓取。
+- 目标是把第一个抖音账号的喜欢慢速分批导入画像，并且每一批都能从上一次位置继续。
+
+## 本地数据状态
+
+截至 2026-07-05 12:03 左右，本地事件层和 `source_bootstrap_state.json` 中已经记录：
+
+- `dy_like`: 595 条。
+- `dy_collect`: 946 条。
+- `dy_follow`: 3 条。
+
+当前 `dy_like` checkpoint：
+
+- `seen_count`: 595。
+- `last_batch_new_count`: 8。
+- `last_task_id`: `b7713354-84e9-4a0b-91c5-0a80e0fb5264`。
+- `last_aweme_id`: `7414772484764945702`。
+- `api_error`: `HTTP 404`，表示本轮主动 API 抓取不可用，实际依赖页面/DOM 抓取和已见 key 跳过。
+
+## 已验证的续跑方式
+
+后端下发 `bootstrap_profile` 任务时，如果 payload 带：
+
+```json
+{
+  "scopes": ["dy_like"],
+  "max_items_per_scope": 5000,
+  "max_new_items_per_scope": 100,
+  "max_scroll_rounds": 30,
+  "max_stagnant_scroll_rounds": 15,
+  "skip_existing_bootstrap_keys": true
+}
+```
+
+后端会从 `source_bootstrap_state.json` 取出已经处理过的 `dy_like:*` key，并以 `skip_item_keys` 下发给扩展。扩展新版本会：
+
+- 跳过已处理 key。
+- 已处理 key 不占用 `max_new_items_per_scope` 新增名额。
+- 在 debug 中返回 `skip_item_key_count`、`skipped_existing_items`、`max_new_items_per_scope`。
+
+2026-07-05 的验证批次中：
+
+- `skip_item_key_count = 587`，说明扩展已加载新 bundle。
+- `skipped_existing_items = 2866`，说明已处理条目被跳过。
+- 本批新增 8 条喜欢，`dy_like` 从 587 增至 595。
+
+## 已修复的问题
+
+1. 扩展未重载时，任务会重复从顶部扫描，debug 中没有 `skip_item_key_count`。现在需要确认扩展已加载新 bundle；若没有，手动在 `chrome://extensions` 刷新 OpenBiliClaw 扩展。
+2. `DyTaskQueue.fail()` 原来会在任务超时时把已有 partial 结果覆盖成 `{ "error": "task_timeout" }`。现在改为保留已抓到的 `videos`、`scope_counts` 和 `debug`，只追加失败原因。
+3. 后端 checkpoint 写入调整到 profile update 之前，避免 profile update 失败后事件已传播但 checkpoint 没保存。
+4. YouTube task handler 中误粘贴的抖音向量库写入代码已移除，避免 `added_videos` 未定义。
+5. 扩展设置页的“本地扫描 & 向量化喜欢”按钮改为续跑任务，不再发起无 checkpoint 的全量重扫。
+
+## 本地向量库
+
+本地向量库作为可重建索引，不替代 SQLite 事件层。真实事实仍以 `data/openbiliclaw.db` 和 `data/memory/source_bootstrap_state.json` 为准。
+
+已接入：
+
+- 依赖：`chromadb>=0.4`。
+- 模块：`src/openbiliclaw/memory/vector_store.py`。
+- 持久化目录：`data/vector_db`。
+- collection：`dy_likes`。
+- 默认 embedding：Ollama `qwen3-embedding:8b`。
+- 默认 Ollama host：`http://127.0.0.1:11434`。
+- 可用环境变量覆盖：
+  - `OPENBILICLAW_VECTOR_OLLAMA_MODEL`
+  - `OPENBILICLAW_VECTOR_OLLAMA_HOST`
+
+数据流：
+
+1. 扩展上报 `dy_like`。
+2. 后端 dedupe，确认是新喜欢。
+3. SQLite 事件层和画像管线照常写入。
+4. 后端后台线程把新 `dy_like` 批量 upsert 到 ChromaDB。
+5. ChromaDB/Ollama 失败只记录 warning，不阻断导入。
+
+## 尚未完成
+
+- 远程重度推荐分析接口目前只返回“尚未接入”。下一阶段应从 `dy_likes` collection 做 Top-K 检索，再把检索结果作为 context 发给服务器上的 `qwen3:30b`。
+- 抖音主动 API 抓取当前返回 `HTTP 404`，还不能依赖 cursor 直接翻页；当前可用方案是扩展页面抓取 + 已见 key 跳过。
+- 第二个抖音账号的数据隔离和小红书喜欢/收藏导入暂停。
+
+## 下次继续
+
+下次继续第一个抖音账号喜欢导入时，直接排同样的 `dy_like` 续跑任务即可。成功的一批应看到：
+
+- `skip_item_key_count` 等于当前已见 `dy_like` 数量。
+- `dy_bootstrap_like` 对应事件数量继续增长。
+- `source_bootstrap_state.json` 的 `dy_scope_progress.dy_like.seen_count` 同步增长。

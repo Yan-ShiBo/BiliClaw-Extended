@@ -64,6 +64,7 @@ export function isValidDouyinBootstrapMessage(
 
 interface SinkOptions {
   maxItemsPerScope: number;
+  skipItemKeys?: readonly string[];
 }
 
 type ScopeMap<T> = Record<DouyinScope, T>;
@@ -88,11 +89,21 @@ function itemKey(item: DouyinBootstrapItem): string {
 
 export class BootstrapItemSink {
   private readonly maxItemsPerScope: number;
+  private readonly skipKeys: Set<string>;
   private readonly seenKeys = new Set<string>();
   private readonly byScope: ScopeMap<DouyinBootstrapItem[]> = emptyScopeMap(() => []);
+  private readonly skippedExistingByScope: ScopeMap<number> = emptyScopeMap(() => 0);
 
   constructor(opts: SinkOptions) {
     this.maxItemsPerScope = Math.max(0, Math.floor(opts.maxItemsPerScope));
+    this.skipKeys = new Set(
+      (opts.skipItemKeys ?? [])
+        .map((key) => String(key).trim())
+        .filter((key) => key.length > 0),
+    );
+    for (const key of this.skipKeys) {
+      this.seenKeys.add(key);
+    }
   }
 
   /**
@@ -106,7 +117,12 @@ export class BootstrapItemSink {
       if (!item || !KNOWN_SCOPES.includes(item.scope)) continue;
       const key = itemKey(item);
       if (!key.includes(":") || key.endsWith(":")) continue; // empty id
-      if (this.seenKeys.has(key)) continue;
+      if (this.seenKeys.has(key)) {
+        if (this.skipKeys.has(key)) {
+          this.skippedExistingByScope[item.scope] += 1;
+        }
+        continue;
+      }
       const bucket = this.byScope[item.scope];
       if (bucket.length >= this.maxItemsPerScope) continue;
       this.seenKeys.add(key);
@@ -132,6 +148,10 @@ export class BootstrapItemSink {
       dy_like: [...this.byScope.dy_like],
       dy_follow: [...this.byScope.dy_follow],
     };
+  }
+
+  skippedExistingCounts(): ScopeMap<number> {
+    return { ...this.skippedExistingByScope };
   }
 }
 
