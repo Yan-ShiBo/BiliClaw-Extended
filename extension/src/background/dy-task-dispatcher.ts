@@ -595,6 +595,24 @@ export function onTabReady(
 // install_messages_received=0 without needing the user's browser
 // console. Will be reverted before release.
 let _lastInjectStatus: string = "not_attempted";
+let _lastContentScriptInjectStatus: string = "not_attempted";
+
+async function injectDouyinContentScriptInto(tabId: number): Promise<void> {
+  if (typeof chrome === "undefined" || !chrome.scripting?.executeScript) {
+    _lastContentScriptInjectStatus = "scripting_api_missing";
+    return;
+  }
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      files: ["dist/content/douyin.js"],
+      world: "ISOLATED",
+    });
+    _lastContentScriptInjectStatus = `ok_results=${Array.isArray(result) ? result.length : "n/a"}`;
+  } catch (err) {
+    _lastContentScriptInjectStatus = `error: ${String(err).slice(0, 120)}`;
+  }
+}
 
 function sendScopeExecuteMessage(): void {
   if (!progress || !taskTabId) {
@@ -625,6 +643,7 @@ function sendScopeExecuteMessage(): void {
         account_id: progress.account_id,
         max_scroll_rounds: progress.max_scroll_rounds,
         max_stagnant_scroll_rounds: progress.max_stagnant_scroll_rounds,
+        debug_content_script_inject_status: _lastContentScriptInjectStatus,
         debug_inject_status: _lastInjectStatus,
       },
     })
@@ -641,6 +660,11 @@ function sendScopeExecuteMessage(): void {
         scope_count: 0,
         status: "failed",
         error: "sendMessage_failed",
+        debug: {
+          content_script_inject_status: _lastContentScriptInjectStatus,
+          fetch_tap_inject_status: _lastInjectStatus,
+          sendMessage_error: String(err),
+        },
       });
     });
 }
@@ -1049,7 +1073,12 @@ export async function executeTask(task: DyTask): Promise<void> {
   // scopes; fetch-tap stays installed across SPA routes.
   onTabReady(taskTabId, () => {
     debugLog("executeTask:tab_ready", { tabId: taskTabId });
-    void injectFetchTapInto(taskTabId!).then(() => {
+    void injectDouyinContentScriptInto(taskTabId!).then(() => {
+      debugLog("executeTask:content_script_inject_done", {
+        inject_status: _lastContentScriptInjectStatus,
+      });
+      return injectFetchTapInto(taskTabId!);
+    }).then(() => {
       debugLog("executeTask:inject_done", { inject_status: _lastInjectStatus });
       sendScopeExecuteMessage();
     });

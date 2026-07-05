@@ -4,6 +4,12 @@
 
 ---
 
+## v0.3.156 / extension v0.3.156: 抖音复用页签后 content script 重新注入（2026-07-05）
+
+- **复用旧抖音页签时重新注入 content script**：扩展热重载后，原抖音页里的旧 content script 会被 Chrome 断开，导致下一批虽然 `tab_reused` 成功但 `DY_SCOPE_EXECUTE` 无接收端。现在 bootstrap 任务会先显式注入 `dist/content/douyin.js`，再注入 MAIN world fetch tap 并发送 scope 执行消息。
+- **content script 重复注册保护**：抖音 content script 增加页面级注册哨兵，允许 dispatcher 对复用页签做兜底注入，同时避免正常页面重复注入时注册多份消息监听器。
+- **测试与版本号**：新增 dispatcher 注入顺序测试和 content script 幂等注册测试；扩展 manifest、npm 元数据和项目版本提升到 `0.3.156`。
+
 ## v0.3.155 / extension v0.3.155: 抖音导入页复用与滚动位置保留（2026-07-05）
 
 - **抖音喜欢续跑复用同一页签**：`bootstrap_profile` 任务完成后不再关闭前台抖音导入页，后台会把该页签 ID 写入 `chrome.storage.session`，下一批优先复用它；如果刚重载扩展导致 session ID 为空，也会主动查找已打开的 `douyin.com` profile 页，避免每批都新开主页。

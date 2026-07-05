@@ -30,6 +30,7 @@ import { douyinAdapter } from "../shared/platforms/douyin.ts";
 import { registerE2EExecutor } from "./e2e-executor.ts";
 
 let behaviorCollectorStarted = false;
+const DY_EXECUTOR_REGISTERED_KEY = "__OPENBILICLAW_DY_EXECUTOR_REGISTERED__";
 
 function startDouyinBehaviorCollector(): void {
   if (behaviorCollectorStarted) return;
@@ -1704,6 +1705,9 @@ export function isValidFeedExecuteMessage(value: unknown): value is FeedExecuteM
 
 export function registerDyScopeExecutor(): void {
   if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.onMessage) return;
+  const globalState = globalThis as Record<string, unknown>;
+  if (globalState[DY_EXECUTOR_REGISTERED_KEY] === true) return;
+  globalState[DY_EXECUTOR_REGISTERED_KEY] = true;
   chrome.runtime.onMessage.addListener(
     (message: Record<string, unknown>, _sender, sendResponse) => {
       if (message.action !== "DY_SCOPE_EXECUTE") return false;

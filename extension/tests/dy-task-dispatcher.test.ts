@@ -19,6 +19,8 @@ import {
   buildDyExecuteMessageData,
   chooseReusableDouyinBootstrapTab,
   computeDyTaskTimeoutMs,
+  executeTask,
+  handleDyScopeResult,
   isReusableDouyinBootstrapTabUrl,
   isValidDyTask,
   onTabReady,
@@ -27,6 +29,7 @@ import {
   shouldOpenDyTaskActive,
   shouldFinalizeHotTask,
 } from "../src/background/dy-task-dispatcher.ts";
+import { installChromeMock } from "./helpers/chrome-mock.ts";
 
 test("buildDyTaskUrl routes bootstrap_profile to the douyin home", () => {
   // The content-script executor will navigate from this initial URL to
@@ -385,6 +388,53 @@ test("pollDyTaskNow exists as the WS-driven immediate-poll entry point", () => {
   // Calling it without chrome / network must not throw — pollNextTask
   // catches its own fetch errors so the dispatcher stays alive.
   assert.doesNotThrow(() => pollDyTaskNow());
+});
+
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+test("executeTask injects Douyin content script before bootstrap scope message", async () => {
+  const chromeMock = installChromeMock();
+  try {
+    chromeMock.queryResult = [
+      {
+        id: 77,
+        url: "https://www.douyin.com/user/self?from_tab_name=main&showTab=like",
+        status: "complete",
+      },
+    ];
+    chromeMock.tabById.set(77, chromeMock.queryResult[0]!);
+
+    await executeTask({
+      id: "dy-inject-content",
+      type: "bootstrap_profile",
+      scopes: ["dy_like"],
+    });
+    await flush();
+
+    assert.deepEqual(chromeMock.executedScripts.slice(-2), [
+      { files: ["dist/content/douyin.js"], tabId: 77, world: "ISOLATED" },
+      { files: ["dist/main/dy-fetch-tap.js"], tabId: 77, world: "MAIN" },
+    ]);
+    assert.equal(chromeMock.sentMessages.at(-1)?.tabId, 77);
+    assert.equal(
+      (chromeMock.sentMessages.at(-1)?.message as { action?: string } | undefined)?.action,
+      "DY_SCOPE_EXECUTE",
+    );
+
+    await handleDyScopeResult({
+      task_id: "dy-inject-content",
+      scope: "dy_like",
+      items: [],
+      scope_count: 0,
+      status: "ok",
+    });
+    await flush();
+  } finally {
+    chromeMock.restore();
+  }
 });
 
 test("onTabReady continues immediately when the tab is already complete", async () => {

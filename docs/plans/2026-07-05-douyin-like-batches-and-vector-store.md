@@ -160,3 +160,10 @@
 - 本批 debug 显示 `skipped_existing=7958`、`dom_items_harvested=8`、`fetch_tap_install_status=installed`，主动 API 仍返回 `HTTP 404`，当前仍依赖页面/DOM 抓取加已见 key 跳过。
 - 本批暴露出后端 ack 卡顿：partial 结果入库后，`/api/sources/dy/task-result` 同步等待 `ProfileUpdatePipeline` 调用画像 LLM；当 Ollama 连接失败时，扩展会等待该 HTTP 请求返回，导致 final ok 延迟。
 - 后端已改为：task-result 在事件/向量入库后立即返回，增量画像更新通过后台任务 best-effort 执行；即使画像 LLM 暂时不可用，也不会阻塞扩展继续滚动或提交 final ok。
+
+## 2026-07-05 18:47 复用页签后的 content script 断连记录
+
+- 热重载扩展后继续排入 `a0ae2dca-6383-42f0-a39c-c133249708a8`，dispatcher 已成功复用原抖音喜欢页签：debug 出现 `executeTask:tab_reused`，`tabId=910917706`。
+- 本批没有新增数据，原因不是后端 checkpoint 或去重，而是 Chrome 扩展热重载会让旧页面里的 content script 失效；复用页签后 `sendMessage` 返回 `Receiving end does not exist`，后端记录为 `sendMessage_failed`。
+- 修复随扩展 `0.3.156`：bootstrap 任务在复用/新开抖音页签后会显式注入 `dist/content/douyin.js`，再注入 `dist/main/dy-fetch-tap.js`；content script 自身增加注册哨兵，避免重复注入造成多份监听器。
+- 继续跑下一批前需要热重载或手动重载 OpenBiliClaw 扩展到 `0.3.156`。

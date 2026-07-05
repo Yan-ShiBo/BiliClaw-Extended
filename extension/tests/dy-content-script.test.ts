@@ -20,6 +20,7 @@ import {
   isDouyinSearchResultUrl,
   isValidFeedExecuteMessage,
   isValidScopeExecuteMessage,
+  registerDyScopeExecutor,
 } from "../src/content/douyin.ts";
 
 test("isValidScopeExecuteMessage accepts a well-formed scope payload", () => {
@@ -98,6 +99,33 @@ test("isValidScopeExecuteMessage rejects malformed input", () => {
     }),
     false,
   );
+});
+
+test("registerDyScopeExecutor is idempotent for explicit reinjection", () => {
+  const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+  const globalState = globalThis as Record<string, unknown>;
+  delete globalState.__OPENBILICLAW_DY_EXECUTOR_REGISTERED__;
+  let listenerCount = 0;
+
+  (globalThis as { chrome?: unknown }).chrome = {
+    runtime: {
+      onMessage: {
+        addListener() {
+          listenerCount += 1;
+        },
+      },
+    },
+  };
+
+  try {
+    registerDyScopeExecutor();
+    registerDyScopeExecutor();
+
+    assert.equal(listenerCount, 4);
+  } finally {
+    delete globalState.__OPENBILICLAW_DY_EXECUTOR_REGISTERED__;
+    (globalThis as { chrome?: unknown }).chrome = originalChrome;
+  }
 });
 
 test("isValidScopeExecuteMessage accepts all four scopes", () => {
