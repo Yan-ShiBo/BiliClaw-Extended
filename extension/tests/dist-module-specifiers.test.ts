@@ -14,7 +14,7 @@ const CONTENT_SCRIPT_FILES = ["dist/content/bilibili.js", "dist/content/xiaohong
 
 test("built extension runtime scripts are directly loadable by Chrome", () => {
   const root = process.cwd();
-  execFileSync("npm", ["run", "build"], { cwd: root, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: root, stdio: "pipe" });
 
   for (const relativePath of DIST_FILES) {
     const content = readFileSync(join(root, relativePath), "utf8");

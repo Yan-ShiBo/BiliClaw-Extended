@@ -495,7 +495,7 @@ test("source-share suggestion button uses settings-scope helpers and form switch
   const populateFormBlock = bindSettingsBlock.slice(populateFormIndex, collectFormIndex);
   const beforePopulate = bindSettingsBlock.slice(0, populateFormIndex);
   const suggestionBlock =
-    bindSettingsBlock.match(/suggestBtn\.addEventListener\("click"[\s\S]*?\n  \}\n\n  saveBtn/)?.[0] ?? "";
+    bindSettingsBlock.match(/suggestBtn\.addEventListener\("click"[\s\S]*?\n  const dyScanLikesBtn/)?.[0] ?? "";
 
   assert.match(beforePopulate, /const setVal = \(id, val\) => \{/);
   assert.doesNotMatch(populateFormBlock, /const setVal = \(id, val\) => \{/);

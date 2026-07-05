@@ -18,9 +18,11 @@ import {
   buildDyTaskUrl,
   buildDyExecuteMessageData,
   computeDyTaskTimeoutMs,
+  isReusableDouyinBootstrapTabUrl,
   isValidDyTask,
   onTabReady,
   pollDyTaskNow,
+  shouldPreserveDyTaskTab,
   shouldOpenDyTaskActive,
   shouldFinalizeHotTask,
 } from "../src/background/dy-task-dispatcher.ts";
@@ -83,6 +85,24 @@ test("shouldOpenDyTaskActive only foregrounds bootstrap imports", () => {
     false,
   );
   assert.equal(shouldOpenDyTaskActive({ id: "feed", type: "feed", max_items: 10 }), false);
+});
+
+test("bootstrap task tabs are the only preserved dy task tabs", () => {
+  assert.equal(shouldPreserveDyTaskTab({ id: "bootstrap", type: "bootstrap_profile" }), true);
+  assert.equal(shouldPreserveDyTaskTab({ id: "search", type: "search", keywords: ["猫"] }), false);
+  assert.equal(shouldPreserveDyTaskTab({ id: "feed", type: "feed", max_items: 10 }), false);
+  assert.equal(shouldPreserveDyTaskTab(null), false);
+});
+
+test("reusable bootstrap tab URLs must be https douyin pages", () => {
+  assert.equal(
+    isReusableDouyinBootstrapTabUrl("https://www.douyin.com/user/self?showTab=like"),
+    true,
+  );
+  assert.equal(isReusableDouyinBootstrapTabUrl("https://www-hj.douyin.com/user/self"), true);
+  assert.equal(isReusableDouyinBootstrapTabUrl("http://www.douyin.com/user/self"), false);
+  assert.equal(isReusableDouyinBootstrapTabUrl("https://example.com/user/self"), false);
+  assert.equal(isReusableDouyinBootstrapTabUrl(undefined), false);
 });
 
 test("isValidDyTask accepts bootstrap_profile with optional payload fields", () => {

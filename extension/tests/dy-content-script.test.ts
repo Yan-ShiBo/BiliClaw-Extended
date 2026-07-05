@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import {
   douyinDiscoveryExecutionPolicy,
   filterDiscoveryItemsForScope,
+  isDouyinScopeRoute,
   isDouyinSearchResultUrl,
   isValidFeedExecuteMessage,
   isValidScopeExecuteMessage,
@@ -113,6 +114,18 @@ test("isValidScopeExecuteMessage accepts all four scopes", () => {
       `expected scope=${scope} to validate`,
     );
   }
+});
+
+test("isDouyinScopeRoute recognizes already-open profile scope tabs", () => {
+  assert.equal(isDouyinScopeRoute("dy_like", "/user/self", "?showTab=like"), true);
+  assert.equal(
+    isDouyinScopeRoute("dy_collect", "/user/MS4wLjABAAAA", "?showTab=favorite_collection"),
+    true,
+  );
+  assert.equal(isDouyinScopeRoute("dy_follow", "/user/self", "?showTab=following"), true);
+  assert.equal(isDouyinScopeRoute("dy_post", "/user/self", ""), true);
+  assert.equal(isDouyinScopeRoute("dy_like", "/user/self", ""), false);
+  assert.equal(isDouyinScopeRoute("dy_like", "/", "?showTab=like"), false);
 });
 
 test("isValidFeedExecuteMessage accepts feed payload and rejects malformed input", () => {

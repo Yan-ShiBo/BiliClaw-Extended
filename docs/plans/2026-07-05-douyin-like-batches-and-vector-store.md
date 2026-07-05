@@ -131,3 +131,23 @@
 - 调试信息增加 `skipped_existing`，后续验证时应能看到浏览器端跳过数量。
 
 注意：该修复在扩展 `0.3.154` bundle 中，继续跑下一批前需要在 `chrome://extensions` 重新加载 OpenBiliClaw，使 Chrome 使用新的 content script 和 service worker。
+
+## 2026-07-05 追加修复：复用抖音导入页和滚动位置
+
+问题：即使浏览器端已经能按 `skip_item_keys` 跳过旧喜欢，旧实现仍然会在每一批完成后清理任务页签，下一批重新打开 `https://www.douyin.com/`，然后 content script 再点击进入“我 / 喜欢”。这会让页面从顶部重新加载，喜欢很多时需要反复跳过大量旧条目，实际不可持续。
+
+本次修复：
+
+- `bootstrap_profile` 任务完成后继续保留前台抖音导入页签，并把页签 ID 写入 `chrome.storage.session`。
+- 下一批 `bootstrap_profile` 任务优先复用这个页签，而不是重新打开主页。
+- content script 新增当前 scope route 判定：如果页面已经在 `/user/...?...showTab=like`，就不再重新点击“喜欢”，直接继续当前页面上的滚动与采集。
+- 浏览器关闭、扩展重载、用户手动关闭该抖音页签，或 Douyin 自己刷新/虚拟列表回收时，仍可能失去滚动上下文；这种情况下会自动退回新开页签，并继续依靠已见 key 跳过旧条目。
+
+版本：该修复随扩展 `0.3.155` 打包。继续跑下一批前需要在 `chrome://extensions` 重新加载 OpenBiliClaw，确认版本显示为 `0.3.155`。
+
+截至本次修复前的最新本地状态：
+
+- 第一个抖音账号 `primary` 的 `dy_like.seen_count` 已到 840。
+- SQLite 中抖音 `like` 事件数为 840。
+- 本地 ChromaDB `dy_likes` 向量文档数为 225。
+- 最近一批任务为 `13709578-2711-4f34-b253-6c7331e8e363`，本批新增 8 条，`skipped_existing=4397`，仍说明当前可用路径是页面/DOM 抓取加已见 key 跳过；主动 API 仍返回 `HTTP 404`。

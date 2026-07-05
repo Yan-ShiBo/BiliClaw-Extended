@@ -829,12 +829,36 @@ interface ClickToScopeReport {
   sub_tab_found: boolean;
 }
 
+export function isDouyinScopeRoute(scope: DouyinScope, path: string, search: string): boolean {
+  if (!path.startsWith("/user/")) return false;
+  const showTab = new URLSearchParams(search).get("showTab") ?? "";
+  switch (scope) {
+    case "dy_post":
+      return showTab === "";
+    case "dy_collect":
+      return showTab === "favorite_collection";
+    case "dy_like":
+      return showTab === "like";
+    case "dy_follow":
+      return showTab === "following";
+  }
+}
+
+function isCurrentScopeRoute(scope: DouyinScope): boolean {
+  return isDouyinScopeRoute(scope, location.pathname, location.search);
+}
+
 async function clickToScope(scope: DouyinScope): Promise<ClickToScopeReport> {
   const report: ClickToScopeReport = {
     page_url: location.href,
     profile_link_found: false,
     sub_tab_found: false,
   };
+  if (isCurrentScopeRoute(scope)) {
+    report.profile_link_found = true;
+    report.sub_tab_found = scope !== "dy_post";
+    return report;
+  }
   // Step 1: get to /user/self if we're still on the homepage.
   // Click is preferred (mirrors user behaviour, avoids risk-control
   // friction); pushState fallback if no profile link found.

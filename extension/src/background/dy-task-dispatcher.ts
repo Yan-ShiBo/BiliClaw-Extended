@@ -149,6 +149,8 @@ let taskTabId: number | null = null;
 let ownsTaskTab = false;
 let taskTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentTask: DyTask | null = null;
+let preservedBootstrapTabId: number | null = null;
+const PRESERVED_BOOTSTRAP_TAB_STORAGE_KEY = "dy_preserved_bootstrap_tab_id";
 
 // Per-scope state machine. Bootstrap visits 4 profile sub-tabs
 // serially (post → collect → like → follow); each sub-tab is its
@@ -345,6 +347,66 @@ export function shouldOpenDyTaskActive(task: DyTask): boolean {
   return task.type === "bootstrap_profile";
 }
 
+export function shouldPreserveDyTaskTab(task: DyTask | null): boolean {
+  return task?.type === "bootstrap_profile";
+}
+
+export function isReusableDouyinBootstrapTabUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith("douyin.com");
+  } catch {
+    return false;
+  }
+}
+
+async function loadPreservedBootstrapTabId(): Promise<number | null> {
+  if (preservedBootstrapTabId !== null) return preservedBootstrapTabId;
+  try {
+    const stored = await chrome.storage.session.get(PRESERVED_BOOTSTRAP_TAB_STORAGE_KEY);
+    const raw = stored[PRESERVED_BOOTSTRAP_TAB_STORAGE_KEY];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      preservedBootstrapTabId = raw;
+      return raw;
+    }
+  } catch {
+    // storage.session may be unavailable in tests or older browsers.
+  }
+  return null;
+}
+
+function rememberPreservedBootstrapTabId(tabId: number): void {
+  preservedBootstrapTabId = tabId;
+  try {
+    void chrome.storage.session.set({ [PRESERVED_BOOTSTRAP_TAB_STORAGE_KEY]: tabId });
+  } catch {
+    // In-memory fallback still works until the service worker is recycled.
+  }
+}
+
+function clearPreservedBootstrapTabId(): void {
+  preservedBootstrapTabId = null;
+  try {
+    void chrome.storage.session.remove(PRESERVED_BOOTSTRAP_TAB_STORAGE_KEY);
+  } catch {
+    // Ignore storage cleanup failures; tab validation will re-check next time.
+  }
+}
+
+async function getPreservedBootstrapTab(): Promise<chrome.tabs.Tab | null> {
+  const tabId = await loadPreservedBootstrapTabId();
+  if (tabId === null) return null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (isReusableDouyinBootstrapTabUrl(tab.url ?? tab.pendingUrl)) return tab;
+  } catch {
+    // The user may have closed the preserved tab.
+  }
+  clearPreservedBootstrapTabId();
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Chrome lifecycle (not unit-tested — Task 4's chrome-devtools MCP probe
 // already exercised the highest-risk seam against real douyin.com).
@@ -380,7 +442,15 @@ function cleanupTask(options: { preserveOwnedTab?: boolean } = {}): void {
     clearTimeout(taskTimeoutId);
     taskTimeoutId = null;
   }
-  if (ownsTaskTab && taskTabId !== null && options.preserveOwnedTab !== true) {
+  if (
+    ownsTaskTab
+    && taskTabId !== null
+    && options.preserveOwnedTab === true
+    && shouldPreserveDyTaskTab(currentTask)
+  ) {
+    rememberPreservedBootstrapTabId(taskTabId);
+  } else if (ownsTaskTab && taskTabId !== null) {
+    if (taskTabId === preservedBootstrapTabId) clearPreservedBootstrapTabId();
     try {
       chrome.tabs.remove(taskTabId);
     } catch {
@@ -410,7 +480,7 @@ function armTaskTimeout(task: DyTask): void {
       status: "failed",
       error: "task_timeout",
     });
-    cleanupTask({ preserveOwnedTab: task.type === "bootstrap_profile" });
+    cleanupTask({ preserveOwnedTab: shouldPreserveDyTaskTab(task) });
   }, timeoutMs);
 }
 
@@ -884,13 +954,17 @@ export async function executeTask(task: DyTask): Promise<void> {
   // settle naturally before we route to the profile, exactly the
   // way a user would land on their own profile (douyin.com → click
   // profile, not empty tab → /user/self).
-  let tab: chrome.tabs.Tab;
+  let tab: chrome.tabs.Tab | null = await getPreservedBootstrapTab();
   try {
-    tab = await chrome.tabs.create({
-      url: "https://www.douyin.com/",
-      active: shouldOpenDyTaskActive(task),
-    });
-    debugLog("executeTask:tab_created", { tabId: tab.id });
+    if (tab === null) {
+      tab = await chrome.tabs.create({
+        url: "https://www.douyin.com/",
+        active: shouldOpenDyTaskActive(task),
+      });
+      debugLog("executeTask:tab_created", { tabId: tab.id });
+    } else {
+      debugLog("executeTask:tab_reused", { tabId: tab.id, url: tab.url });
+    }
   } catch (err) {
     debugLog("executeTask:tab_create_failed", { error: String(err) });
     await postTaskResult({
@@ -983,7 +1057,7 @@ export async function handleDyScopeResult(result: DyScopeResult): Promise<void> 
     scope_counts: { ...progress.accumulated_counts },
     next_cursor: result.next_cursor,
   });
-  cleanupTask();
+  cleanupTask({ preserveOwnedTab: shouldPreserveDyTaskTab(currentTask) });
 }
 
 export async function handleDySearchResult(result: DySearchResult): Promise<void> {
