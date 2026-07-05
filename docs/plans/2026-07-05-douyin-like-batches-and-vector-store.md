@@ -69,9 +69,11 @@
 - 模块：`src/openbiliclaw/memory/vector_store.py`。
 - 持久化目录：`data/vector_db`。
 - collection：`dy_likes`。
-- 默认 embedding：Ollama `qwen3-embedding:8b`。
-- 默认 Ollama host：`http://127.0.0.1:11434`。
-- 可用环境变量覆盖：
+- 运行时优先跟随 `[llm.embedding]`：当 provider 为 `ollama` 时，使用该段的 `model` 和 `base_url`。
+- 当前 setup 可选择本机或服务器 embedding；选择服务器时可使用 `qwen3-embedding:8b` 和服务器 Ollama 地址。
+- 未注入配置时的默认 embedding：Ollama `qwen3-embedding:8b`。
+- 未注入配置时的默认 Ollama host：`http://127.0.0.1:11434`。
+- 未注入配置时可用环境变量覆盖：
   - `OPENBILICLAW_VECTOR_OLLAMA_MODEL`
   - `OPENBILICLAW_VECTOR_OLLAMA_HOST`
 

@@ -20,7 +20,7 @@ from openbiliclaw.discovery.strategies.strategies import (
 from openbiliclaw.llm import build_llm_registry
 from openbiliclaw.llm.service import LLMService, module_overrides_from_config
 from openbiliclaw.llm.usage_recorder import UsageRecorder
-from openbiliclaw.memory.manager import MemoryManager
+from openbiliclaw.memory.manager import MemoryManager, vector_store_kwargs_from_config
 from openbiliclaw.recommendation.engine import RecommendationEngine
 from openbiliclaw.runtime.account_sync import AccountSyncService
 from openbiliclaw.runtime.presence import PresenceTracker
@@ -58,7 +58,11 @@ def build_openclaw_adapter_services() -> OpenClawAdapterServices:
     database = Database(config.data_path / "openbiliclaw.db")
     database.initialize()
 
-    memory_manager = MemoryManager(config.data_path, database=database)
+    memory_manager = MemoryManager(
+        config.data_path,
+        database=database,
+        **vector_store_kwargs_from_config(config),
+    )
     memory_manager.initialize()
 
     llm_cfg = getattr(config, "llm", None)

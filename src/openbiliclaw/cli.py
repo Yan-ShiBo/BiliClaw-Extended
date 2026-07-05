@@ -613,14 +613,18 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
 def _build_memory_manager() -> Any:
     """Build the initialized memory manager for event writes."""
     from openbiliclaw.config import load_config
-    from openbiliclaw.memory.manager import MemoryManager
+    from openbiliclaw.memory.manager import MemoryManager, vector_store_kwargs_from_config
 
     cached = _RUNTIME_COMPONENTS.get("memory_manager")
     if cached is not None:
         return cached
 
     config = load_config()
-    memory = MemoryManager(config.data_path, database=_get_runtime_database())
+    memory = MemoryManager(
+        config.data_path,
+        database=_get_runtime_database(),
+        **vector_store_kwargs_from_config(config),
+    )
     memory.initialize()
     _RUNTIME_COMPONENTS["memory_manager"] = memory
     return memory

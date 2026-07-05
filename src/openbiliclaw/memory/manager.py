@@ -53,6 +53,22 @@ _DISCOVERY_RUNTIME_TIMESTAMP_MAP_KEYS = (
 )
 
 
+def vector_store_kwargs_from_config(config: Any) -> dict[str, str]:
+    """Return VectorStoreManager kwargs from ``[llm.embedding]`` when it is Ollama."""
+
+    embedding = getattr(getattr(config, "llm", None), "embedding", None)
+    if str(getattr(embedding, "provider", "") or "").strip().lower() != "ollama":
+        return {}
+    kwargs: dict[str, str] = {}
+    model = str(getattr(embedding, "model", "") or "").strip()
+    base_url = str(getattr(embedding, "base_url", "") or "").strip()
+    if model:
+        kwargs["vector_embedding_model"] = model
+    if base_url:
+        kwargs["vector_ollama_host"] = base_url
+    return kwargs
+
+
 class MemoryLayer:
     """Base class for a single memory layer."""
 
@@ -133,7 +149,14 @@ class MemoryManager:
     understanding flows down to guide interpretation.
     """
 
-    def __init__(self, data_dir: Path, *, database: Database | None = None) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        database: Database | None = None,
+        vector_embedding_model: str | None = None,
+        vector_ollama_host: str | None = None,
+    ) -> None:
         self._data_dir = data_dir
         self._layers: dict[str, MemoryLayer] = {}
         self._database = database or Database(data_dir / "openbiliclaw.db")
@@ -145,7 +168,11 @@ class MemoryManager:
         self._cognition_updates_path = data_dir / "memory" / "cognition_updates.json"
         self._profile_overrides_path = data_dir / "memory" / "profile_overrides.json"
         self._working_memory: dict[str, Any] = {}  # Session-only
-        self.vector_store = VectorStoreManager(data_dir)
+        self.vector_store = VectorStoreManager(
+            data_dir,
+            embedding_model=vector_embedding_model,
+            ollama_host=vector_ollama_host,
+        )
         # Optional callback that fires after the soul layer is saved or
         # ``sync_profile_files`` runs. The runtime context wires this to
         # ``event_hub.publish({"type": "profile_updated"})`` so the

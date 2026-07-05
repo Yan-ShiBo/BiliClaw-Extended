@@ -1023,9 +1023,16 @@ def create_app(
             _created_db = True
         _mm = memory_manager
         if _mm is None:
-            from openbiliclaw.memory.manager import MemoryManager
+            from openbiliclaw.memory.manager import (
+                MemoryManager,
+                vector_store_kwargs_from_config,
+            )
 
-            _mm = MemoryManager(config.data_path, database=_db if _created_db else None)
+            _mm = MemoryManager(
+                config.data_path,
+                database=_db if _created_db else None,
+                **vector_store_kwargs_from_config(config),
+            )
             _mm.initialize()
 
         ctx = RuntimeContext(

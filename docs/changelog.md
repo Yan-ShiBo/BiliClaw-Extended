@@ -8,7 +8,7 @@
 
 - **抖音喜欢续跑 checkpoint**：`source_bootstrap_state.json` 现在记录 `dy_scope_progress`，后端会在 `skip_existing_bootstrap_keys=true` 的任务中下发已处理 `dy_like:*` key，扩展跳过旧条目且不占用本批新增名额。
 - **任务失败保留 partial 结果**：`DyTaskQueue.fail()` 不再用 `{ "error": ... }` 覆盖已上报的 `videos/scope_counts/debug`，任务超时时仍能保留本批已进入画像的数据和续跑证据。
-- **本地向量库接入**：新增 `VectorStoreManager`，使用 ChromaDB 持久化 `dy_likes` collection，默认通过 Ollama `qwen3-embedding:8b` 生成 embedding；抖音 bootstrap 去重后的新 `dy_like` 会在后台批量 upsert，失败只记录 warning，不阻断事件入库。
+- **本地向量库接入**：新增 `VectorStoreManager`，使用 ChromaDB 持久化 `dy_likes` collection；向量库会跟随 `[llm.embedding]` 的 Ollama model/base_url，未注入配置时默认用 `qwen3-embedding:8b`。抖音 bootstrap 去重后的新 `dy_like` 会在后台批量 upsert，失败只记录 warning，不阻断事件入库。
 - **扩展续跑按钮**：设置页“本地扫描 & 向量化喜欢”按钮改为触发小批次续跑任务，默认每批最多 100 条新喜欢，并返回后端 `task_id`。
 - **状态文档**：新增 `docs/plans/2026-07-05-douyin-like-batches-and-vector-store.md`，记录第一个抖音账号当前已导入数量、已知问题、续跑方式、向量库状态，以及暂停的第二账号/小红书范围。
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from openbiliclaw.memory.manager import MemoryManager
+from openbiliclaw.memory.manager import MemoryManager, vector_store_kwargs_from_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,6 +19,67 @@ def test_initialize_sets_up_database(tmp_path: Path) -> None:
 
     events = memory.query_events()
     assert events == []
+
+
+def test_memory_manager_passes_vector_store_config(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict[str, str | Path | None]] = []
+
+    class FakeVectorStoreManager:
+        def __init__(
+            self,
+            data_dir: Path,
+            *,
+            embedding_model: str | None = None,
+            ollama_host: str | None = None,
+        ) -> None:
+            calls.append(
+                {
+                    "data_dir": data_dir,
+                    "embedding_model": embedding_model,
+                    "ollama_host": ollama_host,
+                }
+            )
+
+    monkeypatch.setattr(
+        "openbiliclaw.memory.manager.VectorStoreManager",
+        FakeVectorStoreManager,
+    )
+
+    MemoryManager(
+        tmp_path,
+        vector_embedding_model="qwen3-embedding:8b",
+        vector_ollama_host="http://10.0.0.5:11434/v1",
+    )
+
+    assert calls == [
+        {
+            "data_dir": tmp_path,
+            "embedding_model": "qwen3-embedding:8b",
+            "ollama_host": "http://10.0.0.5:11434/v1",
+        }
+    ]
+
+
+def test_vector_store_kwargs_from_config_uses_ollama_embedding() -> None:
+    from openbiliclaw.config import Config, EmbeddingConfig, LLMConfig
+
+    cfg = Config(
+        llm=LLMConfig(
+            embedding=EmbeddingConfig(
+                provider="ollama",
+                model="qwen3-embedding:8b",
+                base_url="http://10.0.0.5:11434/v1",
+            )
+        )
+    )
+
+    assert vector_store_kwargs_from_config(cfg) == {
+        "vector_embedding_model": "qwen3-embedding:8b",
+        "vector_ollama_host": "http://10.0.0.5:11434/v1",
+    }
+
+    cfg.llm.embedding.provider = "openai"
+    assert vector_store_kwargs_from_config(cfg) == {}
 
 
 def test_profile_overrides_roundtrip(tmp_path: Path) -> None:

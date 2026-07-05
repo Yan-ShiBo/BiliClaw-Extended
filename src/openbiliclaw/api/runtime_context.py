@@ -1151,7 +1151,7 @@ def build_runtime_context(
     are created here if not supplied.  All swappable components are built
     by delegating to ``RuntimeContext.rebuild_from_config``.
     """
-    from openbiliclaw.memory.manager import MemoryManager
+    from openbiliclaw.memory.manager import MemoryManager, vector_store_kwargs_from_config
     from openbiliclaw.runtime.events import RuntimeEventHub
     from openbiliclaw.storage.database import Database
 
@@ -1166,7 +1166,11 @@ def build_runtime_context(
         # it — matches the original create_app() contract that callers who
         # inject their own database don't expect it to be shared.
         shared_database = database if created_runtime_database else None
-        memory_manager = MemoryManager(config.data_path, database=shared_database)
+        memory_manager = MemoryManager(
+            config.data_path,
+            database=shared_database,
+            **vector_store_kwargs_from_config(config),
+        )
         memory_manager.initialize()
     if event_hub is None:
         event_hub = RuntimeEventHub()
@@ -1222,7 +1226,7 @@ def build_degraded_runtime_context(
     fails, so the popup can still read and repair config.toml.
     """
     from openbiliclaw.config import ConfigIssue
-    from openbiliclaw.memory.manager import MemoryManager
+    from openbiliclaw.memory.manager import MemoryManager, vector_store_kwargs_from_config
     from openbiliclaw.runtime.events import RuntimeEventHub
     from openbiliclaw.runtime.updater import AutoUpdateService
     from openbiliclaw.storage.database import Database
@@ -1234,7 +1238,11 @@ def build_degraded_runtime_context(
         created_runtime_database = True
     if memory_manager is None:
         shared_database = database if created_runtime_database else None
-        memory_manager = MemoryManager(config.data_path, database=shared_database)
+        memory_manager = MemoryManager(
+            config.data_path,
+            database=shared_database,
+            **vector_store_kwargs_from_config(config),
+        )
         memory_manager.initialize()
     if event_hub is None:
         event_hub = RuntimeEventHub()
