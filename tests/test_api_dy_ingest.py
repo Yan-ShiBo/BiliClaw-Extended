@@ -11,6 +11,7 @@ share zero code with the XHS implementation per design-doc
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -61,6 +62,23 @@ class RecordingProfilePipeline:
 class RecordingSoulEngine:
     def __init__(self, memory: RecordingMemoryManager) -> None:
         self.pipeline = RecordingProfilePipeline(memory)
+
+    def is_profile_ready(self) -> bool:
+        return True
+
+
+class SlowProfilePipeline:
+    async def ingest_batch(self, signals: list[object]) -> object:
+        import asyncio
+        from types import SimpleNamespace
+
+        await asyncio.sleep(2)
+        return SimpleNamespace(layers_updated=[])
+
+
+class SlowSoulEngine:
+    def __init__(self) -> None:
+        self.pipeline = SlowProfilePipeline()
 
     def is_profile_ready(self) -> bool:
         return True
@@ -281,6 +299,67 @@ class TestDyTaskResult:
         client, _db, _memory = dy_task_client
         response = client.post("/api/sources/dy/task-result", json={"status": "ok"})
         assert response.status_code == 422
+
+    def test_dy_task_result_does_not_wait_for_profile_pipeline(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from openbiliclaw.api.app import create_app
+        from openbiliclaw.storage.database import Database
+
+        db = Database(tmp_path / "task.db")
+        db.initialize()
+        memory = RecordingMemoryManager()
+        fake_config = SimpleNamespace(
+            data_path=tmp_path,
+            bilibili=SimpleNamespace(cookie="", browser_executable="", browser_headed=False),
+            sources=SimpleNamespace(
+                browser_cdp_url="",
+                browser_headed=False,
+                xiaohongshu=SimpleNamespace(
+                    daily_search_budget=20,
+                    daily_creator_budget=10,
+                    task_interval_seconds=45,
+                ),
+            ),
+            scheduler=SimpleNamespace(pool_target_count=300, account_sync_interval_hours=24),
+        )
+        monkeypatch.setattr("openbiliclaw.config.load_config", lambda: fake_config)
+        app = create_app(
+            database=db,
+            memory_manager=memory,
+            soul_engine=SlowSoulEngine(),
+            runtime_controller=SimpleNamespace(memory_manager=memory),
+            recommendation_engine=None,
+        )
+        client = TestClient(app)
+        task_id = _enqueue_dy_bootstrap_task(db)
+
+        started = time.perf_counter()
+        response = client.post(
+            "/api/sources/dy/task-result",
+            json={
+                "task_id": task_id,
+                "status": "partial",
+                "videos": [
+                    {
+                        "scope": "dy_like",
+                        "title": "slow profile update should not block",
+                        "url": "https://www.douyin.com/video/slow-1",
+                        "aweme_id": "slow-1",
+                    }
+                ],
+                "scope_counts": {"dy_like": 1},
+            },
+        )
+        elapsed = time.perf_counter() - started
+
+        assert response.status_code == 200
+        assert elapsed < 1.0
+        assert len(memory.events) == 1
 
     def test_dy_bootstrap_task_result_records_events(
         self,

@@ -1445,6 +1445,19 @@ def create_app(
             logger.exception("Failed to ingest events into profile pipeline")
         return 0
 
+    def _schedule_profile_update_events(events: list[dict[str, Any]]) -> None:
+        """Best-effort profile update that never blocks source task acks."""
+        if not events:
+            return
+
+        async def _run() -> None:
+            await _ingest_profile_update_events(events)
+
+        try:
+            asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            logger.debug("Profile update ingest skipped: no running event loop")
+
     def _event_cursor_value(value: object) -> int:
         if isinstance(value, bool):
             return 0
@@ -7618,7 +7631,7 @@ def create_app(
                     )
                 # Skip the incremental pipeline during init (see xhs handler).
                 if not _init_busy:
-                    await _ingest_profile_update_events(profile_events)
+                    _schedule_profile_update_events(profile_events)
 
                 # Auto-enqueue continuation task if cursor was returned
                 if is_final and payload.get("next_cursor"):

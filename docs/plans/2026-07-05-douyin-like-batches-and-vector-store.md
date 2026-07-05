@@ -152,3 +152,11 @@
 - SQLite 中抖音 `like` 事件数为 840。
 - 本地 ChromaDB `dy_likes` 向量文档数为 225。
 - 最近一批任务为 `13709578-2711-4f34-b253-6c7331e8e363`，本批新增 8 条，`skipped_existing=4397`，仍说明当前可用路径是页面/DOM 抓取加已见 key 跳过；主动 API 仍返回 `HTTP 404`。
+
+## 2026-07-05 18:30 续跑记录与 task-result 卡顿修复
+
+- 排入 `primary` 的 `dy_like` 续跑任务 `3925f368-4ac0-4e4c-bc4b-20544885ffc0`，payload 使用 `skip_existing_bootstrap_keys=true`、`max_new_items_per_scope=100`、`max_scroll_rounds=60`。
+- 本批 partial 已成功写入 8 条新喜欢，`dy_accounts.primary.dy_scope_progress.dy_like.seen_count` 从 840 增至 848，SQLite `events` 表中抖音 `like` 事件数同步增至 848。
+- 本批 debug 显示 `skipped_existing=7958`、`dom_items_harvested=8`、`fetch_tap_install_status=installed`，主动 API 仍返回 `HTTP 404`，当前仍依赖页面/DOM 抓取加已见 key 跳过。
+- 本批暴露出后端 ack 卡顿：partial 结果入库后，`/api/sources/dy/task-result` 同步等待 `ProfileUpdatePipeline` 调用画像 LLM；当 Ollama 连接失败时，扩展会等待该 HTTP 请求返回，导致 final ok 延迟。
+- 后端已改为：task-result 在事件/向量入库后立即返回，增量画像更新通过后台任务 best-effort 执行；即使画像 LLM 暂时不可用，也不会阻塞扩展继续滚动或提交 final ok。
