@@ -27,6 +27,8 @@ test("isValidScopeExecuteMessage accepts a well-formed scope payload", () => {
       task_id: "t1",
       scope: "dy_post",
       max_items_per_scope: 300,
+      max_new_items_per_scope: 100,
+      skip_item_keys: ["dy_like:old"],
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
       account_id: "account2",
@@ -80,6 +82,18 @@ test("isValidScopeExecuteMessage rejects malformed input", () => {
       max_scroll_rounds: 15,
       max_stagnant_scroll_rounds: 5,
       account_id: 2,
+    }),
+    false,
+  );
+  // Wrong type inside skip keys
+  assert.equal(
+    isValidScopeExecuteMessage({
+      task_id: "t",
+      scope: "dy_like",
+      max_items_per_scope: 300,
+      skip_item_keys: ["dy_like:old", 42],
+      max_scroll_rounds: 15,
+      max_stagnant_scroll_rounds: 5,
     }),
     false,
   );

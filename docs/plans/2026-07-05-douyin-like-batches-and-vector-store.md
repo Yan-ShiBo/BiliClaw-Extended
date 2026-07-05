@@ -108,3 +108,26 @@
 - 画像事件和向量库 metadata 现在写入 `source_account_id` / `account_id`。`primary` 继续使用旧向量 doc id；非 primary 账号使用 `<account_id>:<aweme_id>`，避免两个账号喜欢同一个视频时互相覆盖。
 
 继续第一个账号时使用 `account_id=primary`；切换到第二个账号后使用 `account_id=account2`。两个账号会分别续跑，但最终都会进入同一个总画像。
+
+## 2026-07-05 17:21-17:27 续跑记录
+
+- 已重新加载一次扩展后，排入 `primary` 的 `dy_like` 续跑任务 `7367bed3-74ea-47e7-bd26-93848247f77c`。任务完成，页面没有再被超时清理；扩展采到 660 个页面条目，后端去重后实际新增 90 条喜欢。
+- 第一批完成后，`dy_accounts.primary.dy_scope_progress.dy_like.seen_count` 从 624 增至 714；`last_aweme_id=7650818979431314875`，`last_batch_new_count=90`。
+- 继续排入第二批 `e75ad33e-4902-4b45-b40c-1fcc96ecd67b`。任务完成，扩展采到 195 个页面条目，后端去重后实际新增 8 条喜欢。
+- 第二批完成后，`dy_accounts.primary.dy_scope_progress.dy_like.seen_count` 增至 722；`last_aweme_id=7572532507057409299`，`last_batch_new_count=8`。
+- SQLite `events` 表中抖音 `like` 事件总数为 722，最近新增记录均带 `source_platform=douyin`、`source_account_id=primary`、`account_id=primary`。
+- 本地 ChromaDB 持久化目录为 `data/vector_db`，collection 为 `dy_likes`，当前向量文档数为 107；向量库使用本机 Ollama `qwen3-embedding:8b`，embedding dimension 为 4096。
+
+## 2026-07-05 追加修复：浏览器端 skip 未生效
+
+第二批只新增 8 条，暴露出一个续跑效率问题：后台已经把 `skip_item_keys` 发送给 content script，但 `runScope()` 创建 `BootstrapItemSink` 时没有传入 `msg.skip_item_keys`，导致浏览器端没有真正跳过已处理喜欢，只能依赖后端最终去重。因此每一批都会重新扫描大量顶部旧内容。
+
+已修复为：
+
+- `ScopeExecuteMessage` 显式声明 `max_new_items_per_scope` 和 `skip_item_keys`。
+- `runScope()` 创建 `BootstrapItemSink` 时传入 `skipItemKeys`。
+- `BootstrapItemSink` 的容量改用 `max_new_items_per_scope`，让已处理条目不占用本批新增名额。
+- scroll 停止条件也按本批新增数判断；`max_items_per_scope=5000` 继续表示“最多看多少页面条目”，`max_new_items_per_scope=100` 表示“本批最多收多少新喜欢”。
+- 调试信息增加 `skipped_existing`，后续验证时应能看到浏览器端跳过数量。
+
+注意：该修复在扩展 `0.3.154` bundle 中，继续跑下一批前需要在 `chrome://extensions` 重新加载 OpenBiliClaw，使 Chrome 使用新的 content script 和 service worker。

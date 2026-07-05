@@ -120,6 +120,8 @@ interface ScopeExecuteMessage {
   task_id: string;
   scope: DouyinScope;
   max_items_per_scope: number;
+  max_new_items_per_scope?: number;
+  skip_item_keys?: string[];
   max_scroll_rounds: number;
   max_stagnant_scroll_rounds: number;
   debug_inject_status?: string;
@@ -150,6 +152,7 @@ interface ScopeResultPayload {
     api_items_harvested?: number;
     api_pages_fetched?: number;
     api_error?: string;
+    skipped_existing?: number;
     account_id?: string;
     sec_uid?: string;
     end_of_feed?: string;
@@ -1097,7 +1100,15 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
   const { BootstrapItemSink, dyShouldContinueScroll, ingestMainWorldFetchMessage } =
     await loadTaskExecutorHelpers();
   const { extractDouyinItemsFromDocument } = await loadDomExtractor();
-  const sink = new BootstrapItemSink({ maxItemsPerScope: msg.max_items_per_scope });
+  const maxNewItemsForScope = Math.max(
+    0,
+    Math.floor(msg.max_new_items_per_scope ?? msg.max_items_per_scope),
+  );
+  const skipItemKeys = Array.isArray(msg.skip_item_keys) ? msg.skip_item_keys : [];
+  const sink = new BootstrapItemSink({
+    maxItemsPerScope: maxNewItemsForScope,
+    skipItemKeys,
+  });
   const allItems: DouyinBootstrapItem[] = [];
   // Per-scope counter: how many OPENBILICLAW_DOUYIN_AWEME_PAGE messages
   // the MAIN-world fetch-tap pushed into this scope's listener window.
@@ -1269,7 +1280,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
       if (
         !dyShouldContinueScroll({
           currentCount: afterCount,
-          maxItemsPerScope: msg.max_items_per_scope,
+          maxItemsPerScope: maxNewItemsForScope,
           round: round + 1,
           maxScrollRounds: msg.max_scroll_rounds,
           stagnantRounds,
@@ -1300,6 +1311,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
         api_items_harvested: apiItemsHarvested,
         api_pages_fetched: apiPagesFetched,
         api_error: apiError,
+        skipped_existing: sink.skippedExistingCounts()[msg.scope],
         account_id: msg.account_id,
         sec_uid: _detectedSecUid,
         end_of_feed: endOfFeedPhrase,
