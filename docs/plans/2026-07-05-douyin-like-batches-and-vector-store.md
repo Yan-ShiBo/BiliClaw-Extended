@@ -167,3 +167,12 @@
 - 本批没有新增数据，原因不是后端 checkpoint 或去重，而是 Chrome 扩展热重载会让旧页面里的 content script 失效；复用页签后 `sendMessage` 返回 `Receiving end does not exist`，后端记录为 `sendMessage_failed`。
 - 修复随扩展 `0.3.156`：bootstrap 任务在复用/新开抖音页签后会显式注入 `dist/content/douyin.js`，再注入 `dist/main/dy-fetch-tap.js`；content script 自身增加注册哨兵，避免重复注入造成多份监听器。
 - 继续跑下一批前需要热重载或手动重载 OpenBiliClaw 扩展到 `0.3.156`。
+
+## 2026-07-05 18:53-18:59 续跑记录：复用页签恢复
+
+- 热重载 `0.3.156` 后排入 `1fb8e63e-b3a2-4d96-b4b3-e73cfc2d51d6`，debug 同时出现 `executeTask:tab_reused` 和 `executeTask:content_script_inject_done`，说明旧抖音页签被复用且 content script 重新注入成功。
+- `1fb8e63e-b3a2-4d96-b4b3-e73cfc2d51d6` 完成后新增 100 条 `dy_like`，`dy_accounts.primary.dy_scope_progress.dy_like.seen_count` 从 848 增至 948；本批 `skipped_existing=13580`、`dom_items_harvested=100`、`fetch_tap_install_status=installed`，页面保持在 `https://www.douyin.com/user/self?from_tab_name=main&showTab=like`。
+- 等本批本地 embedding/upsert 完成后，ChromaDB `dy_likes` collection 从 232 增至 332，使用本机 Ollama `qwen3-embedding:8b`。
+- 继续排入 `c4c504d8-37c9-4eae-8929-f4009d2ad004`，任务完成后再新增 100 条 `dy_like`，`dy_like.seen_count` 从 948 增至 1048；本批 `skipped_existing=5999`、`dom_items_harvested=100`、`fetch_tap_install_status=installed`，主动 API 仍可能返回 `HTTP 404`，但 DOM 路径正常。
+- 等第二个 100 条批次 embedding/upsert 追平后，ChromaDB `dy_likes` collection 从 332 增至 432。
+- 截至本记录：第一个抖音账号 `primary` 的 `dy_like.seen_count=1048`，SQLite 抖音 `like` 事件数为 1048，本地向量文档数为 432。
