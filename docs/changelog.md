@@ -4,6 +4,13 @@
 
 ---
 
+## v0.3.157 / extension v0.3.157: 抖音长批次续跑与队列锁重试（2026-07-06）
+
+- **抖音喜欢长批次续跑继续推进**：第一个抖音账号 `primary` 继续以每批 20 条新喜欢的方式慢速导入，当前运行记录已到 SQLite `dy_bootstrap_like` 事件 5717 条，ChromaDB `dy_likes` 向量 5717 条，仍未收到 `end_of_feed`，因此不标记为已完成。
+- **队列入队遇到 SQLite 短锁时自动重试**：`DyTaskQueue.enqueue_with_id()` 在 `database is locked` / `database table is locked` 时会 rollback 后短暂退避重试，避免导入、向量 upsert 或后台写入并发时 `/api/sources/dy/enqueue` 偶发 500。
+- **服务器主分析模型升级准备**：本地运行配置已切到服务器 Ollama `qwen3.5:122b`，后台开始下载约 81GB 的 122B 模型；旧的 `qwen3:30b` / `deepseek-r1:32b` 不再作为本项目主分析模型使用，下载完成后再执行重度画像分析。
+- **验证**：`pytest tests/test_dy_tasks.py -q` 通过；后端 8420 已重启并验证 `/api/health` 正常。
+
 ## v0.3.156 / extension v0.3.156: 抖音复用页签后 content script 重新注入（2026-07-05）
 
 - **复用旧抖音页签时重新注入 content script**：扩展热重载后，原抖音页里的旧 content script 会被 Chrome 断开，导致下一批虽然 `tab_reused` 成功但 `DY_SCOPE_EXECUTE` 无接收端。现在 bootstrap 任务会先显式注入 `dist/content/douyin.js`，再注入 MAIN world fetch tap 并发送 scope 执行消息。

@@ -176,3 +176,19 @@
 - 继续排入 `c4c504d8-37c9-4eae-8929-f4009d2ad004`，任务完成后再新增 100 条 `dy_like`，`dy_like.seen_count` 从 948 增至 1048；本批 `skipped_existing=5999`、`dom_items_harvested=100`、`fetch_tap_install_status=installed`，主动 API 仍可能返回 `HTTP 404`，但 DOM 路径正常。
 - 等第二个 100 条批次 embedding/upsert 追平后，ChromaDB `dy_likes` collection 从 332 增至 432。
 - 截至本记录：第一个抖音账号 `primary` 的 `dy_like.seen_count=1048`，SQLite 抖音 `like` 事件数为 1048，本地向量文档数为 432。
+
+## 2026-07-06 续跑记录：服务器大模型准备与 SQLite 短锁修复
+
+- 服务器 Ollama 已选择 `qwen3.5:122b` 作为新的重度画像分析模型。该模型在 Ollama registry 中约 81GB、256K context，适合 3 张 4090 + 1 张 3090 的 96GB 显存机器；旧的 `qwen3:30b` / `deepseek-r1:32b` 不再作为本项目主分析模型使用。
+- 已通过服务器 Ollama API 启动 `qwen3.5:122b` 后台下载，日志位于本机 `.tmp/ollama-pull-qwen3.5-122b-20260706-004341.jsonl`。下载完成前不执行重度服务器 LLM 画像分析，避免回落使用旧模型。
+- 本机运行配置 `config.toml` 已切到 `[llm.ollama].model = "qwen3.5:122b"`，该文件只保存在本机，不提交到仓库。
+- 续跑期间 `/api/sources/dy/enqueue` 出现一次 `sqlite3.OperationalError: database is locked`。根因是导入 / 向量 upsert / 后台写入并发时主连接短暂被锁，`DyTaskQueue.enqueue_with_id()` 原来没有重试，直接把错误暴露为 HTTP 500。
+- 已修复为：入队时遇到 `database is locked` / `database table is locked` 会 rollback 后按 0.05s、0.1s、0.2s、0.4s、0.8s 短暂退避重试；非锁错误仍直接抛出。
+- 验证：`pytest tests/test_dy_tasks.py -q` 通过，14 个测试全部通过；8420 后端已重启，`GET /api/health` 返回 `status=ok`。
+- 截至 2026-07-06 01:20 左右，第一个抖音账号 `primary` 的本地状态为：
+  - SQLite `dy_bootstrap_like` 事件数：5717。
+  - ChromaDB `dy_likes` 向量文档数：5717。
+  - 抖音收藏事件数：948。
+  - 抖音关注事件数：7。
+  - 最近批次仍为每批新增 20 条，主动 API 仍返回 `HTTP 404`，实际可靠路径仍是复用当前抖音喜欢页 + DOM 抓取 + 已见 key 跳过。
+  - 最近批次未返回 `end_of_feed`，因此不能判断第一个账号所有喜欢已经处理完。

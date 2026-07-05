@@ -1266,6 +1266,7 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
 
     for (let round = 0; round < msg.max_scroll_rounds; round += 1) {
       const beforeCount = sink.scopeCounts()[msg.scope];
+      const beforeSkipped = sink.skippedExistingCounts()[msg.scope];
       const beforeDomSize = document.querySelectorAll(anchorSelector).length;
 
       // Trigger Douyin's virtual-list pagination. Two strategies in
@@ -1286,20 +1287,26 @@ async function runScope(msg: ScopeExecuteMessage): Promise<ScopeResultPayload> {
       harvestDomSnapshot();
 
       const afterCount = sink.scopeCounts()[msg.scope];
+      const afterSkipped = sink.skippedExistingCounts()[msg.scope];
       const afterDomSize = document.querySelectorAll(anchorSelector).length;
       endOfFeedPhrase = detectEndOfFeed();
+      const madeProgress =
+        afterCount > beforeCount || afterSkipped > beforeSkipped || afterDomSize > beforeDomSize;
       debugLog("scroll_round", {
         scope: msg.scope,
         round,
         beforeCount,
         afterCount,
+        beforeSkipped,
+        afterSkipped,
         beforeDomSize,
         afterDomSize,
+        madeProgress,
         scrollY: window.scrollY,
         innerScrollerHeight: findScopeScrollerHeight(),
         endOfFeed: endOfFeedPhrase,
       });
-      stagnantRounds = afterCount > beforeCount ? 0 : stagnantRounds + 1;
+      stagnantRounds = madeProgress ? 0 : stagnantRounds + 1;
 
       if (endOfFeedPhrase) break; // page tells us we're done
       if (

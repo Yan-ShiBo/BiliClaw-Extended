@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _RECENT_TASK_STATUSES = ("pending", "in_progress", "completed", "failed")
+_SQLITE_LOCK_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8)
 
 # Map each Douyin bootstrap scope to its canonical event_type. Scopes
 # are the ones the extension's MAIN-world fetch-tap can observe in a
@@ -153,6 +156,18 @@ def _video_key(video: dict[str, Any]) -> str:
 def dy_bootstrap_video_key(video: dict[str, Any]) -> str:
     """Return the stable cross-task identity key for one bootstrap video."""
     return _video_key(video)
+
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "database is locked" in message or "database table is locked" in message
+
+
+def _rollback_quietly(conn: Any) -> None:
+    try:
+        conn.rollback()
+    except Exception:
+        logger.debug("failed to rollback after sqlite lock", exc_info=True)
 
 
 def _merge_dy_result_payload(
@@ -372,11 +387,27 @@ class DyTaskQueue:
             return None
 
         task_id = str(uuid.uuid4())
-        self._db.conn.execute(
-            "INSERT INTO dy_tasks (id, type, payload_json) VALUES (?, ?, ?)",
-            (task_id, task_type, json.dumps(payload, ensure_ascii=False)),
-        )
-        self._db.conn.commit()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        for attempt, delay_seconds in enumerate((0.0, *_SQLITE_LOCK_RETRY_DELAYS_SECONDS), start=1):
+            if delay_seconds:
+                time.sleep(delay_seconds)
+            try:
+                self._db.conn.execute(
+                    "INSERT INTO dy_tasks (id, type, payload_json) VALUES (?, ?, ?)",
+                    (task_id, task_type, payload_json),
+                )
+                self._db.conn.commit()
+                break
+            except sqlite3.OperationalError as exc:
+                _rollback_quietly(self._db.conn)
+                retries_exhausted = attempt > len(_SQLITE_LOCK_RETRY_DELAYS_SECONDS)
+                if not _is_sqlite_lock_error(exc) or retries_exhausted:
+                    raise
+                logger.warning(
+                    "dy task enqueue hit sqlite lock; retrying: type=%s attempt=%d",
+                    task_type,
+                    attempt,
+                )
         return task_id
 
     def _budgeted_count_today(self, task_type: str) -> int:

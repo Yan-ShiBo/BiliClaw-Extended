@@ -7,6 +7,7 @@ Task 1 of the Douyin bootstrap import plan
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
@@ -251,6 +252,46 @@ def test_dy_task_queue_zero_daily_budget_disables_daily_cap(
 
     for i in range(5):
         assert queue.enqueue_with_id("search", {"keywords": [f"任务 {i}"]}, daily_budget=0)
+
+
+def test_dy_task_queue_retries_enqueue_when_database_is_locked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FlakyConnection:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.commit_calls = 0
+            self.rollback_calls = 0
+
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return object()
+
+        def commit(self) -> None:
+            self.commit_calls += 1
+
+        def rollback(self) -> None:
+            self.rollback_calls += 1
+
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self.conn = FlakyConnection()
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("openbiliclaw.sources.dy_tasks.time.sleep", sleeps.append)
+    queue = object.__new__(DyTaskQueue)
+    fake_db = FakeDatabase()
+    queue._db = fake_db
+
+    task_id = queue.enqueue_with_id("bootstrap_profile", {"scopes": ["dy_like"]}, daily_budget=0)
+
+    assert task_id is not None
+    assert fake_db.conn.execute_calls == 2
+    assert fake_db.conn.commit_calls == 1
+    assert fake_db.conn.rollback_calls == 1
+    assert sleeps == [0.05]
 
 
 def test_dy_task_queue_claims_pending_task_until_terminal_status(
