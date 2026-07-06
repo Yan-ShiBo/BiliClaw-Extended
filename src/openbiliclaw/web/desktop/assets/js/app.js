@@ -266,8 +266,8 @@
     state.dismissOnReshuffle = storageGet(DISMISS_ON_RESHUFFLE_KEY) === "1";
     const SIDE_DRAWER_OPEN_KEY = "openbiliclaw.sideDrawerOpen";
     const DELIGHT_QUEUE_LIMIT_KEY = "openbiliclaw.webui.delightQueueLimit";
-    const STAR_REPO_URL = "https://github.com/whiteguo233/OpenBiliClaw";
-    const STAR_REPO_SLUG = "whiteguo233/OpenBiliClaw";
+    const STAR_REPO_URL = "https://github.com/Yan-ShiBo/BiliClaw-Extended";
+    const STAR_REPO_SLUG = "Yan-ShiBo/BiliClaw-Extended";
     const STAR_COUNT_CACHE_KEY = "openbiliclaw.webui.starCount";
     const STAR_COUNT_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -4749,8 +4749,8 @@
         downloadLink.hidden = !showDownload;
         if (showDownload) {
           downloadLink.href = backend.latest_tag
-            ? `https://github.com/whiteguo233/OpenBiliClaw/releases/tag/${encodeURIComponent(String(backend.latest_tag))}`
-            : "https://github.com/whiteguo233/OpenBiliClaw/releases";
+            ? `https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/tag/${encodeURIComponent(String(backend.latest_tag))}`
+            : "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases";
         }
       }
     }

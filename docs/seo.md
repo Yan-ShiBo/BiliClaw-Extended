@@ -1,15 +1,15 @@
 # OpenBiliClaw 主页 SEO
 
 主页是 `docs/index.html`，通过 GitHub Pages 部署到
-<https://whiteguo233.github.io/OpenBiliClaw/>。
+<https://yan-shibo.github.io/BiliClaw-Extended/>。
 
 本文只覆盖**搜索引擎提交**与**长期维护**。技术上的 meta / OG /
 Twitter Card / JSON-LD / `sitemap.xml` / `robots.txt` 已经在
 `docs/` 里全部就绪，部署一次即可生效。
 
 > 站点托管在 GitHub Pages 的**子路径**
-> `whiteguo233.github.io/OpenBiliClaw/` 下，根目录
-> `whiteguo233.github.io/robots.txt` 不归本仓库管。所以本仓库的
+> `yan-shibo.github.io/BiliClaw-Extended/` 下，根目录
+> `Yan-ShiBo.github.io/robots.txt` 不归本仓库管。所以本仓库的
 > `docs/robots.txt` 只是冗余备份；真正起作用的是把 sitemap
 > **手动提交到 Search Console / Bing Webmaster**。
 
@@ -20,7 +20,7 @@ Twitter Card / JSON-LD / `sitemap.xml` / `robots.txt` 已经在
 1. 打开 <https://search.google.com/search-console>，登录用 Pages 那个 GitHub 账号。
 2. 左上「Add property」→ 选 **URL prefix**，填：
    ```
-   https://whiteguo233.github.io/OpenBiliClaw/
+   https://yan-shibo.github.io/BiliClaw-Extended/
    ```
    （末尾斜杠保留。`Domain` 方式需要 DNS，GitHub Pages 子路径不能用。）
 3. 验证方式选 **HTML tag**，复制它给的
@@ -35,9 +35,9 @@ Twitter Card / JSON-LD / `sitemap.xml` / `robots.txt` 已经在
    ```
    sitemap.xml
    ```
-   （会被拼成 `https://whiteguo233.github.io/OpenBiliClaw/sitemap.xml`），提交。
+   （会被拼成 `https://yan-shibo.github.io/BiliClaw-Extended/sitemap.xml`），提交。
 7. 想立即让 Google 抓首页：顶部搜索框输入
-   `https://whiteguo233.github.io/OpenBiliClaw/` →
+   `https://yan-shibo.github.io/BiliClaw-Extended/` →
    **URL Inspection** → **Request Indexing**。
 
 > 验证 meta 一旦提交不能删；删了 GSC 会自动取消验证，sitemap 数据会
@@ -53,11 +53,11 @@ Twitter Card / JSON-LD / `sitemap.xml` / `robots.txt` 已经在
 
 如果不想用 Google 一键导入，就独立验证：
 
-1. **Add a site** → 填 `https://whiteguo233.github.io/OpenBiliClaw/`。
+1. **Add a site** → 填 `https://yan-shibo.github.io/BiliClaw-Extended/`。
 2. 选 **HTML Meta Tag**，把 `msvalidate.01` 那条 meta 同样在
    `docs/index.html` 取消注释、粘贴值、push。
 3. Bing 验证通过后，左侧 **Sitemaps** → 提交
-   `https://whiteguo233.github.io/OpenBiliClaw/sitemap.xml`。
+   `https://yan-shibo.github.io/BiliClaw-Extended/sitemap.xml`。
 
 ## 国内搜索（可选）
 
@@ -77,11 +77,11 @@ Twitter Card / JSON-LD / `sitemap.xml` / `robots.txt` 已经在
 
 部署到 Pages 之后跑一遍这几个 URL，确认收录前提没问题：
 
-- 主页：<https://whiteguo233.github.io/OpenBiliClaw/>
-- Sitemap：<https://whiteguo233.github.io/OpenBiliClaw/sitemap.xml>
-- 富片段调试：<https://search.google.com/test/rich-results?url=https%3A%2F%2Fwhiteguo233.github.io%2FOpenBiliClaw%2F>
+- 主页：<https://yan-shibo.github.io/BiliClaw-Extended/>
+- Sitemap：<https://yan-shibo.github.io/BiliClaw-Extended/sitemap.xml>
+- 富片段调试：<https://search.google.com/test/rich-results?url=https%3A%2F%2FYan-ShiBo.github.io%2FOpenBiliClaw%2F>
 - Twitter / X 卡片预览：<https://cards-dev.twitter.com/validator>（粘 URL）
-- Facebook 分享 debugger：<https://developers.facebook.com/tools/debug/?q=https%3A%2F%2Fwhiteguo233.github.io%2FOpenBiliClaw%2F>
+- Facebook 分享 debugger：<https://developers.facebook.com/tools/debug/?q=https%3A%2F%2FYan-ShiBo.github.io%2FOpenBiliClaw%2F>
 - Lighthouse SEO：本地 `chrome://lighthouse` 或 PageSpeed Insights，期望 SEO = 100
 
 ## 长期维护

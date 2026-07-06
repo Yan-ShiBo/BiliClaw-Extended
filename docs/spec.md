@@ -1,425 +1,147 @@
-# OpenBiliClaw — 项目规格说明书 (SPEC) v0.3
+# BiliClaw Extended Spec
 
-> *你的跨平台 AI 内容朋友，比你更懂你想看什么* 🎯
+## 1. Goal
 
----
+BiliClaw Extended should become a local-first personal content intelligence layer. It should understand the user's long-term taste across platforms, explain why content is recommended, and let the user keep control over data, model endpoints, and platform sessions.
 
-## 1. 项目定位
+## 2. Product Requirements
 
-OpenBiliClaw 是一个**本地优先、开源的跨平台个性化内容发现 AI Agent**。它像一个深度了解你的朋友或专属内容编辑——不仅知道你喜欢看什么，更理解你**为什么**喜欢，你**是一个什么样的人**，然后主动去 B 站、小红书、抖音、YouTube、X、知乎、Reddit 和通用 Web 等来源帮你发现那些你会喜欢但自己找不到的内容。
+| Requirement | Current Status |
+| --- | --- |
+| Local backend and local storage | Implemented with FastAPI, SQLite, JSON profile files, and ChromaDB |
+| Browser-extension based platform collection | Implemented for Bilibili, Douyin, Xiaohongshu, YouTube, X, Zhihu, Reddit paths |
+| Douyin liked-video vector database | Implemented with ChromaDB and Ollama embedding |
+| Two Douyin accounts in one instance | Supported by separate login/import passes and account metadata |
+| Local or server LLM selection | Supported through Ollama/OpenAI-compatible config |
+| Separate embedding provider | Supported through `[llm.embedding]` |
+| Source-balanced profile analysis | Implemented through `metadata.analysis_weight` |
+| Recommendation pool refresh | Implemented through scheduler/runtime APIs |
+| Sensitive local config exclusion | Required: do not commit `config.toml`, cookies, API keys, or runtime data |
 
-**核心理念**：
-- 不是冷冰冰的推荐算法，而是一个**有温度的 AI 朋友**
-- 不是被动过滤推荐流，而是**主动探索发现**
-- 不是浅层兴趣匹配，而是**深层理解人格与需求**
+## 3. System Architecture Diagram
 
-### 与单平台官方推荐的区别
+```mermaid
+flowchart LR
+    subgraph Input["Input Sources"]
+        Bili["Bilibili"]
+        Douyin1["Douyin Account 1"]
+        Douyin2["Douyin Account 2"]
+        XHS["Xiaohongshu"]
+        YT["YouTube"]
+        X["X"]
+    end
 
-| 维度 | 单平台官方推荐 | OpenBiliClaw |
-|------|------------|--------------|
-| 推荐逻辑 | 协同过滤 + 热度，容易信息茧房 | LLM 深层理解 + 探索式发现 |
-| 用户理解 | 隐式标签，用户不可见 | 深度人格画像，像朋友一样理解你 |
-| 控制权 | 用户只能点"不感兴趣" | 对话式调整 + 主动"教"Agent |
-| 发现方式 | 基于已有行为推荐相似内容 | 主动搜索、跨领域探索、挖掘潜在兴趣 |
-| 推荐语气 | 算法式、无温度 | 朋友式、有人味、有洞察 |
+    subgraph Extension["Browser Extension"]
+        Collector["Content scripts"]
+        Popup["Popup / settings"]
+    end
 
----
+    subgraph Backend["Local openbiliclaw backend"]
+        API["FastAPI API"]
+        Store["SQLite event/content store"]
+        Vec["ChromaDB vector store"]
+        Profile["Soul profile"]
+        Pool["Discovery candidate pool"]
+        Web["/web recommendations"]
+    end
 
-## 2. 核心功能模块
+    subgraph Models["Model Providers"]
+        Emb["Local embedding\nqwen3-embedding:8b"]
+        LLM["Server LLM\nlarge Ollama model"]
+    end
 
-### 2.1 🧠 用户灵魂引擎 (User Soul Engine)
-
-**目标**：从"他做了什么"到"他为什么这样"到"他是一个什么样的人"——建立有深度和温度的用户理解。
-
-#### 2.1.1 行为数据采集
-
-**浏览器插件（核心采集入口）**：
-- 通过统一 `PlatformAdapter` 捕捉 B 站 / 小红书 / 抖音 / YouTube / X / 知乎的交互行为；Reddit 初始化 saved/upvoted/subscribed 信号复用插件登录态任务桥，日常 discovery 默认使用 rdt-cli 登录态命令后端，不可用时 fallback 到插件任务：点击、滚动、停留、评论、点赞、收藏、分享、关注、搜索，以及 B 站特有投币；click 在 capture 阶段记录，scroll 同时覆盖页面和内部 feed / modal 滚动容器
-- 记录行为发生时的**完整上下文**：对应的 DOM 页面快照、当前浏览路径、时间戳、平台内容 ID
-- 捕捉用户的**微行为**：鼠标悬停、视频进度条跳转、视频暂停 / 继续、页面导航等
-- 记录用户的**主动反馈**：`dislike` 类动作统一规范成 `feedback` 事件，避免各平台负反馈语义分叉
-- 本机调试可通过 `/api/extension/e2e/run` 驱动已安装插件在抖音 / 小红书 / X 真实页面执行白名单 DOM 操作，再由后端校验 `/api/events` 是否自然入库；runner 会把复用 tab 归位到平台入口并在回传结果前 flush 捕捉 buffer，该链路不伪造行为事件，用于验证捕捉层本身。`/api/events` 在画像明确未初始化时会拒收普通行为事件，首轮画像信号只由点击「开始初始化」后的 guided init 来源任务拉取；初始化后 accepted 普通事件会先写入 memory，再进入 `ProfileUpdatePipeline`，随后通过 `request_replenishment(reason="event_ingest")` 排队补货需求。旧版本已经停在 discovery 水位后的普通行为事件由独立 `last_profile_pipeline_event_id` 补喂画像 pipeline，而 `pending_signal_events` 仍只是 search / related_chain refresh 的触发水位，不是画像待处理数。
-
-**B 站数据接口**：
-- 通过 B 站 API 获取结构化数据（历史记录、收藏夹、关注列表等）
-- 作为浏览器插件采集的补充和验证
-
-#### 2.1.2 多层网状记忆架构 (Memory Architecture)
-
-> 参考 MemGPT/Letta 的分层记忆设计和认知心理学模型，打造专为"理解一个人"设计的记忆系统。
-
-**核心设计理念**：不是简单的数据存储，而是一个**活的、不断生长和自我修正的理解网络**。每一层之间有网状关联，上层理解会指导下层数据的解读，下层新数据会修正上层理解。
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   🌟 灵魂层 (Soul Layer)                     │
-│  "他是一个什么样的人"                                         │
-│  人格特质 · 核心价值观 · 深层需求 · 生活状态                     │
-│  ↕ 双向修正                                                 │
-├─────────────────────────────────────────────────────────────┤
-│              💡 洞察层 (Insight Layer)                        │
-│  "为什么他会这样"                                             │
-│  动机分析 · 心理需求推断 · 潜在兴趣假设 · 行为模式归因            │
-│  ↕ 双向修正                                                 │
-├─────────────────────────────────────────────────────────────┤
-│              📅 觉察层 (Awareness Layer)                      │
-│  "每天他在发生什么变化"                                        │
-│  每日观察笔记 · 兴趣趋势 · 情绪状态推测 · 阶段性总结             │
-│  ↕ 双向修正                                                 │
-├─────────────────────────────────────────────────────────────┤
-│              📊 偏好层 (Preference Layer)                     │
-│  "他喜欢什么/不喜欢什么"                                      │
-│  兴趣标签(带权重+时间衰减) · 风格偏好 · 情境模式 · 探索倾向      │
-│  ↕ 数据提取                                                 │
-├─────────────────────────────────────────────────────────────┤
-│              📝 事件层 (Event Layer)                          │
-│  "他做了什么"                                                │
-│  原始行为日志 · DOM快照 · 点击/搜索/收藏记录 · 反馈记录          │
-└─────────────────────────────────────────────────────────────┘
+    Bili --> Collector
+    Douyin1 --> Collector
+    Douyin2 --> Collector
+    XHS --> Collector
+    YT --> Collector
+    X --> Collector
+    Popup --> API
+    Collector --> API
+    API --> Store
+    Store --> Vec
+    Emb --> Vec
+    Store --> Profile
+    Vec --> Profile
+    LLM --> Profile
+    Profile --> Pool
+    Pool --> Web
+    LLM --> Web
 ```
 
-**层间关系 — 网状而非单向**：
+## 4. Source Policy
 
-- **自底向上**：事件层的新数据不断注入偏好层，偏好层的变化推动觉察层更新观察笔记，觉察层的发现修正洞察层的推断，洞察层最终塑造灵魂层的人格理解
-- **自顶向下**：灵魂层的人格理解指导洞察层如何解读新行为，洞察层告诉觉察层应该关注什么变化，偏好层根据上层理解来校准标签权重
-- **跨层关联**：一个事件可能直接触发灵魂层的修正（重大行为变化），灵魂层可能直接影响事件层的采集策略（关注特定类型的行为）
+Primary sources:
 
-**记忆类型**（参考 MemGPT/Letta 模式）：
+- Douyin
+- Bilibili
 
-| 记忆类型 | 作用 | 对应层 | 存储方式 |
-|---------|------|--------|---------|
-| **核心记忆** (Core Memory) | 始终在 Agent 上下文中的关键信息 | 灵魂层 + 偏好层摘要 | JSON 文件(可自编辑) |
-| **情景记忆** (Episodic Memory) | 具体的交互片段和发现故事 | 事件层 + 觉察层 | SQLite + 向量索引 |
-| **语义记忆** (Semantic Memory) | 用户相关的事实和知识 | 偏好层 + 洞察层 | 知识图谱/JSON（当前实现使用 JSON，未引入知识图谱） |
-| **工作记忆** (Working Memory) | 当前会话的即时上下文 | 运行时 | 内存 |
+Secondary sources:
 
-**自我编辑能力**：Agent 可以自主决定什么信息该记住、什么该遗忘、什么该从事件层提升到灵魂层。
+- YouTube
+- Xiaohongshu
 
-#### 2.1.3 画像输出
+Supplemental source:
 
-**自然语言人格描述**（像一个了解你好多年的老朋友）：
+- X
 
-> *"小白骨子里是一个追求'深度理解世界运作方式'的人——无论是 AI 原理、历史脉络还是一道菜的风味逻辑，他都想搞明白'为什么'。他表面上是个技术宅，但我观察到他对摄影的兴趣在增长，我怀疑这是他在寻找一种技术之外的创造性表达。工作压力大的时候他会刷 RPG 游戏实况来获得掌控感，这时候千万别推他技术视频。他最近在看探店视频——不是因为想学做菜，而是享受'发现隐藏的好东西'那种感觉。这个特质很有意思，也许可以给他推荐一些小众但高质量的 UP 主。"*
+Source weighting should correct sample imbalance, not override the user's real behavior. The first Douyin account has the largest sample and therefore receives mild recency decay on old items. Smaller sources receive mild boosts so their signals remain visible in profile generation.
 
-**结构化数据**：JSON 格式的多层记忆数据，供系统内部使用。
+## 5. Model Policy
 
-#### 2.1.4 用户自述通道 — 苏格拉底式深度对话
+Embedding:
 
-不是简单地"记录用户说了什么"，而是**主动追问、假设、确认、调整**：
+- Default: local Ollama `qwen3-embedding:8b`.
+- Alternative: server Ollama or another embedding provider through `[llm.embedding]`.
+- Embedding is allowed to run continuously during batch imports because it is deterministic and cheaper than chat LLM analysis.
 
-```
-用户：我最近对美食不太感兴趣了
-Agent：了解。不过我很好奇——你之前看探店视频是因为喜欢美食本身，
-      还是享受"发现隐藏好东西"的过程？如果是后者，也许我可以
-      帮你在其他领域找到类似的发现感？
-用户：嗯你说得对，我确实更喜欢发现的过程
-Agent：那我理解了。这是一个很有意思的特质——你可能也会喜欢"小众
-      宝藏UP主挖掘"或者"冷门但高质量的纪录片"这种内容。
-      我先假设你对这类内容有兴趣，推荐一些试试？如果不对我再调整。
-```
+Chat LLM:
 
-核心策略：
-- **追问 Why** — 不止记录偏好，挖掘背后动机
-- **提出假设** — 基于理解主动猜测，而不是等用户说
-- **确认验证** — 带着假设去推荐，看结果来验证
-- **动态调整** — 根据验证结果修正理解模型
+- Default for high-quality analysis: server Ollama large model.
+- Use on demand for profile rebuilds, candidate evaluation, and recommendation explanation.
+- Unload server models after analysis when GPU memory should be released.
 
----
+## 6. Data Policy
 
-### 2.2 🔍 内容发现引擎 (Content Discovery Engine)
+Committed:
 
-**目标**：像一个熟悉多个内容社区的专业编辑一样，通过多种方式主动发现好内容。
+- Source code.
+- Extension source and package metadata.
+- Config examples.
+- Current documentation.
+- Historical docs under `docs/archive/`.
 
-#### 发现策略
+Not committed:
 
-| 策略 | 说明 |
-|------|------|
-| **兴趣关键词搜索** | 根据用户画像生成关键词组合搜索 |
-| **相关推荐链探索** | 从已知好内容出发，沿相关推荐不断深入 |
-| **分区热门/排行榜** | 固定全站榜，并按本地洗牌轮转覆盖非 0 分区榜，结合用户画像筛选 |
-| **UP 主追踪** | 追踪关注的和发现的优质 UP 主的新动态 |
-| **评论区挖掘** | 从评论区发现用户推荐的其他内容/UP 主 |
-| **跨领域探索** | 刻意推荐用户从未接触过但心理画像暗示可能喜欢的领域；当统一 `KeywordPlanner` 已有 merged keyword 调用、`explore_refresh_hours` 到期或即将到期且 B 站仍有补货空间时，会把 `explore_domains` 合并进同一次关键词生成，把探索 query 写入 B 站 `keyword_kind="explore"` query cache。`ExploreStrategy` 后续从该 explore 候选池 claim query 搜索；池为空时不再单独打一次 explore 计划 LLM |
-| **热点关联** | 追踪热点话题，判断是否与用户深层兴趣相关 |
+- `config.toml`
+- API keys
+- Platform cookies
+- Server credentials
+- `data/`
+- `logs/`
+- `.tmp/`
 
-#### 内容评估
+## 7. Verification Requirements
 
-> 评估的核心依据是**用户的 Soul（灵魂画像）和深层兴趣**，而非通用指标。
+For code changes:
 
-- **核心评估**：这个内容是否匹配这个用户的深层兴趣和当前状态？
-- **可选辅助指标**：播放量/点赞/弹幕质量等——由用户画像决定是否参考（有些用户在意质量指标，有些人不在意）
-- **统一待评估池**：不同来源先产出 raw candidates 并进入 `discovery_candidates`，再由统一 evaluator 混合 batch 评估；refresh plan 发现新 raw 后会即时触发一次 drain，独立 candidate eval loop 也会周期性处理已有 pending raw，避免评估被来源补货计划是否为空卡住。来源只影响取数方式、配额和 prompt 上下文，不单独决定一套喜好判断流程。评估输入包含正文 / 标签 / 互动指标；开启 `[discovery].multimodal_evaluation_enabled` 且模型支持图像时，还会优先从运行时图片缓存读取封面，未命中才白名单抓取，并把压缩后的封面图送入同一评估器。
-
----
-
-### 2.3 📬 推荐与呈现 (Recommendation & Delivery)
-
-**目标**：像一个真正了解你的朋友，在合适的时候以真诚的方式推荐内容。
-
-#### 推荐类型
-
-- **即时推荐**：发现特别匹配的内容时即时推送
-- **每日精选**：定时推荐列表
-- **个人专题**：深度个性化的主题推荐——完全基于对这个人的理解，不是通用分类
-
-> 专题示例（不是"周末放松包"这种通用的，而是只属于这个人的）：
-> - *"你最近在探索摄影——这几个视频从你习惯的'搞明白原理'的角度讲构图和光影，我觉得很对你的胃口"*
-> - *"最近工作是不是有点累？这两个 RPG 实况节奏特别好，适合你晚上用来切换状态"*
-> - *"我发现一个 UP 主讲历史的方式跟你喜欢的那种'深层逻辑分析'风格很像，但他讲的是经济史，你说不定会打开一个新世界"*
-
-#### 推荐表达（有温度、有洞察的朋友式推荐）
-
-不是：*"因为你观看了相关视频，推荐以下内容"* ❌
-
-而是：*"我觉得你会喜欢这个——这个 UP 主讲 AI 的角度很独特，有点像你喜欢的那种'把复杂的事情讲透'的风格，但他会加入很多生活化的类比。我理解你最近对 AI 的关注不仅是工作需要，更多是一种对未来的好奇，这个视频正好聊到了你可能感兴趣的方向。"* ✅
-
-核心要素：
-- **"我觉得"** — 有主观判断，像朋友一样
-- **"我理解你"** — 展示对用户的深层理解
-- **关联洞察** — 不只是"你看过类似的"，而是"我理解你为什么喜欢"
-- **个性化** — 每一条推荐都只属于这个用户
-
----
-
-### 2.4 🔄 反馈学习系统 (Feedback Loop)
-
-- **隐式反馈**（浏览器插件自动采集）：是否点击、观看时长、是否收藏分享
-- **显式反馈**：在插件中点赞/踩、对话式反馈
-- **记忆迭代**：反馈触发多层记忆网络更新——事件层记录事实，偏好层调整权重，觉察层写观察笔记，洞察层修正假设，灵魂层在必要时更新人格理解
-- **策略自省**：Agent 自我评估推荐命中率，反思发现策略和理解模型的有效性
-
----
-
-### 2.5 🔧 Skill 系统 (Extensible Skills)
-
-**目标**：支持自定义扩展能力，让用户和社区可以为 Agent 增加新技能。
-
-- **Skill 定义**：每个 Skill 是一个独立模块，包含说明文档 + 执行逻辑
-- **内置 Skill**：B 站 / 知乎等来源搜索、内容浏览、评论区分析、作者追踪等
-- **自定义 Skill**：用户可以创建新 Skill 扩展 Agent 的能力
-  - 例如：新平台接入、特定领域的内容评估策略、新的推荐呈现方式
-- **Skill 注册**：Agent 自动发现可用 Skill，根据任务需要选择调用
-
----
-
-## 3. 系统架构
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                  用户交互层 (浏览器插件)                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐    │
-│  │ 统一行为采集   │  │ 推荐展示 UI   │  │ 对话/反馈/探针   │    │
-│  │ Adapter: B/XHS│  │ (LUI 界面)   │  │ (durable turn) │    │
-│  │ +DY/YT/X/ZH   │  │ +真实可换数   │  │                │    │
-│  │ +停留满意度   │  │ +文字卡渲染   │  │                │    │
-│  └──────────────┘  └──────────────┘  └─────────────────┘    │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ bili/xhs/dy/yt/zhihu/reddit 任务调度 + 源开关/比例配置（后台 tab / 初始化导入 / 配比建议）│ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ B 站 / 抖音 / X Cookie 同步（runtime-stream 请求 + 扩展回传）│   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 扩展捕捉 E2E：run -> runtime-stream -> 入口归位 -> DOM 操作 -> /api/events │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 普通 /api/events：accepted -> memory -> ProfileUpdatePipeline -> request_replenishment │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ delight / interest.probe / avoidance.probe 主动推送（含probe_mode）│ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 后台 LLM 请求暂停配置（设置页调度区 + presence gate）          │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 开机自启动开关：/api/autostart-status + apply（本机可写）     │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 配置离线缓存 + 降级模式修复 UI（保存后提示重启）              │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 推荐/消息封面：UI -> /api/image-proxy -> 白名单 CDN -> UI    │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ API Auth Gateway（可选）：/api/* 密码门禁中间件             │   │
-│  │   本机/扩展免登录 · LAN/远程需密码 · auth_epoch 撤销         │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 推荐点击：content_id/url/source_platform -> source-aware click signal │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 推荐反馈：/api/feedback -> 5s 合并 -> feedback 批学习单飞 │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ runtime status：available/raw/pending 库存 -> 插件/移动/桌面 │   │
-│  │ 补池：available-by-source deficit + raw-material headroom     │   │
-│  │ 推荐消费池后：refresh.pool_updated 快照 -> 三端库存提示收敛   │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 画像编辑：编辑面板 -> /api/profile/edit -> 覆盖层（插件/移动/桌面三端） │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ 引导初始化：画像信号来源选择 + 前置清单 -> /api/init + 进度流（B 站可取消；Reddit 可独立初始化）│ │
-│  └──────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────┤
-│                      Agent 核心层                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │           Agent Orchestrator (自研)                   │   │
-│  │   (任务调度 / 策略决策 / 多步推理 / 自省 / Skill 调度)    │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────┐ ┌──────────────┐ ┌────────────────┐      │
-│  │ User Soul    │ │ Content      │ │ Recommendation │      │
-│  │ Engine       │ │ Discovery    │ │ Engine         │      │
-│  │ (词表画像+探针)│ │ (发现+待评估池)│ │ (排序+表达)     │      │
-│  └──────────────┘ └──────────────┘ └────────────────┘      │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │     PoolCurator + 双轴 fatigue + per-group 窗口 + 新兴趣放大保护 │ │
-│  │     request_replenishment + 定时/手动补货 + B/XHS/DY/YT/X/Zhihu/Reddit=5/1/1/1/1/1/1 │ │
-│  │     DiscoveryCandidatePipeline: raw candidates -> periodic/refresh eval -> pool │ │
-│  │     LLM gate: scheduler + extension presence          │   │
-│  │     Soul taxonomy: CATEGORY_VOCAB + category migration + homonym-aware consolidation │ │
-│  │     Autostart: user login item + Ollama preflight/self-heal + Ollama.app runtime 校验 │ │
-│  │     Bili DOM fallback + XHS/Douyin/YouTube/X/Zhihu/Reddit producers: 按平台缺口独立补池 │ │
-│  │     Hot reload one-shots: interest/avoidance force_tick │   │
-│  │     Probe arbiter: interest / avoidance 每轮最多推送一条   │   │
-│  │     Interest probes: near 5 + challenge 3 独立 active 额度 │   │
-│  │     Probe memory: domain / axis / distance + exploration buffer │ │
-│  │     AccountSync: B 站账号增量 -> Memory/Soul bootstrap     │   │
-│  │     Guided init: selected profile-signal sources + LLM/embedding live probe -> run_guided_init + InitCoordinator │ │
-│  │     Pool readiness: servable/raw/pending 统一库存口径       │   │
-│  │     Source bootstrap seen-key guard -> Memory/Profile      │   │
-│  │     Profile overrides overlay: 用户编辑 -> profile_overrides.json │ │
-│  │       -> get_profile()/sync_profile_files 读时叠加（抗画像重建）│ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              Skill System (可扩展技能)                 │   │
-│  │  [搜索] [浏览] [评论分析] [UP主追踪] [自定义...]         │   │
-│  └──────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────┤
-│           多源适配层 (SourceAdapter Protocol, v0.3.0+)         │
-│  ┌──────────────┐  ┌──────────────────┐  ┌─────────────┐    │
-│  │ B 站 Adapter  │  │ Bili/小红书/抖音/YouTube/知乎/Reddit任务桥│ │ Web Adapter │  │
-│  │ (WBI API+DOM兜底)│ │ (扩展代理 + DOM-first)│  │ (Playwright │    │
-│  │              │  │ + profile/search/feed/yt/zhihu)│ │ + LLM 抽取)│    │
-│  └──────────────┘  └──────────────────┘  └─────────────┘    │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ DouyinDiscoveryService: 首页 DOM 触发 search / 热点 seed-related / feed │ │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ YoutubeDiscoveryProducer: 后端直连 yt_search/trending/channel │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ XAdapter + XDiscoveryProducer: 服务端 cookie 重放(twitter-cli) │ │
-│  │   search / feed(For-You) / creator(账号订阅) + 源健康状态机   │   │
-│  │   行为采集: 扩展 MAIN-world GraphQL tap + generic collector   │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ ZhihuDiscoveryProducer: 插件登录态 search/hot/feed/creator/related -> pending eval │ │
-│  │   fetch-zhihu 只做 smoke；guided init 勾选知乎才进首版画像       │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ RedditDiscoveryProducer: rdt-cli 默认 + 插件 fallback search/hot/subreddit/related -> pending eval │ │
-│  │   Reddit bootstrap_events: saved/upvoted/subscribed -> 首版画像信号 │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Cookie/登录态、runtime-stream presence、任务持久化/claim、seen-key 去重 │ │
-│  └──────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────┤
-│         LLM 适配层 + Embedding 服务（双层缓存）                 │
-│  ┌──────────────────────────┐  ┌────────────────────────┐   │
-│  │ OpenAI / Claude / Gemini │  │ EmbeddingService       │   │
-│  │ DeepSeek / Ollama /      │  │ L1 内存 + L2 SQLite    │   │
-│  │ OpenRouter + Codex OAuth │  │ Ollama bge-m3 兜底可选  │   │
-│  └──────────────────────────┘  └────────────────────────┘   │
-│  Desktop bundle: official Ollama.app runtime (ollama + runner dylibs/assets) │
-│  LLMService caller bucket → per-module provider/model override │
-│  discovery evaluator: text + metrics + optional compressed cover image input │
-│  OpenAI auth_mode: api_key / experimental Codex CLI OAuth      │
-│  结构化 JSON helper: wrapper / fenced / JSONL / schema echo / MiMo 容错 │
-├──────────────────────────────────────────────────────────────┤
-│                    多层网状记忆存储                             │
-│  ┌───────────┐ ┌─────────────┐ ┌────────────┐ ┌─────────┐  │
-│  │ 核心记忆    │ │ 情景记忆     │ │ 语义记忆    │ │ 工作记忆 │  │
-│  │ (JSON)     │ │ (SQLite +   │ │ (知识图谱/  │ │ (内存)  │  │
-│  │ Soul+偏好   │ │  向量索引)   │ │  JSON)     │ │         │  │
-│  └───────────┘ └─────────────┘ └────────────┘ └─────────┘  │
-│  SQLite: events(inferred_satisfaction) / discovery_candidates     │
-│          content_cache / recommendations / chat_turns / avoidance_state │
-└──────────────────────────────────────────────────────────────┘
+```powershell
+ruff check src/ tests/
+mypy src/
+pytest
 ```
 
----
+For profile/recommendation changes:
 
-## 4. 技术选型
+- Verify `/api/health`.
+- Verify `/api/runtime-status`.
+- Verify `/api/recommendations`.
+- Verify `/web`.
+- Check recommendation source mix after refresh.
 
-| 模块 | 技术方案 | 说明 |
-|------|---------|------|
-| 编程语言 | **Python** (后端) + **TypeScript** (插件) | 后端 AI 生态 + 前端插件 |
-| LLM 接入 | **多模型**：OpenAI / Claude / DeepSeek / 本地模型等 | 全部支持，优先效果 |
-| B 站交互 | **API 优先** (bilibili-api-python)（实际实现使用自研 `BilibiliAPIClient`，不依赖此库）+ **agent-browser** (浏览器操作) | API 快速高效，agent-browser 补充复杂交互 |
-| 浏览器操作 | **[agent-browser](https://github.com/vercel-labs/agent-browser)** | Vercel 的 AI Agent 专用浏览器 CLI |
-| 浏览器插件 | **Chrome Extension** (Manifest V3) | 行为采集 + 交互 UI + LUI |
-| Agent 框架 | **自研轻量框架**，按需扩展 | 灵活可控，支持 Skill 系统 |
-| 记忆存储 | **SQLite** + **向量索引** + **JSON** | 分层存储，匹配不同记忆类型需求 |
-| 任务调度 | **asyncio runtime loops** + `[scheduler]` 配置 | 按前端可换候选缺口、raw-material headroom、行为阈值和策略间隔执行内容发现；pending raw 评估有独立 loop；不依赖 cron |
-| 运行模式 | **本地运行** | 用户自己的电脑上执行 |
+For extension changes:
 
----
-
-## 5. 版本规划
-
-### v0.1 — MVP：最小推荐闭环
-
-> **核心目标**：证明"深度理解用户 → 主动发现内容 → 有温度地推荐"是可行的。
-
-- [ ] 项目骨架搭建（Python 后端 + Chrome 插件 + 配置管理）
-- [ ] B 站 API 接入 + agent-browser 集成
-- [ ] 浏览器插件 MVP：基础行为采集（点击/浏览/搜索 + 页面快照）
-- [ ] 多层记忆架构基础版（事件层 + 偏好层 + 灵魂层）
-- [ ] 基础 Soul Engine：从行为数据中构建初步人格理解
-- [ ] 基础内容搜索与推荐
-- [ ] 插件内 UI：查看推荐、提供反馈、基础对话
-- [ ] 多 LLM 支持框架
-
-### v0.2 — 更深层的理解
-
-- [ ] 完整行为采集（微行为、DOM 上下文、浏览路径）
-- [ ] 完整五层记忆架构 + 网状关联 + 自我编辑能力
-- [ ] 苏格拉底式深度对话（追问/假设/确认/调整）
-- [ ] 多策略内容发现（相关推荐链、排行榜、评论区挖掘）
-- [ ] "发现惊喜"模式：跨领域探索
-- [ ] Skill 系统 v1：内置 Skill + 自定义 Skill 支持
-- [ ] 推荐质量自省和策略迭代
-
-### v0.3 — 更好的体验
-
-- [ ] 插件 UI 升级：丰富的 LUI 交互体验
-- [ ] 情境感知推荐（时间/情绪/场景自适应）
-- [ ] 定时自动发现和推送
-- [ ] 记忆可视化（查看 Agent 对你的理解）
-- [ ] UP 主追踪和新视频提醒
-
-### v1.0 — 成熟的开源工具
-
-> 注：项目已确定为严格单用户设计，不再计划多用户支持。
-
-- [ ] 多用户支持 + 配置系统
-- [ ] 完善的安装和使用文档
-- [ ] 插件商店发布
-- [ ] 社区 Skill 市场
-- [x] 跨平台内容发现（已落地 B 站 / 小红书 / 抖音 / YouTube / X / 知乎 / Reddit / 通用 Web，后续继续扩展更多 adapter）
-
----
-
-## 6. 设计原则
-
-1. **灵魂优于标签** — 理解一个人，而不是给他贴标签
-2. **有温度的表达** — Agent 的每一次输出都像朋友在说话
-3. **主动追问和假设** — 不等用户说，主动猜测并验证
-4. **用户掌控权** — 用户可以查看、修正、引导 Agent 的理解
-5. **隐私本地化** — 所有数据和计算在本地
-6. **开放可扩展** — 通用开源设计 + Skill 系统
-
----
-
-*文档版本: v0.3 | 日期: 2026-06-25 | 状态: 持续更新*
+- Bump extension version.
+- Rebuild or reload the unpacked extension.
+- Confirm the version shown in `chrome://extensions/`.
+- Manually verify the changed source task in a logged-in tab.

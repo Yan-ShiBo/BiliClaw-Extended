@@ -103,7 +103,7 @@ def _render_tone_profile(
 
 
 def _normalize_prompt_style_list(value: object) -> list[str]:
-    if not isinstance(value, (list, tuple, set, frozenset)):
+    if not isinstance(value, list | tuple | set | frozenset):
         return []
     result: list[str] = []
     seen: set[str] = set()
@@ -157,7 +157,7 @@ def _normalize_explore_domains_block(block: dict[str, object]) -> dict[str, obje
         min(3, queries_per_domain),
     )
     covered = normalized.get("covered_topic_groups", [])
-    if not isinstance(covered, (list, tuple)):
+    if not isinstance(covered, list | tuple):
         covered = []
     seen: set[str] = set()
     unique_covered: list[str] = []
@@ -244,6 +244,7 @@ _PREFERENCE_ANALYSIS_SYSTEM_PROMPT = """
 9. 用户的兴趣信号可能跨平台（B 站 / 小红书 / 等）；通过 metadata.source_platform 区分来源，但兴趣分析本身要把所有平台的信号一视同仁，不要因为来自小红书就降权。
 10. 如果事件的 inferred_satisfaction 是 negative，或 metadata.feedback_type 是 dislike / metadata.reaction 是 thumbs_down，表示负向证据。不要把负向事件提取为 interests / favorite_up_users；只能用于 disliked_topics、风格避让或降低相关偏好置信度。
 11. metadata.signal_strength 表示该事件作为偏好证据的强度，不是最终 interest.weight。如果存在该字段，优先用它判断证据强弱；最终 weight 仍要结合重复次数、内容一致性、最近性、负向反馈和跨来源一致性。没有 signal_strength 时按事件类型粗略理解：favorite / bookmark / save / collect 是强正向；coin / share 是强正向；like 是明确正向；comment 是主动参与但要看语义；follow / subscription 是长期兴趣信号但偏创作者/频道维度，不能直接等同于每个题材都喜欢；view / history 是弱到中等信号，单条不能推出高权重兴趣，重复出现或与强信号同向时才提高；click 只有足够停留、完播或 positive inferred_satisfaction 时才增强；search 是意图信号不是喜欢信号；hover / scroll / snapshot 只作被动上下文辅助；dialogue 是用户主动聊到，按表达强度判断。负向反馈、dislike、thumbs_down 或 inferred_satisfaction=negative 优先级最高，不能被 signal_strength 抵消。
+11a. metadata.analysis_weight 是系统在 signal_strength 之上叠加来源平衡和时间衰减后的相对证据权重：第二个抖音账号、小红书、B 站会略微放大，第一个抖音账号越旧的条目会略微降低。若存在 analysis_weight，优先用它判断本条事件对画像的实际证据强度；它可以略高于 1，但仍不是最终 interest.weight。
 12. 如果 metadata.feedback_type 是 comment，它是用户对推荐内容的直接反馈和中性反馈容器，不预设正向或负向。必须根据备注、feedback_note、context 中的具体内容判断用户是喜欢、不喜欢，还是仅补充说明：正向才可强化 interests / style；负向只能用于 disliked_topics、风格避让或降低相关偏好置信度；不明确时不要强行改偏好。
 13. 初始化分片时，可顺手输出少量 awareness_candidates / insight_candidates：
     - awareness_candidates 是对本批事件的直接观察，不是人格结论，最多 3 条；
@@ -2175,7 +2176,7 @@ def parse_merged_keywords_with_presence(
         seen: set[str] = set()
         keywords: list[str] = []
         for item in raw:
-            if not isinstance(item, (str, int, float)):
+            if not isinstance(item, str | int | float):
                 continue
             text = str(item).strip()
             if not text or text in seen:
@@ -2242,12 +2243,12 @@ def parse_merged_keywords_with_presence_and_explore_domains(
 
 
 def _clean_explore_domain_queries(value: object, cap: int) -> list[str]:
-    if not isinstance(value, (list, tuple)):
+    if not isinstance(value, list | tuple):
         return []
     seen: set[str] = set()
     queries: list[str] = []
     for item in value:
-        if not isinstance(item, (str, int, float)):
+        if not isinstance(item, str | int | float):
             continue
         text = str(item).strip()
         if not text or text in seen:

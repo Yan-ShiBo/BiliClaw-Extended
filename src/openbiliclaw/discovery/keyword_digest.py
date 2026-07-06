@@ -1,7 +1,7 @@
 """Stable, quantized digest of the keyword-shaping profile fields (P1.2).
 
 ``profile_kw_digest`` decides WHEN the unified keyword cache is invalidated
-(see ``docs/plans/2026-06-14-discover-backpressure-refactor-design.md`` §8). It
+(see ``docs/archive/plans/2026-06-14-discover-backpressure-refactor-design.md`` §8). It
 is **path-agnostic** — it hashes the *current* profile regardless of which path
 (chat / feedback event / 12h consolidation) changed it — and it is deliberately:
 

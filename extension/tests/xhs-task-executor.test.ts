@@ -253,7 +253,8 @@ test("normalizeBootstrapScrollRounds keeps scrolling explicit and bounded", () =
   assert.equal(normalizeBootstrapScrollRounds(0), 0);
   assert.equal(normalizeBootstrapScrollRounds(-1), 0);
   assert.equal(normalizeBootstrapScrollRounds(3.8), 3);
-  assert.equal(normalizeBootstrapScrollRounds(100), 30);
+  assert.equal(normalizeBootstrapScrollRounds(100), 100);
+  assert.equal(normalizeBootstrapScrollRounds(200), 160);
 });
 
 test("bootstrap scroll wait and stagnant rounds are backend-controlled but clamped", () => {

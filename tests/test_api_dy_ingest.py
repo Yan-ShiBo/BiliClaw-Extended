@@ -1,7 +1,7 @@
 """Tests for the Douyin task-queue API endpoints.
 
 Task 2 of the Douyin bootstrap import plan
-(``docs/plans/2026-05-06-douyin-bootstrap-import.md``).
+(``docs/archive/plans/2026-05-06-douyin-bootstrap-import.md``).
 
 The endpoints mirror the XHS pattern in shape — separate table
 ``dy_tasks`` and separate route prefix ``/api/sources/dy/`` — but

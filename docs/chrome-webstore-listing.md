@@ -7,9 +7,9 @@
 
 - Chrome Web Store item: <https://chromewebstore.google.com/detail/openbiliclaw/cdfjfkdjjhdaccbldipkjhpibnfbiamg>
 - Developer Dashboard: Store listing -> Detailed description
-- 项目主页 / Website URL: <https://whiteguo233.github.io/OpenBiliClaw/>
-- 支持 / GitHub 项目页: <https://github.com/whiteguo233/OpenBiliClaw>
-- 隐私政策: <https://github.com/whiteguo233/OpenBiliClaw/blob/main/docs/privacy.md>
+- 项目主页 / Website URL: <https://yan-shibo.github.io/BiliClaw-Extended/>
+- 支持 / GitHub 项目页: <https://github.com/Yan-ShiBo/BiliClaw-Extended>
+- 隐私政策: <https://github.com/Yan-ShiBo/BiliClaw-Extended/blob/main/docs/privacy.md>
 
 ## Short Description
 
@@ -25,16 +25,16 @@
 OpenBiliClaw 是一个本地优先、私有、开源的个性化内容发现 Agent。它通过浏览器插件采集你授权范围内的 B 站、小红书、抖音、YouTube 等平台浏览 / 互动信号，交给你本机运行的 OpenBiliClaw 后端，生成个人画像、推荐理由和可反馈的跨平台内容流。
 
 项目主页：
-https://whiteguo233.github.io/OpenBiliClaw/
+https://yan-shibo.github.io/BiliClaw-Extended/
 
 GitHub 源码 / Issue / Releases：
-https://github.com/whiteguo233/OpenBiliClaw
+https://github.com/Yan-ShiBo/BiliClaw-Extended
 
 安装和使用：
 1. 安装这个浏览器插件。
 2. 部署本地后端。普通用户建议在 GitHub Releases 下载 macOS .dmg / Windows .exe 桌面安装包；想改源码或深度定制的用户，可以按 README / agent-install 文档让 AI 编程助手部署。
-   Releases: https://github.com/whiteguo233/OpenBiliClaw/releases
-   AI 部署说明: https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docs/agent-install.md
+   Releases: https://github.com/Yan-ShiBo/BiliClaw-Extended/releases
+   AI 部署说明: https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/docs/agent-install.md
 3. 启动后端后，在电脑上打开：
    http://127.0.0.1:8420/web
 4. 在同一个浏览器登录你要使用的平台，至少先登录 B 站；需要更多信号时再登录小红书 / 抖音 / YouTube。
@@ -53,16 +53,16 @@ https://github.com/whiteguo233/OpenBiliClaw
 - 数据默认保存在你本机 SQLite 数据库里。
 
 隐私政策：
-https://github.com/whiteguo233/OpenBiliClaw/blob/main/docs/privacy.md
+https://github.com/Yan-ShiBo/BiliClaw-Extended/blob/main/docs/privacy.md
 
 英文说明：
-https://github.com/whiteguo233/OpenBiliClaw/blob/main/README_EN.md
+https://github.com/Yan-ShiBo/BiliClaw-Extended/blob/main/README_EN.md
 ```
 
 ## 提交前检查
 
 - `Detailed description` 已包含项目主页、GitHub 项目页、Releases、AI 部署说明和隐私政策。
-- `Website URL` 使用项目主页：`https://whiteguo233.github.io/OpenBiliClaw/`。
-- `Support URL` 可使用 GitHub Issues：`https://github.com/whiteguo233/OpenBiliClaw/issues`。
+- `Website URL` 使用项目主页：`https://yan-shibo.github.io/BiliClaw-Extended/`。
+- `Support URL` 可使用 GitHub Issues：`https://github.com/Yan-ShiBo/BiliClaw-Extended/issues`。
 - `Privacy policy URL` 使用 `docs/privacy.md` 的 GitHub 链接。
 - 如果 README 快速开始、桌面安装包、后端默认端口或插件权限边界变化，本文件必须同步更新。

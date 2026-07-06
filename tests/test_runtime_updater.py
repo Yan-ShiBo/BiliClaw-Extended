@@ -284,11 +284,11 @@ async def test_manual_check_uses_atom_fallback_when_tags_api_quota_exhausted(
             text="""
             <feed xmlns="http://www.w3.org/2005/Atom">
               <entry>
-                <link rel="alternate" href="https://github.com/whiteguo233/OpenBiliClaw/releases/tag/extension-v0.3.91"/>
+                <link rel="alternate" href="https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/tag/extension-v0.3.91"/>
                 <title>extension-v0.3.91</title>
               </entry>
               <entry>
-                <link rel="alternate" href="https://github.com/whiteguo233/OpenBiliClaw/releases/tag/backend-v0.3.139"/>
+                <link rel="alternate" href="https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/tag/backend-v0.3.139"/>
                 <title>backend-v0.3.139</title>
               </entry>
             </feed>
@@ -415,7 +415,7 @@ async def test_request_apply_allows_uv_lock_only_dirty_worktree(
         calls.append(list(command))
         if command == ["git", "config", "--get", "remote.origin.url"]:
             return subprocess.CompletedProcess(
-                command, 0, "https://github.com/whiteguo233/OpenBiliClaw.git\n", ""
+                command, 0, "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n", ""
             )
         if command == ["git", "status", "--porcelain"]:
             return subprocess.CompletedProcess(command, 0, " M uv.lock\n", "")
@@ -460,7 +460,7 @@ async def test_request_apply_blocks_dirty_worktree_before_install_or_restart(
     subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True)
     subprocess.run(
-        ["git", "remote", "add", "origin", "https://github.com/whiteguo233/OpenBiliClaw.git"],
+        ["git", "remote", "add", "origin", "https://github.com/Yan-ShiBo/BiliClaw-Extended.git"],
         cwd=tmp_path,
         check=True,
     )
@@ -529,7 +529,7 @@ async def test_request_apply_rejects_second_concurrent_apply(
     "remote_url",
     [
         "https://github.com/someone-else/OpenBiliClaw.git",
-        "https://token@github.com/whiteguo233/OpenBiliClaw.git",
+        "https://token@github.com/Yan-ShiBo/BiliClaw-Extended.git",
     ],
 )
 @pytest.mark.asyncio
@@ -570,7 +570,7 @@ async def test_request_apply_blocks_merge_or_rebase_in_progress(
     async def _run_command(command, _root, *, timeout):
         if command == ["git", "config", "--get", "remote.origin.url"]:
             return subprocess.CompletedProcess(
-                command, 0, "https://github.com/whiteguo233/OpenBiliClaw.git\n", ""
+                command, 0, "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n", ""
             )
         if command == ["git", "status", "--porcelain"]:
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -601,7 +601,7 @@ async def test_request_apply_reports_missing_tag_and_diverged_branch(
         nonlocal rev_parse_calls
         if command == ["git", "config", "--get", "remote.origin.url"]:
             return subprocess.CompletedProcess(
-                command, 0, "https://github.com/whiteguo233/OpenBiliClaw.git\n", ""
+                command, 0, "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n", ""
             )
         if command == ["git", "status", "--porcelain"]:
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -651,7 +651,7 @@ async def test_successful_apply_fetches_merges_syncs_and_publishes_restart(
         calls.append(list(command))
         if command == ["git", "config", "--get", "remote.origin.url"]:
             return subprocess.CompletedProcess(
-                command, 0, "https://github.com/whiteguo233/OpenBiliClaw.git\n", ""
+                command, 0, "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n", ""
             )
         if command == ["git", "rev-parse", "--git-dir"]:
             return subprocess.CompletedProcess(command, 0, ".git\n", "")
@@ -744,7 +744,7 @@ async def test_apply_dependency_failure_publishes_backend_update_failed(
             return subprocess.CompletedProcess(
                 command,
                 0,
-                "https://github.com/whiteguo233/OpenBiliClaw.git\n",
+                "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n",
                 "",
             )
         if command == ["git", "rev-parse", "--git-dir"]:
@@ -786,7 +786,7 @@ async def test_apply_restart_failure_logs_and_publishes_backend_update_failed(
             return subprocess.CompletedProcess(
                 command,
                 0,
-                "https://github.com/whiteguo233/OpenBiliClaw.git\n",
+                "https://github.com/Yan-ShiBo/BiliClaw-Extended.git\n",
                 "",
             )
         if command == ["git", "rev-parse", "--git-dir"]:

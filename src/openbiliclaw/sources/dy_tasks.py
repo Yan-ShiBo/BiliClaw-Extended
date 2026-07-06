@@ -9,7 +9,7 @@ layer is ``event_format.py``: Douyin events emit ``event_type`` values
 from the canonical vocabulary so soul-engine can analyze cross-source
 events uniformly.
 
-See ``docs/plans/2026-05-06-douyin-bootstrap-import-design.md`` for the
+See ``docs/archive/plans/2026-05-06-douyin-bootstrap-import-design.md`` for the
 architecture rationale and the open-source prior-art notes that
 informed the URL / endpoint catalog used elsewhere in the dy_ tree.
 """

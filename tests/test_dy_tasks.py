@@ -1,7 +1,7 @@
 """Tests for the Douyin bootstrap event-conversion helper.
 
 Task 1 of the Douyin bootstrap import plan
-(``docs/plans/2026-05-06-douyin-bootstrap-import.md``).
+(``docs/archive/plans/2026-05-06-douyin-bootstrap-import.md``).
 """
 
 from __future__ import annotations

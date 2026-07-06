@@ -2,7 +2,7 @@
  * Tests for the Douyin background task dispatcher's pure helpers.
  *
  * Task 5 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md).
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md).
  *
  * Module isolation: zero imports from extension/src/background/xhs-task-dispatcher.
  * The orchestration (chrome.tabs / chrome.runtime / fetch lifecycle) lives in

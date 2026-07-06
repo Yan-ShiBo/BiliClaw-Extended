@@ -1,6 +1,6 @@
 """Tests for the init_runs store backing guided (GUI) initialization.
 
-See docs/specs/gui-init.md §5a and docs/plans/2026-06-07-gui-init-implementation.md A1.
+See docs/specs/gui-init.md §5a and docs/archive/plans/2026-06-07-gui-init-implementation.md A1.
 """
 
 from __future__ import annotations

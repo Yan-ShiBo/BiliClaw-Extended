@@ -2,7 +2,7 @@
  * Tests for the Douyin content-script executor's pure helpers.
  *
  * Task 4 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md).
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md).
  *
  * Module isolation: zero imports from extension/src/content/xhs/.
  */

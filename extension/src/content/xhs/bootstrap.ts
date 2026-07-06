@@ -83,7 +83,7 @@ export interface BootstrapScrollCandidateDebug extends BootstrapScrollMetrics {
 
 const DEFAULT_BASE_URL = "https://www.xiaohongshu.com";
 const DEFAULT_MAX_ITEMS_PER_SCOPE = 20;
-const MAX_BOOTSTRAP_SCROLL_ROUNDS = 30;
+const MAX_BOOTSTRAP_SCROLL_ROUNDS = 160;
 const DEFAULT_BOOTSTRAP_SCROLL_WAIT_MS = 1_200;
 const MIN_BOOTSTRAP_SCROLL_WAIT_MS = 500;
 const MAX_BOOTSTRAP_SCROLL_WAIT_MS = 5_000;

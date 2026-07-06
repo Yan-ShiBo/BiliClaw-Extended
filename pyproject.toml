@@ -4,12 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openbiliclaw"
-version = "0.3.156"
-description = "Your local-first, cross-platform AI discovery friend for Bilibili, Zhihu, and more."
+version = "0.3.159"
+description = "BiliClaw Extended: a local-first, cross-platform personal content intelligence and recommendation system."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [
+    { name = "Yan Shibo" },
     { name = "OpenBiliClaw Contributors" },
 ]
 keywords = ["bilibili", "zhihu", "ai", "agent", "recommendation", "content-discovery", "cross-platform", "llm"]
@@ -87,9 +88,9 @@ packaging = [
 openbiliclaw = "openbiliclaw.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/whiteguo233/OpenBiliClaw"
-Repository = "https://github.com/whiteguo233/OpenBiliClaw"
-Issues = "https://github.com/whiteguo233/OpenBiliClaw/issues"
+Homepage = "https://github.com/Yan-ShiBo/BiliClaw-Extended"
+Repository = "https://github.com/Yan-ShiBo/BiliClaw-Extended"
+Issues = "https://github.com/Yan-ShiBo/BiliClaw-Extended/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openbiliclaw"]

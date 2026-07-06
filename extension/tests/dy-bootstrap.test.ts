@@ -2,7 +2,7 @@
  * Tests for the Douyin bootstrap RENDER_DATA reader.
  *
  * Task 4 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md).
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md).
  *
  * RENDER_DATA shape verified via chrome-devtools MCP probe 2026-05-07
  * against a real douyin.com tab — the script tag carries

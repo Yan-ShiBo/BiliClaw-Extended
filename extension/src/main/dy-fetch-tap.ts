@@ -12,7 +12,7 @@
  *
  * **Critical timing detail** (verified empirically 2026-05-07 via
  * chrome-devtools MCP probe — see
- * docs/plans/2026-05-06-douyin-bootstrap-import-design.md §3 step 5):
+ * docs/archive/plans/2026-05-06-douyin-bootstrap-import-design.md §3 step 5):
  * Douyin's page bundle wraps `window.fetch` with its own axios-style
  * wrapper *after* document_start. Installing at `runAt:"document_start"`
  * is shadowed by the page bundle's later wrapper and captures **zero**

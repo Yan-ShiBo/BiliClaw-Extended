@@ -5093,7 +5093,7 @@ class Database:
         Holds the global revocation epoch (``auth_epoch``) and the password
         fingerprint, kept out of ``config.toml`` so that revocation is a
         cross-process atomic counter rather than a whole-file rewrite. See
-        ``docs/plans/2026-05-30-web-password-auth-design.md`` §4.7.
+        ``docs/archive/plans/2026-05-30-web-password-auth-design.md`` §4.7.
         """
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS auth_state (

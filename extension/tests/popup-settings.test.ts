@@ -207,7 +207,7 @@ test("settings page exposes backend-only update controls and plugin release fall
   assert.match(popupHtml, /自动更新后端/);
   assert.match(popupHtml, /此开关不会更新浏览器插件/);
   assert.match(popupHtml, /id="backendUpdateDownload"/);
-  assert.match(popupHtml, /href="https:\/\/github\.com\/whiteguo233\/OpenBiliClaw\/releases"/);
+  assert.match(popupHtml, /href="https:\/\/github\.com\/Yan-ShiBo\/BiliClaw-Extended\/releases"/);
   assert.match(popupJs, /fetchUpdateStatus/);
   assert.match(popupJs, /checkBackendUpdate/);
   assert.match(popupJs, /applyBackendUpdate/);

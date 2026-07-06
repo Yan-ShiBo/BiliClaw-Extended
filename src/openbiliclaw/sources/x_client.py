@@ -5,7 +5,7 @@ Douyin-direct, NOT an XHS-style stub). This client harvests the user's
 ``auth_token`` + ``ct0`` cookies and drives ``twitter_cli.client.TwitterClient``'s
 **synchronous** read methods.
 
-Design contract (see ``docs/plans/2026-06-08-x-twitter-source-plan.md`` Task 6):
+Design contract (see ``docs/archive/plans/2026-06-08-x-twitter-source-plan.md`` Task 6):
 
 * **Lazy import.** ``twitter_cli`` (and its ``curl_cffi`` transitive dep) is
   imported *inside* the network seam, never at module top. Importing this

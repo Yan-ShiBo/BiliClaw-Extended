@@ -2,7 +2,7 @@
  * Tests for the Douyin MAIN-world fetch-tap.
  *
  * Task 3 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md). The module
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md). The module
  * itself does NOT auto-install on import — installFetchTap is called
  * explicitly by the content-script, so importing here under node:test
  * (no window) does not trigger side effects.
@@ -11,7 +11,7 @@
  * douyin.com tab on 2026-05-07 via the chrome-devtools MCP. The
  * URL-classification regex, top-level response keys, and the late-
  * inject timing model all come from that probe — see
- * docs/plans/2026-05-06-douyin-bootstrap-import-design.md §3 step 5.
+ * docs/archive/plans/2026-05-06-douyin-bootstrap-import-design.md §3 step 5.
  */
 
 import test from "node:test";

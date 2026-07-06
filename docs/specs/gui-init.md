@@ -3,7 +3,7 @@
 **Created:** 2026-06-06
 **Status:** **CONVERGED**（Codex 对抗 review R1–R7;R7 判 **SHIP**,0 spec 级缺陷;轨迹:R1 4 根本 blocker → R2 2 → R4 9 → R5 5 → R6 4 二阶边界 → R7 0)。可进入实现计划。
 **Scope:** 打包应用(.dmg/.exe)与浏览器插件用户的「首次初始化」改为 GUI 按钮触发 + 前置检查引导,不再要求终端跑 `openbiliclaw init`
-**Depends on / 关联:** `feat/desktop-installer-wizard` 分支(`/setup` 向导、`packaging/entry.py`);与 `docs/plans/2026-06-06-human-install-wizard-design.md`(命令行一句话安装向导)**互补不重叠**——那条线管 CLI 安装路径,本 spec 管 GUI/打包/插件路径。
+**Depends on / 关联:** `feat/desktop-installer-wizard` 分支(`/setup` 向导、`packaging/entry.py`);与 `docs/archive/plans/2026-06-06-human-install-wizard-design.md`(命令行一句话安装向导)**互补不重叠**——那条线管 CLI 安装路径,本 spec 管 GUI/打包/插件路径。
 
 ## Goal
 

@@ -1,7 +1,7 @@
 """Tests for classify_event_satisfaction — deterministic rule table.
 
 Part of the event-satisfaction signal work (see
-``docs/plans/2026-05-16-event-satisfaction-signal.md``). The classifier
+``docs/archive/plans/2026-05-16-event-satisfaction-signal.md``). The classifier
 must be auditable and cheap — no LLM calls — so the test rules below
 mirror the documented contract one-for-one.
 """

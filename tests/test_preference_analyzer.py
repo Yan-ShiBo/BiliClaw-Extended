@@ -820,6 +820,58 @@ def test_compute_source_platform_mix_returns_empty_when_no_events() -> None:
     assert analyzer.compute_source_platform_mix([]) == {}
 
 
+def test_source_signal_weighting_boosts_secondary_sources_and_decays_primary_douyin() -> None:
+    from openbiliclaw.soul.preference_analyzer import PreferenceAnalyzer
+
+    analyzer = PreferenceAnalyzer(FakeStructuredService())
+    events = analyzer._apply_source_signal_weights(
+        [
+            {
+                "event_type": "like",
+                "title": "dy primary newest",
+                "metadata": {
+                    "source_platform": "douyin",
+                    "source_account_id": "primary",
+                    "signal_strength": 0.85,
+                },
+            },
+            {
+                "event_type": "like",
+                "title": "dy account2",
+                "metadata": {
+                    "source_platform": "douyin",
+                    "source_account_id": "account2",
+                    "signal_strength": 0.85,
+                },
+            },
+            {
+                "event_type": "like",
+                "title": "xhs liked",
+                "metadata": {"source_platform": "xiaohongshu", "signal_strength": 0.85},
+            },
+            {
+                "event_type": "favorite",
+                "title": "bili favorite",
+                "metadata": {"source_platform": "bilibili", "signal_strength": 1.0},
+            },
+            {
+                "event_type": "like",
+                "title": "dy primary oldest",
+                "metadata": {
+                    "source_platform": "douyin",
+                    "source_account_id": "primary",
+                    "signal_strength": 0.85,
+                },
+            },
+        ]
+    )
+
+    weights = [event["metadata"]["analysis_weight"] for event in events]
+    assert weights == [0.85, 0.9775, 0.935, 1.08, 0.697]
+    assert events[1]["metadata"]["source_weight_multiplier"] == 1.15
+    assert events[-1]["metadata"]["recency_weight_multiplier"] == 0.82
+
+
 def test_merge_source_mix_ema_blends_prior_and_batch() -> None:
     from openbiliclaw.soul.preference_analyzer import PreferenceAnalyzer
 
@@ -859,7 +911,7 @@ async def test_analyze_events_populates_source_platform_mix() -> None:
         ],
         existing_preference={},
     )
-    assert preference["source_platform_mix"] == {"bilibili": 0.5, "xiaohongshu": 0.5}
+    assert preference["source_platform_mix"] == {"bilibili": 0.4954, "xiaohongshu": 0.5046}
 
 
 @pytest.mark.asyncio
@@ -884,9 +936,9 @@ async def test_chunked_analysis_splits_and_skips_rejected_single_event() -> None
 
     assert preference["interests"][0]["name"] == "科技"
     assert preference["source_platform_mix"] == {
-        "bilibili": 0.5,
-        "douyin": 0.25,
-        "xiaohongshu": 0.25,
+        "bilibili": 0.507,
+        "douyin": 0.2347,
+        "xiaohongshu": 0.2582,
     }
     assert len(service.calls) > 1
 

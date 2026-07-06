@@ -3,7 +3,7 @@
  * orchestrator separated for testability.
  *
  * Task 4 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md). Module
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md). Module
  * isolation: zero imports from extension/src/content/xhs/. The
  * Douyin executor is structurally simpler than its XHS sibling
  * because data arrives via the MAIN-world fetch-tap (not DOM

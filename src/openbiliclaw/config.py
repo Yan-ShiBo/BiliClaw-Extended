@@ -37,8 +37,8 @@ _DEFAULT_SPECULATOR_IDLE_INTERVAL_MINUTES = 30
 _DEFAULT_FEEDBACK_BATCH_THRESHOLD = 3
 # Unified keyword planner (Discover backpressure refactor P1, spec §6).
 # All defaults are the owner-approved starting baseline; see
-# docs/plans/2026-06-14-discover-backpressure-refactor-design.md §6 and
-# docs/plans/2026-06-14-discover-backpressure-P1-plan.md §P1.0.
+# docs/archive/plans/2026-06-14-discover-backpressure-refactor-design.md §6 and
+# docs/archive/plans/2026-06-14-discover-backpressure-P1-plan.md §P1.0.
 _DEFAULT_UNIFIED_KEYWORD_PLANNER_ENABLED = True
 _DEFAULT_KW_CACHE_HIGH = 30
 _DEFAULT_KW_CACHE_LOW = 10
@@ -69,8 +69,8 @@ _DEFAULT_POOL_SOURCE_SHARES = {
     "reddit": 1,
 }
 _DEFAULT_AUTO_UPDATE_ALLOWED_REMOTES = [
-    "https://github.com/whiteguo233/OpenBiliClaw.git",
-    "git@github.com:whiteguo233/OpenBiliClaw.git",
+    "https://github.com/Yan-ShiBo/BiliClaw-Extended.git",
+    "git@github.com:Yan-ShiBo/BiliClaw-Extended.git",
 ]
 _REMOTE_PROVIDER_FIELDS = {
     "openai": "llm.openai.api_key",
@@ -273,7 +273,7 @@ class DiscoveryConfig:
     behind ``unified_keyword_planner_enabled`` (default ON as of v0.3.124; set
     it ``false`` to fall back, byte-for-byte, to the legacy per-platform LLM
     generation path). See
-    ``docs/plans/2026-06-14-discover-backpressure-refactor-design.md`` §6 for
+    ``docs/archive/plans/2026-06-14-discover-backpressure-refactor-design.md`` §6 for
     the parameter table these defaults come from. ``fetch_floor`` is NOT a
     field here — the planner reuses each platform's existing ``min_interval``.
     """
@@ -548,7 +548,7 @@ class SoulConfig:
 @dataclass
 class ApiAuthConfig:
     """Optional password gate for LAN / remote access (see
-    ``docs/plans/2026-05-30-web-password-auth-design.md``).
+    ``docs/archive/plans/2026-05-30-web-password-auth-design.md``).
 
     Only takes effect when ``enabled`` is true *and* the request is not a
     trusted-local request (loopback without forwarding headers, see §4.1).
@@ -1214,7 +1214,7 @@ def _build_api_auth(api_raw: dict[str, Any]) -> ApiAuthConfig:
 
     Multi-word fields cannot use the generic ``OPENBILICLAW_A_B_C`` override
     (it splits on ``_``), so the security-sensitive ones are read explicitly
-    here. See ``docs/plans/2026-05-30-web-password-auth-design.md`` §5.2. The set
+    here. See ``docs/archive/plans/2026-05-30-web-password-auth-design.md`` §5.2. The set
     of variables read here is mirrored by ``API_AUTH_ENV_VARS`` above.
     """
     from openbiliclaw.auth_core import hash_password

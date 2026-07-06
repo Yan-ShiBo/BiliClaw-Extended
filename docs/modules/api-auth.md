@@ -7,7 +7,7 @@
 - `auth_core.py`：**纯标准库**实现 —— scrypt 密码哈希、HMAC 无状态签名 token、稳定密码指纹、反向代理 / Origin 解析与归一化。无任何第三方依赖。
 - `api/auth.py`：FastAPI 集成 —— `AuthGate`、HTTP 中间件、`/api/auth/*` 路由、cookie / CSRF 处理、登录失败限流。在 `create_app()` 内于 degraded-mode guard 之后注册（更外层、最先执行）。
 - 配置见 [`[api.auth]`](config.md#apiauth)（`ApiAuthConfig`）。撤销纪元 `auth_epoch` 与密码指纹存 SQLite `auth_state` 表，不在 config。
-- 完整设计与对抗式 review 记录见 [`docs/plans/2026-05-30-web-password-auth-design.md`](../plans/2026-05-30-web-password-auth-design.md)。
+- 完整设计与对抗式 review 记录见 [`docs/archive/plans/2026-05-30-web-password-auth-design.md`](../archive/plans/2026-05-30-web-password-auth-design.md)。
 
 ## 已实现功能
 

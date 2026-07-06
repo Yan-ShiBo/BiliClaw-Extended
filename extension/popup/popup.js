@@ -2023,11 +2023,11 @@ function openMobileWebUrl(url) {
   window.open(url, "_blank", "noopener");
 }
 
-const STAR_REPO_URL = "https://github.com/whiteguo233/OpenBiliClaw";
+const STAR_REPO_URL = "https://github.com/Yan-ShiBo/BiliClaw-Extended";
 
 // Wire the persistent header Star button: always present, opens the repo so the
 // user can give a GitHub Star.
-const STAR_REPO_SLUG = "whiteguo233/OpenBiliClaw";
+const STAR_REPO_SLUG = "Yan-ShiBo/BiliClaw-Extended";
 const STAR_COUNT_CACHE_KEY = "obc:starCount";
 const STAR_COUNT_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -5919,8 +5919,8 @@ function bindSettings() {
       downloadLink.hidden = !showDownload;
       downloadLink.href =
         showDownload && backend.latest_tag
-          ? `https://github.com/whiteguo233/OpenBiliClaw/releases/tag/${encodeURIComponent(String(backend.latest_tag))}`
-          : "https://github.com/whiteguo233/OpenBiliClaw/releases";
+          ? `https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/tag/${encodeURIComponent(String(backend.latest_tag))}`
+          : "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases";
     }
   }
 

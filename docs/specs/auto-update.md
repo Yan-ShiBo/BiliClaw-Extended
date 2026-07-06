@@ -73,7 +73,7 @@ OpenBiliClaw 后端和插件 UI 不实现插件自动更新检测。插件更新
 3. **后端安全应用**
    - Current: 发现新版本后直接 `git pull --ff-only`，没有显式检查 worktree、remote、target tag commit。
    - Target: 应用前按顺序检查：git repo、origin 指向允许的仓库、worktree clean、当前 HEAD 可快进到目标 tag、未处于 rebase/merge 中、目标 tag 对应 commit 存在。
-   - Target config: 新增 `[scheduler] auto_update_allowed_remotes = ["https://github.com/whiteguo233/OpenBiliClaw.git", "git@github.com:whiteguo233/OpenBiliClaw.git"]`。unknown remote 和带 userinfo/credential 的 remote 都统一折叠为 `reason="untrusted_remote"`；不向 API 响应暴露 remote 字符串。带 userinfo/credential 的 remote 必须先硬拒绝，不能剥离凭据后再与 allowlist 匹配。
+   - Target config: 新增 `[scheduler] auto_update_allowed_remotes = ["https://github.com/Yan-ShiBo/BiliClaw-Extended.git", "git@github.com:Yan-ShiBo/BiliClaw-Extended.git"]`。unknown remote 和带 userinfo/credential 的 remote 都统一折叠为 `reason="untrusted_remote"`；不向 API 响应暴露 remote 字符串。带 userinfo/credential 的 remote 必须先硬拒绝，不能剥离凭据后再与 allowlist 匹配。
    - Acceptance: dirty worktree、diverged branch、unknown remote、missing tag 都返回 `updated=false` 和稳定 `reason`，不执行依赖同步和重启。
 
 4. **后端应用锁与状态机**

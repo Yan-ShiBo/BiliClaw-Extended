@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://whiteguo233.github.io/OpenBiliClaw/sitemap.xml
+Sitemap: https://yan-shibo.github.io/BiliClaw-Extended/sitemap.xml

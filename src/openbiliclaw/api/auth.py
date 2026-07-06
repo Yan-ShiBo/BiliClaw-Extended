@@ -5,7 +5,7 @@ requests/responses: the auth middleware, the ``/api/auth/*`` routes, cookie and
 CSRF handling, login-failure rate limiting, and startup reconciliation of the
 session secret and password fingerprint.
 
-See ``docs/plans/2026-05-30-web-password-auth-design.md``.
+See ``docs/archive/plans/2026-05-30-web-password-auth-design.md``.
 """
 
 from __future__ import annotations

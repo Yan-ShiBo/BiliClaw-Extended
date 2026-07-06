@@ -6,7 +6,7 @@
 // Derived from the page origin, so every request stays same-origin and the
 // HttpOnly session cookie (and WebSocket handshake) is carried automatically
 // when the password gate is enabled. See
-// docs/plans/2026-05-30-web-password-auth-design.md §4.3.
+// docs/archive/plans/2026-05-30-web-password-auth-design.md §4.3.
 const BASE_URL = `${location.protocol}//${location.host}/api`;
 const DEFAULT_READ_TIMEOUT_MS = 12_000;
 const QUICK_READ_TIMEOUT_MS = 5_000;

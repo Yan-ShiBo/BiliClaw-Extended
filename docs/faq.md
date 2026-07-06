@@ -1,6 +1,6 @@
 # ❓ 常见问题（FAQ）
 
-> 汇总安装和日常使用中最高频的问题。没找到答案可以在 [GitHub Issues](https://github.com/whiteguo233/OpenBiliClaw/issues) 提问，或加 README 里的用户交流群。
+> 汇总安装和日常使用中最高频的问题。没找到答案可以在 [GitHub Issues](https://github.com/Yan-ShiBo/BiliClaw-Extended/issues) 提问，或加 README 里的用户交流群。
 
 ## 安装
 
@@ -10,7 +10,7 @@
 
 ### macOS 提示「OpenBiliClaw.app 已损坏，无法打开」？
 
-通常是下载隔离属性导致。确认安装包来自本项目 [Releases](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 后运行：
+通常是下载隔离属性导致。确认安装包来自本项目 [Releases](https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/latest) 后运行：
 
 ```bash
 APP="/Applications/OpenBiliClaw.app"
@@ -29,14 +29,14 @@ xattr -dr com.apple.quarantine "$APP"
 
 ### Chrome 应用商店的版本比 GitHub Releases 旧？
 
-正常。商店版受审核排期影响，通常滞后几天到一两周。想第一时间拿到新功能，从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 下载 zip 手动安装即可（缺点是需要手动更新）。
+正常。商店版受审核排期影响，通常滞后几天到一两周。想第一时间拿到新功能，从 [Latest Release](https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/latest) 下载 zip 手动安装即可（缺点是需要手动更新）。
 
 ### 想用 Docker 部署后端？
 
 不需要克隆源码：下载一个 compose 文件启动预构建镜像（自带 Ollama embedding sidecar），再打开 `http://127.0.0.1:8420/setup/` 完成初始化：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/docker-compose.prebuilt.yml
+curl -fsSLO https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/docker-compose.prebuilt.yml
 docker compose -f docker-compose.prebuilt.yml up -d
 ```
 
@@ -71,7 +71,7 @@ docker compose -f docker-compose.prebuilt.yml up -d
 
 ### 后端设置里没有「立即应用」更新按钮？
 
-「立即应用」只对源码安装（`install_mode="git"`）显示。桌面安装包用户请直接从 [Latest Release](https://github.com/whiteguo233/OpenBiliClaw/releases/latest) 下载新版安装包覆盖安装，数据目录不受影响。
+「立即应用」只对源码安装（`install_mode="git"`）显示。桌面安装包用户请直接从 [Latest Release](https://github.com/Yan-ShiBo/BiliClaw-Extended/releases/latest) 下载新版安装包覆盖安装，数据目录不受影响。
 
 ### 点「立即应用」提示更新未开始 / 被拒绝？
 

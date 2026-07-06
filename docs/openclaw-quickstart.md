@@ -29,7 +29,7 @@
 - 已克隆当前仓库
 - 目标机器可用 Python 3.11+
 - 可以访问当前配置所需的 LLM provider
-- B 站登录态：v0.3.12+ 推荐**装浏览器扩展自动同步**（[下载](https://github.com/whiteguo233/OpenBiliClaw/releases)），不再需要 F12 贴 Cookie。也可以用交互式终端现场粘
+- B 站登录态：v0.3.12+ 推荐**装浏览器扩展自动同步**（[下载](https://github.com/Yan-ShiBo/BiliClaw-Extended/releases)），不再需要 F12 贴 Cookie。也可以用交互式终端现场粘
 - 小红书 / 抖音 / YouTube 登录态：只有在你明确选择把这些源加入初始化画像或 discovery 时需要；后端不代爬账号，依赖同一个浏览器扩展里的登录会话执行任务
 - 如果走 Docker 路径，目标机器上还需要可用的 Docker / Docker Compose
 

@@ -162,7 +162,7 @@ def test_aggregate_release_helper_does_not_backfill_previous_channel_assets(
         {
             "CHANNEL": "backend",
             "GH_LOG": str(gh_log),
-            "GITHUB_REPOSITORY": "whiteguo233/OpenBiliClaw",
+            "GITHUB_REPOSITORY": "Yan-ShiBo/BiliClaw-Extended",
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
             "PROJECT_VERSION": version,
             "RELEASE_TAG": f"backend-v{version}",

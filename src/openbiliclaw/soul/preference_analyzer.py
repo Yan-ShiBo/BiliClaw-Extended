@@ -41,7 +41,12 @@ _INIT_INSIGHT_CANDIDATES_CAP = 8
 
 _COMPACT_METADATA_KEYS = frozenset(
     {
+        "account_id",
+        "analysis_weight",
         "source_platform",
+        "source_account_id",
+        "source_weight_multiplier",
+        "recency_weight_multiplier",
         "up_name",
         "author",
         "bvid",
@@ -56,6 +61,13 @@ _COMPACT_METADATA_KEYS = frozenset(
         "signal_strength",
     }
 )
+
+_SOURCE_SIGNAL_WEIGHT_MULTIPLIERS: dict[str, float] = {
+    "bilibili": 1.08,
+    "xiaohongshu": 1.10,
+}
+_DOUYIN_SECONDARY_ACCOUNT_WEIGHT_MULTIPLIER = 1.15
+_PRIMARY_DOUYIN_OLD_SIGNAL_FLOOR = 0.82
 
 
 class SupportsCoreMemoryTask(Protocol):
@@ -124,6 +136,7 @@ class PreferenceAnalyzer:
         would block for minutes.
         """
         events = self._maybe_filter_events(events)
+        events = self._apply_source_signal_weights(events)
         if event_chunk_size > 0 and len(events) >= event_chunk_size:
             return await self._analyze_events_chunked(
                 events=events,
@@ -199,6 +212,115 @@ class PreferenceAnalyzer:
         return event_type in {"feedback", "dislike"} and (
             feedback_type == "dislike" or reaction == "thumbs_down" or event_type == "dislike"
         )
+
+    def _apply_source_signal_weights(
+        self,
+        events: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        """Annotate prompt events with effective evidence weights.
+
+        The original event rows stay untouched. The weighted copy lets
+        preference prompts, prompt compaction, and source mix use the same
+        balancing policy without rewriting stored history.
+        """
+        primary_douyin_indices = [
+            index for index, event in enumerate(events) if self._is_primary_douyin_event(event)
+        ]
+        primary_rank_by_index = {index: rank for rank, index in enumerate(primary_douyin_indices)}
+        primary_count = len(primary_douyin_indices)
+
+        weighted_events: list[dict[str, object]] = []
+        for index, event in enumerate(events):
+            metadata = event.get("metadata")
+            metadata_copy: dict[str, object] = dict(metadata) if isinstance(metadata, dict) else {}
+
+            signal_strength = self._metadata_float(metadata_copy, "signal_strength", default=1.0)
+            source_multiplier = self._source_weight_multiplier(metadata_copy)
+            recency_multiplier = 1.0
+            primary_rank = primary_rank_by_index.get(index)
+            if primary_rank is not None:
+                recency_multiplier = self._primary_douyin_recency_multiplier(
+                    primary_rank,
+                    primary_count,
+                )
+
+            analysis_weight = self._clamp_analysis_weight(
+                signal_strength * source_multiplier * recency_multiplier
+            )
+            metadata_copy["analysis_weight"] = analysis_weight
+            metadata_copy["source_weight_multiplier"] = round(source_multiplier, 4)
+            if recency_multiplier != 1.0:
+                metadata_copy["recency_weight_multiplier"] = round(recency_multiplier, 4)
+
+            event_copy = dict(event)
+            event_copy["metadata"] = metadata_copy
+            weighted_events.append(event_copy)
+        return weighted_events
+
+    @staticmethod
+    def _event_source_platform(event: dict[str, object]) -> str:
+        metadata = event.get("metadata")
+        source = ""
+        if isinstance(metadata, dict):
+            raw = metadata.get("source_platform")
+            if isinstance(raw, str):
+                source = raw.strip().lower()
+        return source or "bilibili"
+
+    @staticmethod
+    def _event_account_id(event: dict[str, object]) -> str:
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            return ""
+        for key in ("source_account_id", "account_id"):
+            raw = metadata.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip().lower()
+        return ""
+
+    @classmethod
+    def _is_primary_douyin_event(cls, event: dict[str, object]) -> bool:
+        if cls._event_source_platform(event) != "douyin":
+            return False
+        account_id = cls._event_account_id(event)
+        return account_id in {"", "primary"}
+
+    def _source_weight_multiplier(self, metadata: dict[str, object]) -> float:
+        raw_source = metadata.get("source_platform")
+        source = raw_source.strip().lower() if isinstance(raw_source, str) else "bilibili"
+        if source == "douyin":
+            raw_account = metadata.get("source_account_id") or metadata.get("account_id") or ""
+            account_id = raw_account.strip().lower() if isinstance(raw_account, str) else ""
+            if account_id and account_id != "primary":
+                return _DOUYIN_SECONDARY_ACCOUNT_WEIGHT_MULTIPLIER
+            return 1.0
+        return _SOURCE_SIGNAL_WEIGHT_MULTIPLIERS.get(source, 1.0)
+
+    @staticmethod
+    def _primary_douyin_recency_multiplier(rank: int, total: int) -> float:
+        if total <= 1:
+            return 1.0
+        progress = max(0.0, min(1.0, rank / (total - 1)))
+        return 1.0 - ((1.0 - _PRIMARY_DOUYIN_OLD_SIGNAL_FLOOR) * progress)
+
+    @staticmethod
+    def _metadata_float(
+        metadata: dict[str, object],
+        key: str,
+        *,
+        default: float,
+    ) -> float:
+        raw_value = metadata.get(key)
+        if isinstance(raw_value, bool):
+            return float(raw_value)
+        if isinstance(raw_value, int | float):
+            return float(raw_value)
+        if isinstance(raw_value, str):
+            try:
+                return float(raw_value)
+            except ValueError:
+                return default
+        return default
 
     async def _analyze_events_single(
         self,
@@ -545,8 +667,12 @@ class PreferenceAnalyzer:
     def compute_source_platform_mix(
         events: list[dict[str, object]],
     ) -> dict[str, float]:
-        """Count events by source_platform and return a normalized share dict."""
-        counts: dict[str, int] = {}
+        """Count events by source_platform and return a normalized share dict.
+
+        Raw events count as one unit. Events already annotated by
+        ``_apply_source_signal_weights`` count by ``metadata.analysis_weight``.
+        """
+        counts: dict[str, float] = {}
         for event in events:
             if not isinstance(event, dict):
                 continue
@@ -559,11 +685,23 @@ class PreferenceAnalyzer:
             if not source:
                 # Events predating source_platform are always bilibili.
                 source = "bilibili"
-            counts[source] = counts.get(source, 0) + 1
+            weight = 1.0
+            if isinstance(metadata, dict):
+                raw_weight = metadata.get("analysis_weight")
+                if isinstance(raw_weight, bool | int | float):
+                    weight = float(raw_weight)
+                elif isinstance(raw_weight, str):
+                    try:
+                        weight = float(raw_weight)
+                    except ValueError:
+                        weight = 1.0
+            if weight <= 0:
+                continue
+            counts[source] = counts.get(source, 0.0) + weight
         total = sum(counts.values())
         if total == 0:
             return {}
-        return {name: count / total for name, count in counts.items()}
+        return {name: round(count / total, 4) for name, count in counts.items()}
 
     def _merge_init_cognition_contexts(
         self,
@@ -1036,7 +1174,7 @@ class PreferenceAnalyzer:
     def _to_float(raw_value: object) -> float:
         if isinstance(raw_value, bool):
             return float(raw_value)
-        if isinstance(raw_value, (int, float)):
+        if isinstance(raw_value, int | float):
             return float(raw_value)
         if isinstance(raw_value, str):
             try:
@@ -1048,6 +1186,10 @@ class PreferenceAnalyzer:
     @staticmethod
     def _clamp_weight(value: float) -> float:
         return max(0.0, min(1.0, round(value, 4)))
+
+    @staticmethod
+    def _clamp_analysis_weight(value: float) -> float:
+        return max(0.0, min(1.5, round(value, 4)))
 
     @staticmethod
     def _default_preference() -> dict[str, object]:

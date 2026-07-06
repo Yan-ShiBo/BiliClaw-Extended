@@ -31,8 +31,8 @@ import openbiliclaw
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_TAGS = "https://api.github.com/repos/whiteguo233/OpenBiliClaw/tags"
-_GITHUB_TAGS_ATOM = "https://github.com/whiteguo233/OpenBiliClaw/tags.atom"
+_GITHUB_TAGS = "https://api.github.com/repos/Yan-ShiBo/BiliClaw-Extended/tags"
+_GITHUB_TAGS_ATOM = "https://github.com/Yan-ShiBo/BiliClaw-Extended/tags.atom"
 _BACKEND_TAG_PREFIX = "backend-v"
 _DESKTOP_TAG_PREFIX = "desktop-v"
 _MAX_TAG_PAGES = 5
@@ -43,8 +43,8 @@ _VERSION_RE = re.compile(
     r"(?:\+[0-9A-Za-z.-]+)?$"
 )
 DEFAULT_ALLOWED_REMOTES = (
-    "https://github.com/whiteguo233/OpenBiliClaw.git",
-    "git@github.com:whiteguo233/OpenBiliClaw.git",
+    "https://github.com/Yan-ShiBo/BiliClaw-Extended.git",
+    "git@github.com:Yan-ShiBo/BiliClaw-Extended.git",
 )
 _OBSERVE_VIA = "runtime-stream"
 

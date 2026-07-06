@@ -4,7 +4,7 @@ This module is deliberately dependency-free (only Python stdlib) so it can be
 imported by both ``config.py`` (which must stay low-level to avoid an import
 cycle with ``openbiliclaw.api``) and the FastAPI glue in ``api/auth.py``.
 
-It implements, per ``docs/plans/2026-05-30-web-password-auth-design.md``:
+It implements, per ``docs/archive/plans/2026-05-30-web-password-auth-design.md``:
 
 * scrypt password hashing / constant-time verification (§4.5)
 * HMAC-signed stateless session tokens carrying ``iat`` / ``ep`` / optional

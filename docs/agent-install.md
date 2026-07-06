@@ -12,14 +12,14 @@ Pick the command for the user's shell — **detect the platform from the user's 
 **macOS / Linux / WSL2 (Bash):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/scripts/install.sh | bash
 ```
 
 For an explicit Docker install on macOS / Linux / WSL2, set `MODE=docker`
 on the same one-liner:
 
 ```bash
-MODE=docker curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash
+MODE=docker curl -fsSL https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/scripts/install.sh | bash
 ```
 
 > ⚠️ **Detect, don't guess.** On a native Windows host (no WSL),
@@ -31,18 +31,18 @@ MODE=docker curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliCla
 > - run the **PowerShell** one-liner below (preferred — install.ps1
 >   is the supported native-Windows path), **or**
 > - explicitly invoke Git Bash:
->   `& "C:\Program Files\Git\bin\bash.exe" -c "curl -fsSL https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.sh | bash"`
+>   `& "C:\Program Files\Git\bin\bash.exe" -c "curl -fsSL https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/scripts/install.sh | bash"`
 
 **Native Windows (PowerShell, no Docker / WSL2 required, since v0.3.4):**
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.ps1 -UseBasicParsing | iex
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/scripts/install.ps1 -UseBasicParsing | iex
 ```
 
 For an explicit Docker Desktop install on native Windows:
 
 ```powershell
-$env:MODE="docker"; [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/whiteguo233/OpenBiliClaw/main/scripts/install.ps1 -UseBasicParsing | iex
+$env:MODE="docker"; [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iwr https://raw.githubusercontent.com/Yan-ShiBo/BiliClaw-Extended/main/scripts/install.ps1 -UseBasicParsing | iex
 ```
 
 > The leading `[Net.ServicePointManager]...Tls12` line is **required on PowerShell 5.1** (the default that ships with Windows 10/11). PS 5.1 defaults to TLS 1.0/1.1, but GitHub.com only accepts TLS 1.2+. Without the prefix, `iwr` fails with "underlying connection was closed" and the user blames the installer. Users on PowerShell 7+ can omit the prefix. Compatible from v0.3.9 forward — the script itself also re-applies the same setting once it starts running, so any subsequent HTTPS calls (git, pip, uv) inside the script are also covered.
@@ -216,7 +216,7 @@ question silently.** Specifically for `bilibili.cookie`:
 >   A. 装一下浏览器扩展(推荐): 装好后扩展会立刻把最新 cookie
 >      推到后端,覆盖那条旧的。即使旧 cookie 还有效也是净赚——
 >      过期 / 续签都会自动同步,以后再装就不用管了。
->      下载: https://github.com/whiteguo233/OpenBiliClaw/releases
+>      下载: https://github.com/Yan-ShiBo/BiliClaw-Extended/releases
 >   B. 先用旧的: 我先继续 init,如果中途看到
 >      "Cannot fetch history without authentication" 或者
 >      画像数据明显偏少,就是 cookie 过期了,到时再装扩展。
@@ -517,7 +517,7 @@ points (A.1 + B.1–B.4) must appear**, and **A. must come first**.
  两种方式（任选其一，强烈推荐 A）：
 
  A. 装浏览器扩展（推荐，零配置）
-    下载: https://github.com/whiteguo233/OpenBiliClaw/releases
+    下载: https://github.com/Yan-ShiBo/BiliClaw-Extended/releases
     装好后，确保你已登录 B 站（如果没登就去登）。扩展会在几秒内
     自动把 Cookie 推到本地后端，之后 Cookie 过期/续签也会自动同步。
     选这个就什么都不用贴给我，等我从 /api/runtime-status 看到

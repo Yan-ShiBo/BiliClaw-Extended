@@ -2092,7 +2092,7 @@ def _interactive_auth_setup(auth_manager: Any) -> Any:
         "[dim]Cookie 只存在你本机 data/bilibili_cookie.json，不会上传任何地方。[/dim]\n\n"
         "[bold]两种方式（任选其一）：[/bold]\n"
         "  [cyan]1.[/cyan] 装浏览器扩展，自动同步（推荐，零配置）\n"
-        "     下载: https://github.com/whiteguo233/OpenBiliClaw/releases\n"
+        "     下载: https://github.com/Yan-ShiBo/BiliClaw-Extended/releases\n"
         "     装好后扩展会几秒内自动把登录 Cookie 推到本地后端。\n"
         "     选这条会先退出 init；扩展同步完再跑 `openbiliclaw init` 即可。\n\n"
         "  [cyan]2.[/cyan] 现在手动贴 Cookie\n"
@@ -2106,7 +2106,7 @@ def _interactive_auth_setup(auth_manager: Any) -> Any:
         console.print(
             "\n[bold green]好的——退出当前 init，让扩展接手。[/bold green]\n"
             "  1. 启动后端：[cyan]openbiliclaw start[/cyan]（或保持当前 docker compose up）\n"
-            "  2. 装扩展：[cyan]https://github.com/whiteguo233/OpenBiliClaw/releases[/cyan]\n"
+            "  2. 装扩展：[cyan]https://github.com/Yan-ShiBo/BiliClaw-Extended/releases[/cyan]\n"
             "  3. 确认你已登录 B 站；扩展会几秒内同步 Cookie\n"
             "  4. 再跑 [cyan]openbiliclaw init[/cyan] 完成画像生成 + 首轮发现\n"
         )
@@ -4693,8 +4693,8 @@ def _ask_xhs_inclusion() -> bool:
     console.print("启用需要:")
     console.print("  1. 装好 OpenBiliClaw 浏览器扩展")
     console.print(
-        "     [link=https://github.com/whiteguo233/OpenBiliClaw/releases]"
-        "https://github.com/whiteguo233/OpenBiliClaw/releases[/link]"
+        "     [link=https://github.com/Yan-ShiBo/BiliClaw-Extended/releases]"
+        "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases[/link]"
     )
     console.print(
         "  2. 浏览器登录 [link=https://www.xiaohongshu.com]https://www.xiaohongshu.com[/link]"
@@ -4780,8 +4780,8 @@ def _ask_dy_inclusion() -> bool:
     console.print("启用需要:")
     console.print("  1. 装好 OpenBiliClaw 浏览器扩展")
     console.print(
-        "     [link=https://github.com/whiteguo233/OpenBiliClaw/releases]"
-        "https://github.com/whiteguo233/OpenBiliClaw/releases[/link]"
+        "     [link=https://github.com/Yan-ShiBo/BiliClaw-Extended/releases]"
+        "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases[/link]"
     )
     console.print("  2. 浏览器登录 [link=https://www.douyin.com]https://www.douyin.com[/link]")
     console.print()
@@ -4856,8 +4856,8 @@ def _ask_yt_inclusion() -> bool:
     console.print("启用需要:")
     console.print("  1. 装好 OpenBiliClaw 浏览器扩展")
     console.print(
-        "     [link=https://github.com/whiteguo233/OpenBiliClaw/releases]"
-        "https://github.com/whiteguo233/OpenBiliClaw/releases[/link]"
+        "     [link=https://github.com/Yan-ShiBo/BiliClaw-Extended/releases]"
+        "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases[/link]"
     )
     console.print("  2. 浏览器登录 [link=https://www.youtube.com]https://www.youtube.com[/link]")
     console.print()
@@ -4933,8 +4933,8 @@ def _ask_x_inclusion() -> bool:
     console.print("启用需要:")
     console.print("  1. 装好 OpenBiliClaw 浏览器扩展")
     console.print(
-        "     [link=https://github.com/whiteguo233/OpenBiliClaw/releases]"
-        "https://github.com/whiteguo233/OpenBiliClaw/releases[/link]"
+        "     [link=https://github.com/Yan-ShiBo/BiliClaw-Extended/releases]"
+        "https://github.com/Yan-ShiBo/BiliClaw-Extended/releases[/link]"
     )
     console.print(
         "  2. 浏览器登录 [link=https://x.com]https://x.com[/link](扩展会自动把 cookie 同步给后端)"

@@ -74,7 +74,7 @@ test("popup shows a GitHub-Buttons style Star button (icon + label + live count)
   assert.doesNotMatch(heroActions, /id="starButton"/);
   assert.doesNotMatch(popupHtml, /id="starCta"/);
   // Click opens the repo (direct-star needs GitHub auth); count is fetched/cached.
-  assert.match(popupJs, /STAR_REPO_URL\s*=\s*"https:\/\/github\.com\/whiteguo233\/OpenBiliClaw"/);
+  assert.match(popupJs, /STAR_REPO_URL\s*=\s*"https:\/\/github\.com\/Yan-ShiBo\/BiliClaw-Extended"/);
   assert.match(popupJs, /bindStarButton\(\);/);
   assert.match(popupJs, /api\.github\.com\/repos\/\$\{STAR_REPO_SLUG\}/);
   assert.match(popupJs, /loadStarCount/);

@@ -2,7 +2,7 @@
  * Douyin RENDER_DATA reader — pure, no side effects on import.
  *
  * Task 4 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md).
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md).
  *
  * Douyin SSR-injects a `<script id="RENDER_DATA">` element whose
  * textContent is URL-encoded JSON. Top-level key is `app`. The

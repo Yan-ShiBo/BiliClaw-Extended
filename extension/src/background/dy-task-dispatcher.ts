@@ -2,7 +2,7 @@
  * Douyin task dispatcher — background polling for bootstrap_profile tasks.
  *
  * Task 5 of the Douyin bootstrap import plan
- * (docs/plans/2026-05-06-douyin-bootstrap-import.md). Module isolation:
+ * (docs/archive/plans/2026-05-06-douyin-bootstrap-import.md). Module isolation:
  * zero imports from xhs-task-dispatcher; the dy/ tree owns its own
  * lifecycle so divergence is allowed.
  *

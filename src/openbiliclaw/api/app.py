@@ -984,7 +984,7 @@ def create_app(
     config = load_config()
 
     # Auto-generate the session signing secret on first enable so login state
-    # survives restarts (see docs/plans/2026-05-30-web-password-auth-design.md).
+    # survives restarts (see docs/archive/plans/2026-05-30-web-password-auth-design.md).
     from openbiliclaw.api.auth import (
         AuthGate,
         _auth_env_overrides,
@@ -7505,7 +7505,7 @@ def create_app(
 
     # ── Douyin task queue endpoints (extension dispatcher) ──────────
     # Independent from the XHS block above by design — see
-    # docs/plans/2026-05-06-douyin-bootstrap-import-design.md
+    # docs/archive/plans/2026-05-06-douyin-bootstrap-import-design.md
     # §"Module Isolation from XHS". Different table (dy_tasks),
     # different queue class, different fail isolation.
 

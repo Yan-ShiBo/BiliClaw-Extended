@@ -6,7 +6,7 @@ parsed and unwrapped the raw GraphQL response (``TweetWithVisibilityResults`` /
 ``note_tweet`` long-form / retweet-quote nesting). We do NOT re-implement
 ``prinsss/twitter-web-exporter``'s ``extractDataFromResponse`` here; the library
 owns that. We only map the plain dict onto the unified ``DiscoveredContent`` shape
-(see ``docs/plans/2026-06-08-x-twitter-source-spec.md`` §5.2).
+(see ``docs/archive/plans/2026-06-08-x-twitter-source-spec.md`` §5.2).
 
 The keys ``tweet_to_dict`` emits (mirror of ``x_client.py``'s contract):
 
